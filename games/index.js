@@ -10,9 +10,10 @@
 //
 // Set state.over = true when the game ends.
 
+import hexisle from './hexisle.js';
 import gems from './gems.js';
 import mosaic from './mosaic.js';
 
-export const GAMES = [gems, mosaic];
+export const GAMES = [hexisle, gems, mosaic];
 
 export const getGame = (id) => GAMES.find((g) => g.id === id) || GAMES[0];

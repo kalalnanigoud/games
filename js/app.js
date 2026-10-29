@@ -622,6 +622,7 @@ function renderGame() {
   document.title = (myTurn && S.role !== 'local' ? '🔔 Your turn — ' : '') + g.name + ' — Game Night';
 
   const before = snapshot(app);
+  const hadModal = !!app.querySelector('.modal');
   const humans = S.players.filter((p) => !p.bot);
   app.innerHTML = `
     <div class="game-head">
@@ -648,6 +649,8 @@ function renderGame() {
     console.error(e);
     box.innerHTML = `<div class="panel">Display error: ${esc(e.message)}</div>`;
   }
+  // A dialog that was already open shouldn't pop in again on every update.
+  if (hadModal) app.querySelectorAll('.modal, .modal-bg').forEach((m) => (m.style.animation = 'none'));
   try {
     flip(app, before);
     lastFxSeq = playFx(app, before, S.view.fx, lastFxSeq);
