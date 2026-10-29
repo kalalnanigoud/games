@@ -1131,6 +1131,21 @@ export default {
   minPlayers: 2,
   maxPlayers: 4,
   cover: buildCover(),
+  howTo: {
+    goal: 'Score the most points by tiling your palace wall. The game ends after the round in which someone completes a full horizontal row of their wall.',
+    turn: [
+      ['🎨', 'Pick a colour', 'Take <b>all</b> tiles of one colour from a coaster (the leftovers slide into the centre), or all of one colour from the centre.'],
+      ['🪜', 'Place them on one line', 'Your board has 5 staircase lines (1 to 5 tiles). The line must be empty or already hold that colour, and that colour must not be in the same wall row yet.'],
+      ['⬇️', 'Extras fall to the floor', 'Tiles that don\'t fit drop to your floor strip, which costs points: −1 −1 −2 −2 −2 −3 −3.'],
+      ['🧱', 'End of round: tile the wall', 'When the table is empty, each full line moves one tile onto your wall. It scores 1, or the length of the connected row plus column it joins.'],
+    ],
+    tips: [
+      'The first player to take from the centre gets the first-player tile: −1 point, but they start the next round.',
+      'End bonuses: <b>+2</b> per complete row, <b>+7</b> per complete column, <b>+10</b> for all 5 of one colour.',
+      'Tiles placed next to each other score far more than scattered ones.',
+      'Tap a colour to lift it: the lines where it can go light up.',
+    ],
+  },
   // The platform waits for this before the game-over confetti.
   isAnimating: () => !!UI.busy,
 

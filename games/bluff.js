@@ -1907,6 +1907,21 @@ export default {
   minPlayers: 2,
   maxPlayers: 6,
   cover: COVER,
+  howTo: {
+    goal: 'Be the <b>last courtier standing</b>. Everyone starts with 2 secret role cards (your "influence") and 2 coins. Lose both cards and you are out.',
+    turn: [
+      ['🪙', 'Take a safe action', '<b>Income</b> +1 coin (can\'t be stopped) or <b>Foreign Aid</b> +2 coins (a Chancellor can block it).'],
+      ['🎭', 'Or claim a role (you may bluff!)', '<b>Chancellor</b> Levy +3 coins · <b>Shadow</b> pay 3 to make a rival lose a card · <b>Corsair</b> steal up to 2 coins · <b>Envoy</b> swap cards with the deck. You don\'t need to really hold the card.'],
+      ['⚔️', 'Or launch a Coup', 'Pay 7 coins: a rival loses a card, and nobody can stop it. With 10+ coins you must Coup.'],
+      ['❗', 'Others respond', 'Anyone can <b>Challenge</b> a claim. If the claimer had the card, the challenger loses a card; if not, the bluffer loses one. Some actions can be <b>blocked</b> by claiming a role too.'],
+    ],
+    tips: [
+      '<b>Blocks:</b> Duchess blocks the Shadow · Chancellor blocks Foreign Aid · Corsair or Envoy block a Corsair\'s steal. Blocks can be challenged as well.',
+      'When you lose a card, you choose which one to reveal. Revealed cards are out of play for good.',
+      'Watch the Court Ledger: if all 3 copies of a role are revealed, nobody can truly hold it.',
+      'Your action buttons say <b>HELD</b> or <b>BLUFF</b> so you always know which claims are honest.',
+    ],
+  },
 
   setup(players) {
     const deck = shuffle(ROLES.flatMap((r) => [r, r, r]));

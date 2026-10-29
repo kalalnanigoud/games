@@ -1578,6 +1578,21 @@ export default {
   minPlayers: 2,
   maxPlayers: 4,
   cover: coverSVG(),
+  howTo: {
+    goal: 'Earn <b>15 prestige</b> by buying gem cards and winning patrons. When someone reaches 15, the round is finished so everyone has had the same number of turns; most prestige wins.',
+    turn: [
+      ['💎', 'Take gems', 'Take <b>3 different</b> colours, or <b>2 of the same</b> colour if that pile has at least 4.'],
+      ['🃏', 'Or buy a card', 'Pay its cost in gems. Gold coins count as any colour. Bought cards may give prestige (top-left number).'],
+      ['✨', 'Cards give discounts', 'Every card you own shows a gem (top-right). It counts as one gem of that colour off every future purchase, forever.'],
+      ['📌', 'Or reserve a card', 'Keep a card for later (up to 3) and take a gold coin. Only you can buy it. You can even reserve the top of a deck, unseen.'],
+    ],
+    tips: [
+      'You can hold at most <b>10 tokens</b>. Take more and you must hand some back.',
+      '<b>Patrons</b> (the portraits on top) visit you automatically when your card discounts match their requirement: +3 prestige each.',
+      'Cheap cards early build discounts; expensive cards later bring the points.',
+      'Tap any card to see what it costs you after discounts, and to buy or reserve it.',
+    ],
+  },
   setup,
   act,
   turnOf,

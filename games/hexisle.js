@@ -1774,6 +1774,22 @@ export default {
   render,
   defaultTimer: 30,
   onTimeout,
+  howTo: {
+    goal: 'Be the first to reach <b>10 victory points</b> on your own turn. Settlements are worth 1, cities 2, plus bonus cards and awards.',
+    turn: [
+      ['🏠', 'Start: place 2 settlements', 'Everyone places a settlement and a road, twice (the order snakes back). Your second settlement gives you its neighbouring resources.'],
+      ['🎲', 'Roll the dice', 'Every tile showing that number produces: each settlement on its corner gets 1 card, each city 2. Red 6s and 8s roll most often.'],
+      ['🔨', 'Build', '<b>Road</b> lumber + brick · <b>Settlement</b> lumber + brick + wool + grain (at least 2 roads apart from any building) · <b>City</b> upgrade 2 grain + 3 ore · <b>Development card</b> wool + grain + ore.'],
+      ['🤝', 'Trade', 'With the bank 4 : 1, or 3 : 1 / 2 : 1 at a harbor you have built on. Or post an offer to the other players.'],
+      ['⏭️', 'End your turn', 'Tap End turn. If a turn timer is on, your turn ends by itself when it runs out.'],
+    ],
+    tips: [
+      '<b>Rolled a 7?</b> Anyone holding more than 7 cards discards half. The roller moves the hooded robber to a tile (it stops producing) and steals a card from someone there.',
+      '<b>Development cards:</b> Knight (move the robber), Road Building, Year of Plenty, Monopoly, or a hidden Victory Point. Play one per turn, not on the turn you bought it.',
+      '<b>Longest Road</b> (5+ connected roads) and <b>Largest Army</b> (3+ knights) are each worth 2 points.',
+      'Spread your settlements over different resources and numbers so you collect cards on many rolls.',
+    ],
+  },
 };
 
 // What happens when a player's move timer runs out (the platform falls back to

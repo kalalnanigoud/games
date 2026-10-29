@@ -63,6 +63,62 @@ const roomPeerId = (code) => CONFIG.roomPrefix + code;
 const myId = () => (S.role === 'local' ? S.viewAs : S.token);
 const playerName = (id) => S.players.find((p) => p.id === id)?.name ?? '???';
 
+/* ---------------- how to play ---------------- */
+// Each game supplies howTo = { goal, turn: [[icon, title, text]], tips: [text] }.
+// The guide lives outside #app so game redraws never close it.
+
+const seenHelp = (id) => localStorage.getItem('gn-help-' + id) === '1';
+const helpBtn = (id, cls = '') =>
+  getGame(id).howTo ? `<button class="help-btn ${cls} ${seenHelp(id) ? '' : 'new'}" data-help="${id}" title="How to play" aria-label="How to play">?</button>` : '';
+let helpAutoShown = new Set();
+
+function showHelp(id) {
+  const g = getGame(id);
+  const h = g.howTo;
+  if (!h) return;
+  localStorage.setItem('gn-help-' + id, '1');
+  document.querySelectorAll('.help-btn.new').forEach((b) => b.dataset.help === id && b.classList.remove('new'));
+  closeHelp();
+  const el = document.createElement('div');
+  el.className = 'modal-bg';
+  el.id = 'helpModal';
+  el.innerHTML = `
+    <div class="modal panel help" role="dialog" aria-label="How to play ${esc(g.name)}">
+      <button class="small icon help-x" aria-label="Close">✕</button>
+      ${g.cover ? `<div class="help-cover">${g.cover}</div>` : ''}
+      <h2 class="gold">How to play ${esc(g.name)}</h2>
+      <div class="parchment help-goal"><b>🏆 Goal</b><p>${h.goal}</p></div>
+      <h3 class="gold">On your turn</h3>
+      <ol class="help-steps">
+        ${h.turn.map(([icon, title, text]) => `<li><span class="help-ic">${icon}</span><div><b>${title}</b><p>${text}</p></div></li>`).join('')}
+      </ol>
+      ${h.tips?.length ? `<h3 class="gold">Good to know</h3><ul class="help-tips">${h.tips.map((t) => `<li>${t}</li>`).join('')}</ul>` : ''}
+      <button class="primary help-ok" style="width:100%">Got it — let's play</button>
+    </div>`;
+  document.body.appendChild(el);
+  el.querySelector('.help-cover svg')?.setAttribute('preserveAspectRatio', 'xMidYMid slice'); // fill the banner
+  el.addEventListener('click', (e) => { if (e.target === el || e.target.closest('.help-x, .help-ok')) closeHelp(); });
+  el.querySelector('.help-ok').focus({ preventScroll: true });
+  sound('flip');
+}
+function closeHelp() {
+  document.getElementById('helpModal')?.remove();
+}
+addEventListener('keydown', (e) => { if (e.key === 'Escape') closeHelp(); });
+// Any "?" button anywhere opens its game's guide.
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-help]');
+  if (b) { e.preventDefault(); e.stopPropagation(); showHelp(b.dataset.help); }
+}, true);
+
+// First visit to a game's lobby: open its guide once, while nobody is on the clock.
+function maybeAutoHelp() {
+  const id = S.gameId;
+  if (seenHelp(id) || helpAutoShown.has(id) || !getGame(id).howTo) return;
+  helpAutoShown.add(id);
+  setTimeout(() => { if (S.screen === 'lobby' && S.gameId === id && !seenHelp(id)) showHelp(id); }, 900);
+}
+
 /* ---------------- session persistence ---------------- */
 
 // Saved in sessionStorage (survives a refresh of this tab) and localStorage
@@ -562,7 +618,7 @@ function renderHome() {
     <div class="games-grid">
       ${GAMES.map((g) => `
         <div class="game-card">
-          <div class="cover">${g.cover || ''}<span class="badge">${g.minPlayers === g.maxPlayers ? g.minPlayers : g.minPlayers + '–' + g.maxPlayers} players</span></div>
+          <div class="cover">${g.cover || ''}<span class="badge">${g.minPlayers === g.maxPlayers ? g.minPlayers : g.minPlayers + '–' + g.maxPlayers} players</span>${helpBtn(g.id, 'on-cover')}</div>
           <div class="body">
             <h3>${esc(g.name)}</h3>
             <p>${esc(g.description)}</p>
@@ -636,6 +692,7 @@ function renderJoining() {
 
 function renderLobby() {
   if (S.role === 'client' && !S.synced) return renderJoining();
+  maybeAutoHelp();
   const g = getGame(S.gameId);
   const isHost = S.role === 'host' || S.role === 'local';
   const link = S.code ? `${location.origin}${location.pathname}?room=${S.code}` : '';
@@ -673,7 +730,7 @@ function renderLobby() {
       </div>
       ${isHost ? `
       <div class="panel stack">
-        <h3 class="gold" style="margin:0">Game</h3>
+        <div class="row"><h3 class="gold grow" style="margin:0">Game</h3>${g.howTo ? `<button class="small" data-help="${g.id}">? How to play</button>` : ''}</div>
         ${g.cover ? `<div class="lobby-cover">${g.cover}</div>` : ''}
         <select id="gameSel" style="width:100%">
           ${GAMES.map((x) => `<option value="${x.id}" ${x.id === S.gameId ? 'selected' : ''}>${esc(x.name)} (${x.minPlayers}–${x.maxPlayers})</option>`).join('')}
@@ -690,7 +747,10 @@ function renderLobby() {
         </button>
       </div>` : `
       <div class="panel" style="text-align:center">
-        ${S.status === 'online' ? `Waiting for the host to start <b>${esc(g?.name || '')}</b>…${S.timerSec ? `<div class="muted small">⏱ ${S.timerSec} seconds per move</div>` : ''}` : `<div class="stack"><div>Status: ${esc(S.status)}</div><button id="retryBtn">Retry</button></div>`}
+        ${S.status === 'online' ? `<div class="stack">
+          <div>Waiting for the host to start <b>${esc(g?.name || '')}</b>…</div>
+          ${S.timerSec ? `<div class="muted small">⏱ ${S.timerSec} seconds per move</div>` : ''}
+          ${g?.howTo ? `<div><button class="small" data-help="${g.id}">? How to play while you wait</button></div>` : ''}</div>` : `<div class="stack"><div>Status: ${esc(S.status)}</div><button id="retryBtn">Retry</button></div>`}
       </div>`}
     </div>`;
 
@@ -761,6 +821,7 @@ function renderGame() {
   app.innerHTML = `
     <div class="game-head">
       <h2>${esc(g.name)}</h2>
+      ${helpBtn(g.id)}
       <div id="turnTimer" class="turn-timer" hidden></div>
       ${S.role === 'local' && humans.length > 1 ? `<label class="small muted">Playing as
         <select id="viewAs">${humans.map((p) => `<option value="${esc(p.id)}" ${p.id === S.viewAs ? 'selected' : ''}>${esc(p.name)}${turn.includes(p.id) ? ' ◀' : ''}</option>`).join('')}</select></label>` : ''}

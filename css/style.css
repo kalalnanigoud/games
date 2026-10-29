@@ -268,6 +268,41 @@ input.code { text-transform: uppercase; letter-spacing: .25em; font-weight: 800;
 @keyframes fadein { from { opacity: 0; } }
 @keyframes popin { from { opacity: 0; transform: scale(.85) translateY(20px); } }
 
+/* ---------- how to play ---------- */
+.help-btn {
+  width: 36px; height: 36px; min-height: 36px; padding: 0; border-radius: 50%; flex: none;
+  font-family: var(--font-display); font-size: 1.15rem; line-height: 1;
+  color: #3a2405; text-shadow: 0 1px 0 rgba(255, 245, 210, .6);
+  background: radial-gradient(circle at 35% 30%, #fff3c4, #f2c14e 55%, #b57a1c);
+  border: 1px solid #7a5010;
+  box-shadow: inset 0 1px 0 #fffbe6, 0 2px 0 #6b440c, 0 4px 10px rgba(0, 0, 0, .4);
+}
+/* Not opened yet: a few gentle pulses to catch a newcomer's eye, then a steady ring. */
+.help-btn.new { box-shadow: 0 0 0 3px rgba(242, 193, 78, .45), 0 2px 0 #6b440c, 0 4px 10px rgba(0, 0, 0, .4); animation: helpPulse 1.6s ease-in-out 5; }
+@keyframes helpPulse { 50% { transform: scale(1.14); box-shadow: 0 0 0 7px rgba(242, 193, 78, .25), 0 2px 0 #6b440c; } }
+.help-btn.on-cover { position: absolute; top: 8px; left: 8px; z-index: 2; }
+.help { max-width: 560px; position: relative; }
+.help .help-x { position: absolute; top: 12px; right: 12px; z-index: 3; }
+.help-cover { margin: -16px -16px 12px; aspect-ratio: 16 / 6; overflow: hidden; border-radius: var(--radius) var(--radius) 0 0; border-bottom: 2px solid #1a0f07; }
+.help-cover > svg { width: 100%; height: 100%; display: block; object-fit: cover; }
+.help h2 { margin-top: 4px; padding-right: 40px; }
+.help h3 { margin: 16px 0 8px; }
+.help-goal p { margin: 4px 0 0; }
+.help-steps { list-style: none; counter-reset: step; padding: 0; margin: 0; }
+.help-steps li { counter-increment: step; display: flex; gap: 12px; align-items: flex-start; padding: 9px 10px; border-radius: 10px; background: rgba(0, 0, 0, .22); margin-bottom: 7px; }
+.help-steps li p { margin: 2px 0 0; color: var(--muted); font-size: .92rem; }
+.help-ic {
+  flex: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; font-size: 1.2rem; position: relative;
+  background: radial-gradient(circle at 35% 30%, #6a4428, #2c1a0f); border: 1px solid rgba(242, 193, 78, .45);
+}
+.help-ic::after {
+  content: counter(step); position: absolute; right: -4px; bottom: -4px; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--gold); color: #3a2405; font: 800 .7rem/18px var(--font-body); text-align: center;
+}
+.help-tips { margin: 0 0 14px; padding-left: 20px; color: var(--muted); font-size: .92rem; }
+.help-tips li { margin: 4px 0; }
+.help .help-ok { margin-top: 6px; }
+
 /* ---------- animation helpers (see js/fx.js) ---------- */
 [data-k] { transform-box: fill-box; transform-origin: center; }
 .fx-ghost { position: fixed; left: 0; top: 0; z-index: 120; pointer-events: none; will-change: transform, opacity; }
