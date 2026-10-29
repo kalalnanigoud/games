@@ -243,6 +243,8 @@ input.code { text-transform: uppercase; letter-spacing: .25em; font-weight: 800;
   animation: fadein .2s ease;
 }
 .modal { max-width: 480px; width: 100%; max-height: 90vh; overflow-y: auto; animation: popin .3s cubic-bezier(.3, 1.4, .5, 1); }
+.modal.panel::before { display: none; } /* stitching would scroll with the content */
+.modal.panel { box-shadow: inset 0 0 0 5px rgba(0, 0, 0, .15), inset 0 0 0 6.5px rgba(242, 200, 130, .25), 0 20px 50px rgba(0, 0, 0, .6); }
 @keyframes fadein { from { opacity: 0; } }
 @keyframes popin { from { opacity: 0; transform: scale(.85) translateY(20px); } }
 
@@ -284,6 +286,8 @@ input.code { text-transform: uppercase; letter-spacing: .25em; font-weight: 800;
   .felt { border-width: 8px; padding: 8px; border-radius: 16px; }
 }
 @media (max-width: 480px) {
+  #topinfo { flex-wrap: nowrap; gap: 6px; }
+  #topinfo .status-text { display: none; }
   .games-grid { grid-template-columns: 1fr; gap: 14px; }
   .roomcode { font-size: 2.1rem; }
   .panel { padding: 13px; }

@@ -138,7 +138,7 @@ export function floatText(rect, text, color = '#ffd76a', delay = 0) {
 
 // Play effects with seq greater than lastSeq. Returns the new lastSeq.
 export function playFx(root, before, list, lastSeq) {
-  if (!list || !list.length) return lastSeq;
+  if (!list || !list.length) return 0; // fresh game: play everything from the first move
   const max = Math.max(...list.map((f) => f.seq));
   if (lastSeq == null || max < lastSeq) return max; // first view, or new game
   const fresh = list.filter((f) => f.seq > lastSeq);

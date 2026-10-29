@@ -440,7 +440,7 @@ function renderTopbar() {
   const online = S.status === 'online' || S.status === 'one device';
   topinfo.innerHTML = `
     ${S.code ? `<span>Room <b class="gold">${esc(S.code)}</b></span>` : ''}
-    ${S.role ? `<span><span class="dot ${online ? 'on' : 'off'}"></span> ${esc(S.status)}</span>` : ''}
+    ${S.role ? `<span><span class="dot ${online ? 'on' : 'off'}"></span> <span class="status-text">${esc(S.status)}</span></span>` : ''}
     <button class="small icon" id="muteBtn" title="Sound on/off">${isMuted() ? '🔇' : '🔊'}</button>
     ${S.role ? '<button class="small" id="leaveBtn">Leave</button>' : ''}`;
   topinfo.querySelector('#muteBtn').onclick = () => { setMuted(!isMuted()); renderTopbar(); if (!isMuted()) sound('chime'); };
@@ -560,7 +560,7 @@ function renderLobby() {
         <h3 class="gold" style="margin:0">Game</h3>
         ${g.cover ? `<div class="lobby-cover">${g.cover}</div>` : ''}
         <select id="gameSel" style="width:100%">
-          ${GAMES.map((x) => `<option value="${x.id}" ${x.id === S.gameId ? 'selected' : ''}>${x.emoji} ${esc(x.name)} (${x.minPlayers}–${x.maxPlayers})</option>`).join('')}
+          ${GAMES.map((x) => `<option value="${x.id}" ${x.id === S.gameId ? 'selected' : ''}>${esc(x.name)} (${x.minPlayers}–${x.maxPlayers})</option>`).join('')}
         </select>
         <button class="primary" id="startBtn" ${canStart ? '' : 'disabled'} style="width:100%">
           ${canStart ? 'Start game' : n < g.minPlayers ? `Waiting for ${g.minPlayers - n} more player(s)…` : `Too many players (max ${g.maxPlayers})`}

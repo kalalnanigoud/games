@@ -10,8 +10,9 @@
 //
 // Set state.over = true when the game ends.
 
+import gems from './gems.js';
 import mosaic from './mosaic.js';
 
-export const GAMES = [mosaic];
+export const GAMES = [gems, mosaic];
 
 export const getGame = (id) => GAMES.find((g) => g.id === id) || GAMES[0];
