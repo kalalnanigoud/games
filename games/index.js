@@ -13,7 +13,8 @@
 import hexisle from './hexisle.js';
 import gems from './gems.js';
 import mosaic from './mosaic.js';
+import bluff from './bluff.js';
 
-export const GAMES = [hexisle, gems, mosaic];
+export const GAMES = [hexisle, gems, mosaic, bluff];
 
 export const getGame = (id) => GAMES.find((g) => g.id === id) || GAMES[0];

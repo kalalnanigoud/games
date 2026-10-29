@@ -123,6 +123,7 @@ function hostRoom(gameId, resume = null) {
   if (me) me.name = S.name;
   refreshLocalView();
   render();
+  scheduleBots();
   openHostPeer(!!resume);
 }
 
@@ -254,7 +255,7 @@ function scheduleBots() {
       console.warn('bot move rejected:', err, action);
       if (++botFails < 25) scheduleBots();
     } else botFails = 0;
-  }, 850 + Math.random() * 650);
+  }, due.length > 1 ? 350 + Math.random() * 300 : 850 + Math.random() * 650); // several bots answering at once: move quicker
 }
 
 function viewFor(pid) {
@@ -328,6 +329,7 @@ function localRoom(gameId, resume = null) {
   refreshLocalView();
   saveSession();
   render();
+  scheduleBots();
 }
 
 /* ---------------- client ---------------- */
