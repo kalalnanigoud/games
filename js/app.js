@@ -7,7 +7,7 @@
 import CONFIG from './config.js';
 import { GAMES, getGame } from '../games/index.js';
 import { esc, toast, randomCode, uid } from './util.js';
-import { snapshot, flip, playFx, changed, confetti } from './fx.js';
+import { snapshot, flip, playFx, changed, confetti, wake, settleLoops } from './fx.js';
 import { sound, isMuted, setMuted } from './sound.js';
 
 const MAX_ROOM = 8;
@@ -29,7 +29,12 @@ const S = {
   view: null, // what this device renders
   viewAs: null, // local mode: whose eyes we see through
   status: '',
+  timerSec: defaultTimer(GAMES[0]), // seconds per move, 0 = off (games with onTimeout only)
+  timer: null, // {deadline (host clock), total, due: [ids]} while someone is on the clock
 };
+function defaultTimer(g) {
+  return g?.onTimeout ? g.defaultTimer || 30 : 0;
+}
 sessionStorage.setItem('gn-token', S.token);
 
 function adoptToken(token) {
@@ -47,6 +52,10 @@ let wasMyTurn = false;
 let lastFxSeq = null;
 let botTimer = null;
 let botFails = 0;
+let turnTimer = null; // host: fires when the current move's time runs out
+let timedGame = null; // host: the game state the running clock belongs to
+let clockSkew = 0; // client: host clock minus our clock
+let lastTickSec = 0;
 
 // debug 0: failed retries are expected while a host refreshes, so keep them out of the console.
 const peerOptions = () => ({ config: { iceServers: CONFIG.iceServers }, debug: 0 });
@@ -62,7 +71,7 @@ function saveSession() {
   if (!S.role) return;
   const data = S.role === 'client'
     ? { role: 'client', code: S.code, token: S.token }
-    : { role: S.role, code: S.code, token: S.token, gameId: S.gameId, players: S.players, started: S.started, game: S.game, viewAs: S.viewAs };
+    : { role: S.role, code: S.code, token: S.token, gameId: S.gameId, players: S.players, started: S.started, game: S.game, viewAs: S.viewAs, timerSec: S.timerSec };
   const json = JSON.stringify(data);
   sessionStorage.setItem('gn-session', json);
   localStorage.setItem('gn-session', json);
@@ -88,6 +97,10 @@ function resume(session) {
 
 function cleanup() {
   clearTimeout(retryTimer);
+  clearTimeout(turnTimer);
+  turnTimer = null;
+  timedGame = null;
+  S.timer = null;
   retries = 0;
   for (const c of conns.values()) try { c.close(); } catch {}
   conns.clear();
@@ -116,6 +129,8 @@ function hostRoom(gameId, resume = null) {
     gameId: resume?.gameId || gameId,
     players: resume?.players?.map((p) => ({ ...p, connected: p.id === S.token })) || [{ id: S.token, name: S.name, connected: true }],
     started: resume?.started || false,
+    timerSec: resume?.timerSec ?? defaultTimer(getGame(resume?.gameId || gameId)),
+    timer: null,
     game: resume?.game || null,
     screen: resume?.started ? 'game' : 'lobby',
     status: 'connecting',
@@ -279,12 +294,63 @@ function refreshLocalView() {
   S.view = viewFor(myId());
 }
 
+/* ---------------- turn timer (host) ---------------- */
+
+// Start the clock whenever the game moves on and a human must act.
+// The clock only restarts when the game state changes, not on reconnects.
+function armTimer() {
+  const g = getGame(S.gameId);
+  const due = S.started && S.game && !S.game.over && S.timerSec && g.onTimeout
+    ? (g.turnOf(S.game) || []).filter((id) => !isBot(id)) : [];
+  if (!due.length) {
+    clearTimeout(turnTimer);
+    turnTimer = null;
+    timedGame = null;
+    S.timer = null;
+    return;
+  }
+  if (timedGame === S.game && S.timer) return;
+  timedGame = S.game;
+  const total = S.timerSec * 1000;
+  S.timer = { deadline: Date.now() + total, total, due };
+  clearTimeout(turnTimer);
+  turnTimer = setTimeout(expireTimer, total + 200);
+}
+
+// Time's up: make the game's timeout move for everyone still on the clock
+// (falling back to what a bot would do), then tell the table.
+function expireTimer() {
+  turnTimer = null;
+  const g = getGame(S.gameId);
+  if (!S.started || !S.game || S.game.over) return;
+  const late = (g.turnOf(S.game) || []).filter((id) => !isBot(id));
+  let moved = false;
+  for (const pid of late) {
+    if (!(g.turnOf(S.game) || []).includes(pid)) continue;
+    for (const pick of [g.onTimeout, g.bot]) {
+      if (!pick) continue;
+      let a = null;
+      try { a = pick(JSON.parse(JSON.stringify(viewFor(pid))), pid); } catch (e) { console.warn('timeout move failed', e); }
+      if (a && !applyAction(pid, a)) { moved = true; break; }
+    }
+    notice(`⏱ Time's up for ${playerName(pid)}`);
+  }
+  if (!moved) { timedGame = null; S.timer = null; broadcast(); } // nothing worked: give a fresh clock
+}
+
+function notice(msg) {
+  for (const c of conns.values()) if (c.open) c.send({ t: 'notice', msg });
+  toast(msg, 'info');
+}
+
 function broadcast() {
+  if (S.role !== 'client') armTimer();
+  const now = Date.now();
   for (const p of S.players) {
     if (p.id === S.token || S.role === 'local') continue;
     const c = conns.get(p.id);
     if (c && c.open) {
-      c.send({ t: 'sync', code: S.code, players: S.players, gameId: S.gameId, started: S.started, hostId: S.token, view: viewFor(p.id) });
+      c.send({ t: 'sync', code: S.code, players: S.players, gameId: S.gameId, started: S.started, hostId: S.token, view: viewFor(p.id), timerSec: S.timerSec, timer: S.timer, now });
     }
   }
   refreshLocalView();
@@ -333,6 +399,8 @@ function localRoom(gameId, resume = null) {
     gameId: resume?.gameId || gameId,
     players: resume?.players || [{ id: 'L1', name: S.name || 'Player 1', connected: true }, { id: 'L2', name: 'Player 2', connected: true }],
     started: resume?.started || false,
+    timerSec: resume?.timerSec ?? defaultTimer(getGame(resume?.gameId || gameId)),
+    timer: null,
     game: resume?.game || null,
     viewAs: resume?.viewAs || 'L1',
     screen: resume?.started ? 'game' : 'lobby',
@@ -423,9 +491,12 @@ function scheduleClientRetry() {
 function onClientMessage(msg) {
   if (!msg || typeof msg !== 'object') return;
   if (msg.t === 'sync') {
-    Object.assign(S, { players: msg.players, gameId: msg.gameId, started: msg.started, view: msg.view, hostId: msg.hostId, synced: true });
+    Object.assign(S, { players: msg.players, gameId: msg.gameId, started: msg.started, view: msg.view, hostId: msg.hostId, synced: true, timerSec: msg.timerSec || 0, timer: msg.timer || null });
+    if (msg.now) clockSkew = msg.now - Date.now();
     S.screen = S.started ? 'game' : 'lobby';
     render();
+  } else if (msg.t === 'notice') {
+    toast(msg.msg, 'info');
   } else if (msg.t === 'error') {
     toast(msg.msg);
     if (msg.fatal) { cleanup(); clearSession(); S.screen = 'home'; S.role = null; render(); }
@@ -482,7 +553,7 @@ function renderHome() {
       <div class="panel stack">
         <h3 class="gold">Join a friend's table</h3>
         <div class="row">
-          <input id="codeIn" class="code grow" maxlength="6" placeholder="CODE" value="${esc(roomParam)}" autocomplete="off" />
+          <input id="codeIn" class="code grow" maxlength="6" placeholder="CODE" value="${esc(roomParam)}" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="go" aria-label="Room code" />
           <button class="primary" id="joinBtn">Join</button>
         </div>
       </div>
@@ -523,7 +594,13 @@ function renderHome() {
     joinRoom(code);
   };
   app.querySelector('#joinBtn').onclick = doJoin;
-  codeIn.onkeydown = (e) => e.key === 'Enter' && doJoin();
+  // Never return a value from a key handler: returning false cancels the key (no typing on iPhone).
+  codeIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') doJoin(); });
+  // Keep the code tidy as people type: uppercase letters only.
+  codeIn.addEventListener('input', () => {
+    const v = codeIn.value.toUpperCase().replace(/[^A-Z]/g, '');
+    if (v !== codeIn.value) codeIn.value = v;
+  });
   app.querySelectorAll('[data-host]').forEach((b) => (b.onclick = () => needName() && hostRoom(b.dataset.host)));
   app.querySelectorAll('[data-local]').forEach((b) => (b.onclick = () => { S.name = nameIn.value.trim(); localRoom(b.dataset.local); }));
   if (session) {
@@ -601,12 +678,19 @@ function renderLobby() {
         <select id="gameSel" style="width:100%">
           ${GAMES.map((x) => `<option value="${x.id}" ${x.id === S.gameId ? 'selected' : ''}>${esc(x.name)} (${x.minPlayers}–${x.maxPlayers})</option>`).join('')}
         </select>
+        ${g.onTimeout ? `
+        <label class="row" style="justify-content:space-between">
+          <span>⏱ Time per move</span>
+          <select id="timerSel">
+            ${[0, 15, 30, 45, 60, 90].map((t) => `<option value="${t}" ${t === S.timerSec ? 'selected' : ''}>${t ? t + ' seconds' : 'No timer'}</option>`).join('')}
+          </select>
+        </label>` : ''}
         <button class="primary" id="startBtn" ${canStart ? '' : 'disabled'} style="width:100%">
           ${canStart ? 'Start game' : n < g.minPlayers ? `Waiting for ${g.minPlayers - n} more player(s)…` : `Too many players (max ${g.maxPlayers})`}
         </button>
       </div>` : `
       <div class="panel" style="text-align:center">
-        ${S.status === 'online' ? `Waiting for the host to start <b>${esc(g?.name || '')}</b>…` : `<div class="stack"><div>Status: ${esc(S.status)}</div><button id="retryBtn">Retry</button></div>`}
+        ${S.status === 'online' ? `Waiting for the host to start <b>${esc(g?.name || '')}</b>…${S.timerSec ? `<div class="muted small">⏱ ${S.timerSec} seconds per move</div>` : ''}` : `<div class="stack"><div>Status: ${esc(S.status)}</div><button id="retryBtn">Retry</button></div>`}
       </div>`}
     </div>`;
 
@@ -620,7 +704,9 @@ function renderLobby() {
     };
   }
   if (isHost) {
-    app.querySelector('#gameSel').onchange = (e) => { S.gameId = e.target.value; saveSession(); broadcast(); };
+    app.querySelector('#gameSel').onchange = (e) => { S.gameId = e.target.value; S.timerSec = defaultTimer(getGame(S.gameId)); saveSession(); broadcast(); };
+    const timerSel = app.querySelector('#timerSel');
+    if (timerSel) timerSel.onchange = (e) => { S.timerSec = +e.target.value; saveSession(); broadcast(); };
     app.querySelector('#startBtn').onclick = startGame;
     const botBtn = app.querySelector('#botBtn');
     if (botBtn) botBtn.onclick = addBot;
@@ -641,15 +727,22 @@ function renderLobby() {
       app.querySelector('#addName').focus();
     };
     app.querySelector('#addBtn').onclick = add;
-    addIn.onkeydown = (e) => e.key === 'Enter' && add();
+    addIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
   }
   const retryBtn = app.querySelector('#retryBtn');
   if (retryBtn) retryBtn.onclick = () => joinRoom(S.code);
 }
 
+let lastGameKey = '';
+
 function renderGame() {
   const g = getGame(S.gameId);
-  if (!S.view) { app.innerHTML = '<div class="panel">Loading…</div>'; return; }
+  if (!S.view) { app.innerHTML = '<div class="panel">Loading…</div>'; lastGameKey = ''; return; }
+  // Redrawing a big board costs phone battery: skip it when nothing visible changed
+  // (reconnects, repeated syncs).
+  const key = JSON.stringify([S.gameId, myId(), S.view, S.players.map((p) => [p.id, p.name, p.connected])]);
+  if (key === lastGameKey && app.querySelector('#gamebox')) { tickTimer(); return; }
+  lastGameKey = key;
   const isHost = S.role === 'host' || S.role === 'local';
   const turn = g.turnOf ? g.turnOf(S.view) : [];
   const myTurn = turn.includes(myId());
@@ -657,6 +750,7 @@ function renderGame() {
     // Browsers only allow vibration after the player has tapped the page.
     if (navigator.userActivation?.hasBeenActive) try { navigator.vibrate?.(80); } catch {}
     sound('turn');
+    wake(); // let the "your move" glows play
   }
   wasMyTurn = myTurn;
   document.title = (myTurn && S.role !== 'local' ? '🔔 Your turn — ' : '') + g.name + ' — Game Night';
@@ -667,6 +761,7 @@ function renderGame() {
   app.innerHTML = `
     <div class="game-head">
       <h2>${esc(g.name)}</h2>
+      <div id="turnTimer" class="turn-timer" hidden></div>
       ${S.role === 'local' && humans.length > 1 ? `<label class="small muted">Playing as
         <select id="viewAs">${humans.map((p) => `<option value="${esc(p.id)}" ${p.id === S.viewAs ? 'selected' : ''}>${esc(p.name)}${turn.includes(p.id) ? ' ◀' : ''}</option>`).join('')}</select></label>` : ''}
       ${isHost ? `<button class="small" id="restartBtn">New game</button><button class="small" id="lobbyBtn">Lobby</button>` : ''}
@@ -708,6 +803,9 @@ function renderGame() {
     celebrate();
   }
 
+  tickTimer();
+  // CSS animations start a frame after insertion; then pause new loops if the player is idle.
+  requestAnimationFrame(settleLoops);
   const viewAs = app.querySelector('#viewAs');
   if (viewAs) viewAs.onchange = (e) => { S.viewAs = e.target.value; saveSession(); refreshLocalView(); render(); };
   if (isHost) {
@@ -718,6 +816,32 @@ function renderGame() {
     };
   }
 }
+
+/* ---------------- turn timer display ---------------- */
+
+// Updates once a second; the bar slides smoothly with a CSS transition, so the
+// phone only repaints this small pill.
+function tickTimer() {
+  const el = document.getElementById('turnTimer');
+  if (!el) return;
+  const t = S.timer;
+  if (!t || !S.started || S.screen !== 'game' || S.view?.over) { el.hidden = true; return; }
+  const now = Date.now() + (S.role === 'client' ? clockSkew : 0);
+  const ms = Math.max(0, t.deadline - now);
+  const secs = Math.ceil(ms / 1000);
+  const mine = t.due.includes(myId());
+  const who = mine ? 'Your move' : t.due.length > 1 ? `${t.due.length} players` : playerName(t.due[0]);
+  el.hidden = false;
+  el.classList.toggle('low', secs <= 10);
+  el.classList.toggle('mine', mine);
+  if (!el.firstChild) el.innerHTML = '<i class="tt-bar"></i><span class="tt-who"></span><b class="tt-secs"></b>';
+  el.querySelector('.tt-who').textContent = '⏱ ' + who;
+  el.querySelector('.tt-secs').textContent = secs + 's';
+  el.querySelector('.tt-bar').style.width = Math.max(0, (ms - 1000) / t.total) * 100 + '%';
+  if (mine && secs <= 5 && secs > 0 && secs !== lastTickSec) sound('click');
+  lastTickSec = secs;
+}
+setInterval(tickTimer, 1000);
 
 /* ---------------- boot ---------------- */
 

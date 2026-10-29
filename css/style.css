@@ -44,7 +44,7 @@ body {
     var(--woodgrain),
     linear-gradient(180deg, #4a2c19, #2e1b0f);
   background-size: auto, auto, 900px 300px, auto;
-  background-attachment: fixed;
+  /* No background-attachment: fixed — iPhones repaint the whole page with it. */
 }
 
 h1, h2, h3, .display { font-family: var(--font-display); letter-spacing: .02em; margin: .2em 0 .5em; }
@@ -63,7 +63,8 @@ h3 { font-size: 1.05rem; }
   background: linear-gradient(180deg, rgba(30, 18, 10, .96), rgba(30, 18, 10, .85));
   border-bottom: 1px solid #120a05;
   box-shadow: 0 4px 18px rgba(0, 0, 0, .5), inset 0 -1px 0 rgba(242, 193, 78, .18);
-  backdrop-filter: blur(6px);
+  /* Solid instead of a blur: a blurred sticky bar is costly on phones while scrolling. */
+  background: #1e120a;
 }
 #logo {
   font-family: var(--font-display); font-weight: 800; font-size: 1.2rem;
@@ -216,7 +217,24 @@ input.code { text-transform: uppercase; letter-spacing: .25em; font-weight: 800;
 .board-wrap { width: 100%; }
 .board-wrap svg { width: 100%; height: auto; display: block; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
 .status { font-family: var(--font-display); font-weight: 800; font-size: 1.05rem; }
-.status.myturn { color: var(--gold); animation: glowtext 1.6s ease-in-out infinite; }
+/* Pulses a few times then rests: endless glows keep phones redrawing and warm. */
+.status.myturn { color: var(--gold); animation: glowtext 1.6s ease-in-out 3; }
+
+/* Turn timer pill in the game header */
+.turn-timer {
+  position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 8px;
+  padding: 5px 12px; border-radius: 20px; font-weight: 800; font-size: .9rem; white-space: nowrap;
+  background: rgba(0, 0, 0, .35); border: 1px solid rgba(242, 193, 78, .35); color: var(--text);
+}
+.turn-timer[hidden] { display: none; }
+.turn-timer .tt-bar { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(242, 193, 78, .22); transition: width 1s linear; z-index: 0; }
+.turn-timer span, .turn-timer b { position: relative; z-index: 1; }
+.turn-timer b { font-family: var(--font-display); min-width: 2.4em; text-align: right; }
+.turn-timer.mine { border-color: var(--gold); color: var(--gold); }
+.turn-timer.low { border-color: var(--bad); color: #ffd3cc; }
+.turn-timer.low .tt-bar { background: rgba(255, 122, 107, .35); }
+.turn-timer.low.mine b { animation: ttpulse 1s ease-in-out infinite; }
+@keyframes ttpulse { 50% { transform: scale(1.18); } }
 @keyframes glowtext { 50% { text-shadow: 0 0 14px rgba(242, 193, 78, .8); } }
 .log { max-height: 170px; overflow-y: auto; font-size: .85rem; }
 .log div { padding: 3px 0; border-bottom: 1px dashed rgba(59, 42, 23, .25); }
@@ -286,6 +304,10 @@ input.code { text-transform: uppercase; letter-spacing: .25em; font-weight: 800;
   .home-top { grid-template-columns: 1fr; }
   #app { padding: 10px; }
   .felt { border-width: 8px; padding: 8px; border-radius: 16px; }
+}
+@media (max-width: 640px) {
+  .game-head h2 { font-size: 1.15rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .turn-timer { order: 10; flex-basis: 100%; justify-content: center; padding: 7px 12px; }
 }
 @media (max-width: 480px) {
   #topinfo { flex-wrap: nowrap; gap: 6px; }

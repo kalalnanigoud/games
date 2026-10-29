@@ -1772,4 +1772,18 @@ export default {
   view,
   bot,
   render,
+  defaultTimer: 30,
+  onTimeout,
 };
+
+// What happens when a player's move timer runs out (the platform falls back to
+// the bot's choice if this move turns out to be illegal).
+function onTimeout(v, pid) {
+  if (v.phase === 'main') {
+    if (v.trade && v.trade.replies?.[pid] === null) return { type: 'reply', yes: false }; // decline the offer
+    return { type: 'end' }; // ends the turn (an open offer of their own is dropped)
+  }
+  if (v.phase === 'roads') return { type: 'skip' };
+  if (v.phase === 'roll') return { type: 'roll' };
+  return bot(v, pid); // setup placement, discarding, robber, steal: let the computer choose
+}

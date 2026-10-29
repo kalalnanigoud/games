@@ -244,6 +244,51 @@ export function confetti(duration = 3200) {
   })(t0);
 }
 
+/* ---------- battery saver ---------- */
+// Endless ambient loops (glows, waves, sparkles, bobbing) make phones redraw the
+// board many times a second and heat up. Pause them after a short time without a
+// touch; any tap, or the start of your turn, wakes them. One-off effects (gliding
+// pieces, flying gems, dice, pop-ins) are never paused.
+const IDLE_MS = 8000;
+let resting = false;
+let idleTimer = null;
+let restSweep = null; // while resting, catch loops created by a game's own redraws
+
+function setLoops(play) {
+  if (typeof document === 'undefined' || !document.getAnimations) return;
+  for (const a of document.getAnimations()) {
+    let endless = false;
+    try { endless = a.effect?.getComputedTiming?.().iterations === Infinity; } catch {}
+    if (!endless) continue;
+    try { play ? a.play() : a.pause(); } catch {}
+  }
+}
+
+// Call after the game redraws, so newly created loops also respect the resting state.
+export function settleLoops() {
+  if (resting) setLoops(false);
+}
+
+function rest() {
+  resting = true;
+  setLoops(false);
+  clearInterval(restSweep);
+  restSweep = setInterval(() => setLoops(false), 1500);
+}
+
+export function wake() {
+  if (resting) { resting = false; clearInterval(restSweep); setLoops(true); }
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(rest, IDLE_MS);
+}
+
+if (typeof window !== 'undefined') {
+  addEventListener('pointerdown', wake, { passive: true });
+  addEventListener('keydown', wake);
+  document.addEventListener('visibilitychange', () => (document.hidden ? rest() : wake()));
+  wake();
+}
+
 /* ---------- misc ---------- */
 const seen = new Map();
 // True when value differs from the last one seen for key (false on first sight).

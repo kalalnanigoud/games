@@ -79,10 +79,14 @@ const SOUNDS = {
   win: () => [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, 0.45, { type: 'triangle', gain: 0.1, when: i * 0.11 })),
 };
 
+// Put the audio hardware to sleep when the game goes quiet; it wakes on the next sound.
+let sleepTimer = null;
 export function sound(name) {
   if (muted || !browser) return;
   try {
     if (!audio()) return;
     SOUNDS[name]?.();
+    clearTimeout(sleepTimer);
+    sleepTimer = setTimeout(() => { if (ac && ac.state === 'running') ac.suspend(); }, 6000);
   } catch {}
 }

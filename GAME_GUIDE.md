@@ -35,6 +35,17 @@ export default {
 
 `ctx` = `{ me, players, name(id), isBot(id), send(action), isHost, local }`.
 
+### Turn timer (optional)
+Export `onTimeout(view, pid)` (and optionally `defaultTimer: 30`) to give your game a per-move clock.
+The host picks the length in the lobby. When a human's time runs out, the host plays
+`onTimeout`'s action for them (falling back to `bot`), so keep it gentle: end the turn, pass, decline.
+The countdown pill in the header is drawn by the platform.
+
+### Performance
+Endless CSS loops (`animation: … infinite`) are paused automatically after 8 seconds without a touch, and
+resumed on the next tap, to keep phones cool. Never rely on an endless animation for something essential.
+Avoid animating `filter`, `box-shadow` or `backdrop-filter` on large areas.
+
 ### Rules for state
 - **Plain JSON only**: no Sets, Maps, class instances, functions or `undefined` holes. It is cloned and sent over the network.
 - All randomness happens inside `setup`/`act` (on the host). Use `rand`, `shuffle`, `d6` from `js/util.js`.
