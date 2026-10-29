@@ -1,17 +1,17 @@
-// Every game is one module. To add a game, create a file in this folder that
-// exports an object with this shape, then add it to the list below:
+// Every game is one module. See GAME_GUIDE.md for the full contract.
 //
-//   id, name, emoji, description, minPlayers, maxPlayers
-//   setup(players)          -> initial state   (players: [{id, name}])
+//   id, name, description, minPlayers, maxPlayers, cover (SVG string)
+//   setup(players)                -> initial state   (players: [{id, name}])
 //   act(state, playerId, action)  mutate state, or throw Error('message')
-//   turnOf(state)           -> [playerIds who must act now]
-//   view(state, playerId)   -> optional: state with secrets hidden
-//   render(el, view, ctx)   draw into el; ctx = {me, name(id), send(action), ...}
+//   turnOf(state)                 -> [playerIds who may act now]
+//   view(state, playerId)         -> optional: copy of state with secrets hidden
+//   bot(view, playerId)           -> a legal action for a computer player
+//   render(el, view, ctx)         draw into el; ctx = {me, name(id), send(action), isBot(id), ...}
 //
 // Set state.over = true when the game ends.
 
-import connect4 from './connect4.js';
+import mosaic from './mosaic.js';
 
-export const GAMES = [connect4];
+export const GAMES = [mosaic];
 
 export const getGame = (id) => GAMES.find((g) => g.id === id) || GAMES[0];

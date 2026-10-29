@@ -7,8 +7,11 @@
 import CONFIG from './config.js';
 import { GAMES, getGame } from '../games/index.js';
 import { esc, toast, randomCode, uid } from './util.js';
+import { snapshot, flip, playFx, changed, confetti } from './fx.js';
+import { sound, isMuted, setMuted } from './sound.js';
 
 const MAX_ROOM = 8;
+const BOT_NAMES = ['Ada', 'Bram', 'Cleo', 'Dax', 'Esme', 'Finn', 'Gus', 'Hana'];
 const app = document.getElementById('app');
 const topinfo = document.getElementById('topinfo');
 
@@ -41,6 +44,9 @@ const conns = new Map(); // player id -> DataConnection (host only)
 let retryTimer = null;
 let retries = 0;
 let wasMyTurn = false;
+let lastFxSeq = null;
+let botTimer = null;
+let botFails = 0;
 
 const peerOptions = () => ({ config: { iceServers: CONFIG.iceServers }, debug: 1 });
 const roomPeerId = (code) => CONFIG.roomPrefix + code;
@@ -60,7 +66,14 @@ function saveSession() {
   sessionStorage.setItem('gn-session', json);
   localStorage.setItem('gn-session', json);
 }
-const parse = (s) => { try { return JSON.parse(s); } catch { return null; } };
+const parse = (s) => {
+  try {
+    const v = JSON.parse(s);
+    // Ignore sessions for games that no longer exist.
+    if (v && v.role !== 'client' && !GAMES.some((g) => g.id === v.gameId)) return null;
+    return v;
+  } catch { return null; }
+};
 const loadTabSession = () => parse(sessionStorage.getItem('gn-session'));
 const loadSession = () => loadTabSession() || parse(localStorage.getItem('gn-session'));
 const clearSession = () => { sessionStorage.removeItem('gn-session'); localStorage.removeItem('gn-session'); };
@@ -204,13 +217,44 @@ function applyAction(pid, action) {
     return e.message || String(e);
   }
   S.game = next;
-  if (S.role === 'local' && g.turnOf) {
-    const t = g.turnOf(next);
-    if (t && t.length && !t.includes(S.viewAs)) S.viewAs = t[0];
-  }
+  if (S.role === 'local') followTurn();
   saveSession();
   broadcast();
   return null;
+}
+
+const isBot = (id) => !!S.players.find((p) => p.id === id)?.bot;
+
+// One-device mode: hand the screen to the next human who must act.
+function followTurn() {
+  const g = getGame(S.gameId);
+  const t = (g.turnOf?.(S.game) || []).filter((id) => !isBot(id));
+  if (t.length && !t.includes(S.viewAs)) S.viewAs = t[0];
+  if (!S.viewAs || isBot(S.viewAs)) S.viewAs = S.players.find((p) => !p.bot)?.id;
+}
+
+// The host's browser plays for the bots, using only what that bot could see.
+function scheduleBots() {
+  clearTimeout(botTimer);
+  if (!S.started || S.role === 'client' || !S.game || S.game.over) return;
+  const g = getGame(S.gameId);
+  if (!g.bot || !g.turnOf) return;
+  const due = (g.turnOf(S.game) || []).filter(isBot);
+  if (!due.length) return;
+  botTimer = setTimeout(() => {
+    const id = due[Math.floor(Math.random() * due.length)];
+    let action = null;
+    try {
+      action = g.bot(g.view ? g.view(S.game, id) : S.game, id);
+    } catch (e) {
+      console.warn('bot crashed', e);
+    }
+    const err = action ? applyAction(id, action) : 'no action';
+    if (err) {
+      console.warn('bot move rejected:', err, action);
+      if (++botFails < 25) scheduleBots();
+    } else botFails = 0;
+  }, 850 + Math.random() * 650);
 }
 
 function viewFor(pid) {
@@ -232,6 +276,16 @@ function broadcast() {
   }
   refreshLocalView();
   render();
+  scheduleBots();
+}
+
+function addBot() {
+  if (S.players.length >= MAX_ROOM) return toast('Room is full.');
+  const used = new Set(S.players.map((p) => p.name));
+  const name = (BOT_NAMES.find((n) => !used.has(n + ' 🤖')) || 'Bot' + S.players.length) + ' 🤖';
+  S.players.push({ id: 'B' + uid(), name, connected: true, bot: true });
+  saveSession();
+  broadcast();
 }
 
 function startGame() {
@@ -241,7 +295,8 @@ function startGame() {
   S.game = g.setup(S.players.map((p) => ({ id: p.id, name: p.name })));
   S.started = true;
   S.screen = 'game';
-  if (S.role === 'local') S.viewAs = g.turnOf?.(S.game)?.[0] || S.players[0].id;
+  botFails = 0;
+  if (S.role === 'local') { S.viewAs = null; followTurn(); }
   saveSession();
   broadcast();
 }
@@ -382,13 +437,15 @@ function render() {
 }
 
 function renderTopbar() {
-  if (!S.role) { topinfo.innerHTML = ''; return; }
   const online = S.status === 'online' || S.status === 'one device';
   topinfo.innerHTML = `
-    ${S.code ? `<span>Room <b style="color:var(--accent)">${esc(S.code)}</b></span>` : ''}
-    <span><span class="dot ${online ? 'on' : 'off'}"></span> ${esc(S.status)}</span>
-    <button class="small" id="leaveBtn">Leave</button>`;
-  topinfo.querySelector('#leaveBtn').onclick = leave;
+    ${S.code ? `<span>Room <b class="gold">${esc(S.code)}</b></span>` : ''}
+    ${S.role ? `<span><span class="dot ${online ? 'on' : 'off'}"></span> ${esc(S.status)}</span>` : ''}
+    <button class="small icon" id="muteBtn" title="Sound on/off">${isMuted() ? '🔇' : '🔊'}</button>
+    ${S.role ? '<button class="small" id="leaveBtn">Leave</button>' : ''}`;
+  topinfo.querySelector('#muteBtn').onclick = () => { setMuted(!isMuted()); renderTopbar(); if (!isMuted()) sound('chime'); };
+  const lb = topinfo.querySelector('#leaveBtn');
+  if (lb) lb.onclick = leave;
 }
 
 function renderHome() {
@@ -396,34 +453,35 @@ function renderHome() {
   const roomParam = new URLSearchParams(location.search).get('room') || '';
   app.innerHTML = `
     <div class="hero">
-      <h1>Play board games with friends</h1>
-      <p>Free, no sign-up. Works on phones and computers. Create a room, share the code, play.</p>
+      <h1>Game Night</h1>
+      <p>Beautiful strategy games to play with friends. Free, no sign-up, on any phone or computer.</p>
     </div>
     <div class="home-top">
       <div class="panel stack">
-        <h3>Your name</h3>
+        <h3 class="gold">Your name</h3>
         <input id="nameIn" maxlength="20" placeholder="Enter your name" value="${esc(S.name)}" style="width:100%" />
-        ${session ? `<div class="row"><span class="muted small grow">You have an unfinished ${session.role === 'client' ? 'room ' + esc(session.code) : getGame(session.gameId)?.name || 'game'}</span><button class="blue" id="resumeBtn">Resume</button><button class="small" id="forgetBtn">✕</button></div>` : ''}
+        ${session ? `<div class="row"><span class="muted small grow">Unfinished: ${session.role === 'client' ? 'room ' + esc(session.code) : esc(getGame(session.gameId)?.name || 'game')}</span><button class="primary small" id="resumeBtn">Resume</button><button class="small icon" id="forgetBtn" title="Forget">✕</button></div>` : ''}
       </div>
       <div class="panel stack">
-        <h3>Join a friend's room</h3>
+        <h3 class="gold">Join a friend's table</h3>
         <div class="row">
           <input id="codeIn" class="code grow" maxlength="6" placeholder="CODE" value="${esc(roomParam)}" autocomplete="off" />
           <button class="primary" id="joinBtn">Join</button>
         </div>
       </div>
     </div>
-    <h2>Pick a game to host</h2>
+    <div class="section-title">Choose a game</div>
     <div class="games-grid">
       ${GAMES.map((g) => `
         <div class="game-card">
-          <div class="emoji">${g.emoji}</div>
-          <h3 style="margin:0">${esc(g.name)}</h3>
-          <div class="players">${g.minPlayers === g.maxPlayers ? g.minPlayers : g.minPlayers + '–' + g.maxPlayers} players</div>
-          <p>${esc(g.description)}</p>
-          <div class="row">
-            <button class="primary" data-host="${g.id}">Host online</button>
-            <button data-local="${g.id}" title="Pass one phone or computer around">One device</button>
+          <div class="cover">${g.cover || ''}<span class="badge">${g.minPlayers === g.maxPlayers ? g.minPlayers : g.minPlayers + '–' + g.maxPlayers} players</span></div>
+          <div class="body">
+            <h3>${esc(g.name)}</h3>
+            <p>${esc(g.description)}</p>
+            <div class="row">
+              <button class="primary" data-host="${g.id}">Host online</button>
+              <button data-local="${g.id}" title="Pass one device around, or play against bots">One device</button>
+            </div>
           </div>
         </div>`).join('')}
     </div>`;
@@ -477,27 +535,30 @@ function renderLobby() {
         <div class="muted small">Friends open this site and type the code, or use the link:</div>
         <div class="row" style="justify-content:center">
           <input readonly value="${esc(link)}" class="grow" id="linkIn" style="min-width:0" />
-          <button class="blue" id="shareBtn">${navigator.share ? 'Share' : 'Copy'}</button>
+          <button class="primary" id="shareBtn">${navigator.share ? 'Share' : 'Copy'}</button>
         </div>` : ''}
       </div>` : ''}
       <div class="panel stack">
-        <div class="row"><h3 class="grow" style="margin:0">Players (${n})</h3><span class="muted small">${g.name}: ${g.minPlayers}–${g.maxPlayers}</span></div>
+        <div class="row"><h3 class="grow gold" style="margin:0">Players (${n})</h3><span class="muted small">${esc(g.name)}: ${g.minPlayers}–${g.maxPlayers}</span></div>
         <ul class="plist">
           ${S.players.map((p) => `
-            <li>
+            <li data-k="lp-${esc(p.id)}">
               <span class="dot ${p.connected ? 'on' : 'off'}"></span>
               <span class="grow">${esc(p.name)}</span>
               ${p.id === (S.hostId || S.token) && S.role !== 'local' ? '<span class="tag">HOST</span>' : ''}
               ${p.id === S.token && S.role !== 'local' ? '<span class="tag">YOU</span>' : ''}
-              ${isHost && p.id !== S.token && (S.role === 'local' || !p.connected) ? `<button class="small bad" data-kick="${esc(p.id)}">Remove</button>` : ''}
+              ${p.bot ? '<span class="tag">BOT</span>' : ''}
+              ${isHost && p.id !== S.token && (S.role === 'local' || !p.connected || p.bot) ? `<button class="small bad" data-kick="${esc(p.id)}">Remove</button>` : ''}
             </li>`).join('')}
         </ul>
         ${S.role === 'local' ? `
           <div class="row"><input id="addName" class="grow" maxlength="20" placeholder="Add player name" style="min-width:0" /><button id="addBtn">Add</button></div>` : ''}
+        ${isHost && g.bot ? `<button id="botBtn" style="width:100%">🤖 Add a computer player</button>` : ''}
       </div>
       ${isHost ? `
       <div class="panel stack">
-        <h3 style="margin:0">Game</h3>
+        <h3 class="gold" style="margin:0">Game</h3>
+        ${g.cover ? `<div class="lobby-cover">${g.cover}</div>` : ''}
         <select id="gameSel" style="width:100%">
           ${GAMES.map((x) => `<option value="${x.id}" ${x.id === S.gameId ? 'selected' : ''}>${x.emoji} ${esc(x.name)} (${x.minPlayers}–${x.maxPlayers})</option>`).join('')}
         </select>
@@ -522,6 +583,8 @@ function renderLobby() {
   if (isHost) {
     app.querySelector('#gameSel').onchange = (e) => { S.gameId = e.target.value; saveSession(); broadcast(); };
     app.querySelector('#startBtn').onclick = startGame;
+    const botBtn = app.querySelector('#botBtn');
+    if (botBtn) botBtn.onclick = addBot;
     app.querySelectorAll('[data-kick]').forEach((b) => (b.onclick = () => {
       S.players = S.players.filter((p) => p.id !== b.dataset.kick);
       saveSession();
@@ -553,15 +616,18 @@ function renderGame() {
   const myTurn = turn.includes(myId());
   if (myTurn && !wasMyTurn && S.role !== 'local') {
     try { navigator.vibrate?.(80); } catch {}
+    sound('turn');
   }
   wasMyTurn = myTurn;
   document.title = (myTurn && S.role !== 'local' ? '🔔 Your turn — ' : '') + g.name + ' — Game Night';
 
+  const before = snapshot(app);
+  const humans = S.players.filter((p) => !p.bot);
   app.innerHTML = `
-    <div class="row" style="margin-bottom:10px">
-      <h2 class="grow" style="margin:0">${g.emoji} ${esc(g.name)}</h2>
-      ${S.role === 'local' ? `<label class="small muted">Playing as
-        <select id="viewAs">${S.players.map((p) => `<option value="${esc(p.id)}" ${p.id === S.viewAs ? 'selected' : ''}>${esc(p.name)}${turn.includes(p.id) ? ' ◀' : ''}</option>`).join('')}</select></label>` : ''}
+    <div class="game-head">
+      <h2>${esc(g.name)}</h2>
+      ${S.role === 'local' && humans.length > 1 ? `<label class="small muted">Playing as
+        <select id="viewAs">${humans.map((p) => `<option value="${esc(p.id)}" ${p.id === S.viewAs ? 'selected' : ''}>${esc(p.name)}${turn.includes(p.id) ? ' ◀' : ''}</option>`).join('')}</select></label>` : ''}
       ${isHost ? `<button class="small" id="restartBtn">New game</button><button class="small" id="lobbyBtn">Lobby</button>` : ''}
     </div>
     <div id="gamebox"></div>`;
@@ -570,15 +636,33 @@ function renderGame() {
     me: myId(),
     players: S.players,
     name: playerName,
+    isBot,
     send,
     isHost,
     local: S.role === 'local',
   };
+  const box = app.querySelector('#gamebox');
   try {
-    g.render(app.querySelector('#gamebox'), S.view, ctx);
+    g.render(box, S.view, ctx);
   } catch (e) {
     console.error(e);
-    app.querySelector('#gamebox').innerHTML = `<div class="panel">Display error: ${esc(e.message)}</div>`;
+    box.innerHTML = `<div class="panel">Display error: ${esc(e.message)}</div>`;
+  }
+  try {
+    flip(app, before);
+    lastFxSeq = playFx(app, before, S.view.fx, lastFxSeq);
+  } catch (e) {
+    console.warn('animation error', e);
+  }
+  if (changed('over', !!S.view.over) && S.view.over) {
+    // Let the game finish its own end-of-game animation first.
+    let waited = 0;
+    const celebrate = () => {
+      if (g.isAnimating?.() && (waited += 300) < 20000) return setTimeout(celebrate, 300);
+      confetti();
+      sound('win');
+    };
+    celebrate();
   }
 
   const viewAs = app.querySelector('#viewAs');

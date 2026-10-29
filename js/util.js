@@ -33,6 +33,12 @@ export function log(state, msg) {
   if (state.log.length > 40) state.log.length = 40;
 }
 
+// Queue a visual effect every player sees once (played by js/fx.js playFx).
+export function addFx(state, item) {
+  state.fxSeq = (state.fxSeq || 0) + 1;
+  state.fx = (state.fx || []).concat({ ...item, seq: state.fxSeq }).slice(-40);
+}
+
 export const DIE_FACES = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
 
 // Standard player colours shared by games that don't define their own.
