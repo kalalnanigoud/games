@@ -72,7 +72,9 @@ h3 { font-size: 1.05rem; }
 }
 #topinfo { display: flex; align-items: center; gap: 10px; font-size: .9rem; color: var(--muted); flex-wrap: wrap; justify-content: flex-end; }
 
-#app { max-width: 1280px; margin: 0 auto; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+#app { max-width: 1280px; margin: 0 auto; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); overflow-x: clip; }
+/* Pop-in effects briefly grow past the edges; never let them make a phone page scroll sideways. */
+html, body { overflow-x: clip; }
 
 /* ---------- surfaces ---------- */
 .panel {

@@ -48,7 +48,8 @@ let lastFxSeq = null;
 let botTimer = null;
 let botFails = 0;
 
-const peerOptions = () => ({ config: { iceServers: CONFIG.iceServers }, debug: 1 });
+// debug 0: failed retries are expected while a host refreshes, so keep them out of the console.
+const peerOptions = () => ({ config: { iceServers: CONFIG.iceServers }, debug: 0 });
 const roomPeerId = (code) => CONFIG.roomPrefix + code;
 const myId = () => (S.role === 'local' ? S.viewAs : S.token);
 const playerName = (id) => S.players.find((p) => p.id === id)?.name ?? '???';
@@ -127,28 +128,39 @@ function hostRoom(gameId, resume = null) {
   openHostPeer(!!resume);
 }
 
+// Reconnect to the matchmaking server after a drop. Bound to one Peer object so a
+// timer from a room you already left can never touch the next room.
+function keepAlive(p) {
+  p.on('disconnected', () => {
+    if (p !== peer || p.destroyed) return;
+    S.status = 'reconnecting';
+    render();
+    setTimeout(() => {
+      if (p === peer && !p.destroyed && p.disconnected) try { p.reconnect(); } catch {}
+    }, 1500);
+  });
+}
+
 function openHostPeer(isResume) {
-  peer = new Peer(roomPeerId(S.code), peerOptions());
-  peer.on('open', () => {
+  const p = (peer = new Peer(roomPeerId(S.code), peerOptions()));
+  p.on('open', () => {
+    if (p !== peer) return;
     retries = 0;
     S.status = 'online';
     saveSession();
     render();
   });
-  peer.on('connection', (conn) => {
+  p.on('connection', (conn) => {
+    if (p !== peer) return conn.close();
     conn.on('data', (msg) => onHostMessage(conn, msg));
     conn.on('close', () => onConnClosed(conn));
     conn.on('error', () => onConnClosed(conn));
   });
-  peer.on('disconnected', () => {
-    if (!peer || peer.destroyed) return;
-    S.status = 'reconnecting';
-    render();
-    setTimeout(() => peer && !peer.destroyed && peer.reconnect(), 1500);
-  });
-  peer.on('error', (err) => {
+  keepAlive(p);
+  p.on('error', (err) => {
+    if (p !== peer) return;
     if (err.type === 'unavailable-id') {
-      peer.destroy();
+      p.destroy();
       if (isResume && retries++ < 8) {
         // The broker may still remember our old connection for a few seconds.
         S.status = 'reclaiming room…';
@@ -163,7 +175,7 @@ function openHostPeer(isResume) {
       render();
       toast('Lost connection to the matchmaking server. Retrying…');
       clearTimeout(retryTimer);
-      retryTimer = setTimeout(() => { if (peer) peer.destroy(); openHostPeer(true); }, 4000);
+      retryTimer = setTimeout(() => { if (p !== peer) return; p.destroy(); openHostPeer(true); }, 4000);
     } else if (err.type !== 'peer-unavailable') {
       console.warn(err);
     }
@@ -336,7 +348,7 @@ function localRoom(gameId, resume = null) {
 
 function joinRoom(code) {
   cleanup();
-  Object.assign(S, { role: 'client', code: code.toUpperCase().trim(), screen: 'lobby', status: 'connecting', players: [], started: false, view: null });
+  Object.assign(S, { role: 'client', code: code.toUpperCase().trim(), screen: 'lobby', status: 'connecting', players: [], started: false, view: null, synced: false });
   history.replaceState(null, '', '?room=' + S.code);
   saveSession();
   render();
@@ -344,10 +356,11 @@ function joinRoom(code) {
 }
 
 function openClientPeer() {
-  peer = new Peer(peerOptions());
-  peer.on('open', connectToHost);
-  peer.on('disconnected', () => peer && !peer.destroyed && setTimeout(() => peer && !peer.destroyed && peer.reconnect(), 1500));
-  peer.on('error', (err) => {
+  const p = (peer = new Peer(peerOptions()));
+  p.on('open', () => p === peer && connectToHost());
+  keepAlive(p);
+  p.on('error', (err) => {
+    if (p !== peer) return;
     if (err.type === 'peer-unavailable') {
       S.status = 'host not found';
       render();
@@ -356,7 +369,7 @@ function openClientPeer() {
       S.status = 'offline';
       render();
       clearTimeout(retryTimer);
-      retryTimer = setTimeout(() => { cleanupPeerOnly(); openClientPeer(); }, 4000);
+      retryTimer = setTimeout(() => { if (p !== peer) return; cleanupPeerOnly(); openClientPeer(); }, 4000);
     } else console.warn(err);
   });
 }
@@ -398,7 +411,9 @@ function connectToHost() {
 function scheduleClientRetry() {
   clearTimeout(retryTimer);
   if (S.role !== 'client') return;
-  if (retries++ > 20) { S.status = 'gave up — tap Retry'; render(); return; }
+  // A room we were in may just be refreshing, so keep trying for a minute.
+  // A code that never answered is probably mistyped: stop after ~15 seconds.
+  if (retries++ > (S.synced ? 20 : 4)) { S.status = S.synced ? 'gave up — tap Retry' : 'not found'; render(); return; }
   retryTimer = setTimeout(() => {
     if (peer && !peer.destroyed && peer.open) connectToHost();
     else { cleanupPeerOnly(); openClientPeer(); }
@@ -408,7 +423,7 @@ function scheduleClientRetry() {
 function onClientMessage(msg) {
   if (!msg || typeof msg !== 'object') return;
   if (msg.t === 'sync') {
-    Object.assign(S, { players: msg.players, gameId: msg.gameId, started: msg.started, view: msg.view, hostId: msg.hostId });
+    Object.assign(S, { players: msg.players, gameId: msg.gameId, started: msg.started, view: msg.view, hostId: msg.hostId, synced: true });
     S.screen = S.started ? 'game' : 'lobby';
     render();
   } else if (msg.t === 'error') {
@@ -521,7 +536,29 @@ function renderHome() {
   if (roomParam && S.name && !session) codeIn.focus();
 }
 
+// Joining, before the host has answered: no player list or game yet.
+function renderJoining() {
+  const lost = S.status === 'not found';
+  app.innerHTML = `
+    <div class="lobby stack">
+      <div class="panel stack" style="text-align:center">
+        <div class="muted">Room code</div>
+        <div class="roomcode">${esc(S.code)}</div>
+        ${lost ? `
+          <h3 class="gold" style="margin:0">No open room with this code</h3>
+          <p class="muted" style="margin:0">Check the code with your friend. Their game page must stay open while you join.</p>
+          <div class="row" style="justify-content:center"><button class="primary" id="retryBtn">Try again</button><button id="backBtn">Back</button></div>`
+        : `<p class="muted" style="margin:0">Looking for the room… <span class="small">(${esc(S.status)})</span></p>
+          <div class="row" style="justify-content:center"><button id="backBtn">Cancel</button></div>`}
+      </div>
+    </div>`;
+  const retry = app.querySelector('#retryBtn');
+  if (retry) retry.onclick = () => joinRoom(S.code);
+  app.querySelector('#backBtn').onclick = leave;
+}
+
 function renderLobby() {
+  if (S.role === 'client' && !S.synced) return renderJoining();
   const g = getGame(S.gameId);
   const isHost = S.role === 'host' || S.role === 'local';
   const link = S.code ? `${location.origin}${location.pathname}?room=${S.code}` : '';
@@ -617,7 +654,8 @@ function renderGame() {
   const turn = g.turnOf ? g.turnOf(S.view) : [];
   const myTurn = turn.includes(myId());
   if (myTurn && !wasMyTurn && S.role !== 'local') {
-    try { navigator.vibrate?.(80); } catch {}
+    // Browsers only allow vibration after the player has tapped the page.
+    if (navigator.userActivation?.hasBeenActive) try { navigator.vibrate?.(80); } catch {}
     sound('turn');
   }
   wasMyTurn = myTurn;

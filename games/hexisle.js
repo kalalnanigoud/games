@@ -1185,8 +1185,8 @@ const CSS = `
 .hexisle-num { position: absolute; top: -9px; right: -9px; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
   background: radial-gradient(circle at 35% 30%, #fff6d0, #e9b947 60%, #a87418); color: #3a2405; border: 1px solid #6b440c;
   font-family: var(--font-display); font-weight: 800; font-size: .85rem; box-shadow: 0 2px 4px rgba(0,0,0,.5); }
-.hexisle-step { display: flex; gap: 4px; }
-.hexisle-step button { min-height: 34px; min-width: 27px; width: 27px; padding: 0; border-radius: 8px; font-size: 1.05rem; }
+.hexisle-step { display: flex; gap: 3px; }
+.hexisle-step button { min-height: 38px; min-width: 32px; width: 32px; padding: 0; border-radius: 8px; font-size: 1.15rem; }
 .hexisle-sel { position: absolute; left: -8px; bottom: -8px; min-width: 26px; height: 22px; padding: 0 4px; border-radius: 11px; display: grid; place-items: center;
   background: radial-gradient(circle at 35% 30%, #ffb9ad, #d4412c 65%, #8a1c0e); color: #fff; border: 1px solid #5a1008; font-weight: 800; font-size: .78rem; box-shadow: 0 2px 4px rgba(0,0,0,.5); }
 .hexisle-have { font-size: .68rem; color: var(--muted); font-weight: 700; }
