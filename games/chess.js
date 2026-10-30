@@ -163,13 +163,34 @@ export const rules = { fromFEN, fen, legal, play, perft, san, inCheck, START };
 const pos = (s) => ({ board: s.board, turn: s.turn, castling: s.castling, ep: s.ep, half: s.half, full: s.full });
 const seatOf = (s, pid) => s.players.find((p) => p.id === pid);
 function finish(s, winner, reason) {
+  const c = s.clock;
+  if (c?.since) { c.left[s.turn] = Math.max(0, c.left[s.turn] - (Date.now() - c.since)); c.since = 0; } // stop the clock
   s.over = true; s.phase = 'over'; s.reason = reason;
   s.winners = winner ? [winner.id] : [];
   s.result = winner ? (winner.color === 'w' ? '1-0' : '0-1') : '½-½';
   log(s, reason);
 }
 
-function setup(players) {
+/* ---------------- clocks ---------------- */
+// Each side has a time bank (plus an increment per move). White's clock starts after White's first
+// move. Times use the host's clock: c.since is when the current player's turn began.
+const CLOCKS = [['none', 'No clock'], ['1+0', '1 minute'], ['3+2', '3 min + 2 s per move'], ['5+0', '5 minutes'], ['10+5', '10 min + 5 s per move'], ['15+10', '15 min + 10 s per move'], ['30+0', '30 minutes']];
+function makeClock(choice) {
+  if (!CLOCKS.some(([v]) => v === choice)) choice = '10+5';
+  if (choice === 'none') return null;
+  const [min, inc] = choice.split('+').map(Number);
+  return { name: choice, inc: inc * 1000, left: { w: min * 60000, b: min * 60000 }, since: 0 };
+}
+// A flag fall loses, unless the opponent has nothing left that could ever deliver mate.
+function timeUp(s, loser) {
+  const winner = s.players.find((p) => p !== loser);
+  s.clock.left[loser.color] = 0; s.clock.since = 0;
+  const army = s.board.split('').filter((p) => colorOf(p) === winner.color && p.toLowerCase() !== 'k');
+  if (!army.length || (army.length === 1 && /[nb]/i.test(army[0]))) return finish(s, null, `${loser.name} ran out of time, but ${winner.name} cannot checkmate. Draw.`);
+  return finish(s, winner, `${loser.name} ran out of time. ${winner.name} wins.`);
+}
+
+function setup(players, opts = {}) {
   if (players.length !== 2) throw Error('Chess needs exactly 2 players.');
   const white = rand(2);
   const s = {
@@ -178,6 +199,7 @@ function setup(players) {
     board: START, turn: 'w', castling: 'KQkq', ep: -1, half: 0, full: 1,
     ids: Array.from({ length: 64 }, (_, i) => (START[i] === '.' ? 0 : i + 1)),
     sans: [], last: null, counts: {}, taken: { w: [], b: [] }, drawOffer: null, log: [],
+    clock: makeClock(opts.clock),
   };
   s.counts[posKey(s)] = 1;
   log(s, `${s.players.find((p) => p.color === 'w').name} plays White and moves first.`);
@@ -190,6 +212,12 @@ function act(s, pid, a) {
   if (!me) throw Error('You are not playing in this game.');
   if (!a || typeof a !== 'object') throw Error('Choose a move.');
   const them = s.players.find((p) => p !== me);
+  if (a.type === 'flag') {
+    // Either player's screen reports a clock that reached zero; the host's own clock decides.
+    const c = s.clock;
+    if (!c || !c.since || Date.now() - c.since < c.left[s.turn]) return;
+    return timeUp(s, s.players.find((p) => p.color === s.turn));
+  }
   if (a.type === 'resign') return finish(s, them, `${me.name} resigned. ${them.name} wins.`);
   if (a.type === 'offer') {
     if (s.drawOffer) throw Error('A draw offer is already on the table.');
@@ -204,6 +232,15 @@ function act(s, pid, a) {
   const P = pos(s), moves = legal(P);
   const m = moves.find((x) => x.from === a.from && x.to === a.to && (x.promo || null) === (a.promo || null));
   if (!m) throw Error(moves.some((x) => x.from === a.from && x.to === a.to) ? 'Choose a piece to promote to.' : 'That move is not legal.');
+  if (s.clock) {
+    const c = s.clock, now = Date.now();
+    if (c.since) {
+      c.left[me.color] -= now - c.since;
+      if (c.left[me.color] <= 0) return timeUp(s, me); // the move arrived too late
+      c.left[me.color] += c.inc;
+    }
+    c.since = now;
+  }
   const notation = san(P, m, moves), next = play(P, m);
   // Piece identities, so moved pieces glide across the board.
   const ids = s.ids.slice();
@@ -280,7 +317,7 @@ const pieceSVG = (p) => {
 const ENGINE_URLS = ['https://cdn.jsdelivr.net/npm/stockfish.js@10.0.2/stockfish.js', 'https://unpkg.com/stockfish.js@10.0.2/stockfish.js'];
 const SIGHT = 'gn-chess-sight';
 const browser = typeof document !== 'undefined';
-const A = { on: browser && localStorage.getItem(SIGHT) === '1', worker: null, url: 0, fen: null, pos: null, lines: [], depth: 0, status: '', taps: [], flip: false, me: 'w', frame: 0 };
+const A = { root: null, on: browser && localStorage.getItem(SIGHT) === '1', worker: null, url: 0, fen: null, pos: null, lines: [], depth: 0, status: '', taps: [], flip: false, me: 'w', frame: 0 };
 
 function engine() {
   if (A.worker) return A.worker;
@@ -333,7 +370,7 @@ function pvSan(P, uci, n = 4) {
 }
 const centre = (i) => { const r = i >> 3, f = i & 7; return A.flip ? [(7 - f) * 100 + 50, (7 - r) * 100 + 50] : [f * 100 + 50, r * 100 + 50]; };
 function paint() {
-  const root = browser && document.querySelector('.chess-root');
+  const root = A.root?.isConnected && A.root.querySelector('.chess-root');
   if (!root) return;
   const bar = root.querySelector('.chess-eval'), list = root.querySelector('.chess-lines'), arrows = root.querySelector('.chess-arrows');
   if (!A.on || !bar) return;
@@ -364,10 +401,40 @@ if (browser) addEventListener('keydown', (e) => {
 
 const UI = { sel: null, promo: null, key: null };
 
+// Clock display: ticks locally between updates, corrected by the host's time sent with each view.
+const CLK = { root: null, c: null, turn: 'w', over: true, offset: 0, hostNow: 0, send: null, canFlag: false, sentAt: 0 };
+const remaining = (color) => {
+  const c = CLK.c;
+  if (!c) return 0;
+  return c.left[color] - (!CLK.over && c.since && CLK.turn === color ? Date.now() + CLK.offset - c.since : 0);
+};
+const clockText = (ms) => {
+  ms = Math.max(0, ms);
+  if (ms < 20000) return (Math.floor(ms / 100) / 10).toFixed(1);
+  const t = Math.ceil(ms / 1000);
+  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+};
+function tickClocks() {
+  if (!CLK.c || !CLK.root?.isConnected) return;
+  CLK.root.querySelectorAll('.chess-clock').forEach((e) => {
+    const ms = remaining(e.dataset.c), run = !CLK.over && !!CLK.c.since && CLK.turn === e.dataset.c;
+    e.textContent = clockText(ms);
+    e.classList.toggle('run', run);
+    e.classList.toggle('low', run && ms < 20000);
+  });
+  // When the side to move hits zero, ask the host to check (it ignores early requests).
+  if (!CLK.over && CLK.canFlag && CLK.c.since && remaining(CLK.turn) < -300 && Date.now() - CLK.sentAt > 2000) {
+    CLK.sentAt = Date.now();
+    CLK.send({ type: 'flag' });
+  }
+}
+if (browser) setInterval(tickClocks, 200);
+
 function render(el, v, ctx) {
   injectCSS('chess', STYLE);
   const redraw = () => render(el, v, ctx);
   redrawSight = redraw;
+  A.root = el;
   const key = v.players.map((p) => p.id).join() + v.ids.join();
   if (UI.key && v.sans.length === 0 && UI.key !== key) Object.assign(UI, { sel: null, promo: null });
   UI.key = key;
@@ -376,6 +443,8 @@ function render(el, v, ctx) {
   const flip = myColor === 'b';
   A.flip = flip; A.me = myColor;
   const opp = v.players.find((p) => p.color !== myColor), mine = v.players.find((p) => p.color === myColor);
+  if (v.hostNow && v.hostNow !== CLK.hostNow) { CLK.hostNow = v.hostNow; CLK.offset = v.hostNow - Date.now(); }
+  Object.assign(CLK, { root: el, c: v.clock, turn: v.turn, over: v.over, send: ctx.send, canFlag: !!me });
   const P = pos(v), moves = v.over ? [] : legal(P);
   const myTurn = !v.over && me && me.color === v.turn;
   if (!myTurn || (UI.sel != null && colorOf(v.board[UI.sel]) !== v.turn)) UI.sel = null;
@@ -395,7 +464,7 @@ function render(el, v, ctx) {
     const taken = v.taken[p.color], diff = material(v.board, p.color);
     const active = !v.over && v.turn === p.color;
     return `<div class="pchip chess-chip ${active ? 'turn' : ''}"><span class="chess-dot ${p.color}"></span><b class="grow">${esc(p.name)}${p.id === ctx.me ? ' · you' : ''}</b>
-      <span class="chess-taken">${taken.slice().sort((a, b) => VAL[b] - VAL[a]).map((t) => `<i>${pieceSVG(p.color === 'w' ? t : t.toUpperCase())}</i>`).join('')}${diff > 0 ? `<small>+${Math.round(diff / 100)}</small>` : ''}</span></div>`;
+      <span class="chess-taken">${taken.slice().sort((a, b) => VAL[b] - VAL[a]).map((t) => `<i>${pieceSVG(p.color === 'w' ? t : t.toUpperCase())}</i>`).join('')}${diff > 0 ? `<small>+${Math.round(diff / 100)}</small>` : ''}</span>${v.clock ? `<span class="chess-clock" data-c="${p.color}">${clockText(remaining(p.color))}</span>` : ''}</div>`;
   };
   const status = v.over ? `${esc(v.reason)} (${v.result})`
     : myTurn ? (checkSq >= 0 ? 'Check! Your move' : 'Your move') + ` · ${v.turn === 'w' ? 'White' : 'Black'}`
@@ -454,12 +523,16 @@ function render(el, v, ctx) {
     A.taps = A.taps.filter((t) => now - t < 900).concat(now);
     if (A.taps.length >= 3) { A.taps = []; toggleSight(redraw); }
   };
+  tickClocks();
   if (A.on) { if (!v.over) analyse(fen(P), P); paint(); }
 }
 
 const STYLE = `
 .chess-main{min-width:0;display:flex;flex-direction:column;gap:10px}
 .chess-chip{min-height:44px}
+.chess-clock{flex:none;min-width:66px;padding:5px 10px;border-radius:9px;text-align:center;font-family:var(--font-display);font-weight:800;font-size:1.05rem;font-variant-numeric:tabular-nums;color:var(--muted);background:rgba(0,0,0,.45);box-shadow:inset 0 1px 3px rgba(0,0,0,.6)}
+.chess-clock.run{color:#1d1714;background:#f4ecd8;box-shadow:0 0 0 2px var(--gold),0 0 12px rgba(242,193,78,.4)}
+.chess-clock.low{color:#2c0703;background:#ff9a8c;box-shadow:0 0 0 2px var(--bad)}
 .chess-dot{width:16px;height:16px;border-radius:50%;flex:none;border:2px solid #000;box-shadow:0 1px 3px rgba(0,0,0,.6)}
 .chess-dot.w{background:#f4ecd8}.chess-dot.b{background:#1d1714;border-color:#c8b89a}
 .chess-taken{display:flex;align-items:center;flex-wrap:wrap;justify-content:flex-end;max-width:55%}
@@ -504,8 +577,9 @@ const STYLE = `
 
 export default {
   id: 'chess', name: 'Chess',
-  description: 'The classic game of kings, on a walnut board. Full rules, draw offers, and a computer opponent.',
+  description: 'The classic game of kings, on a walnut board. Full rules, chess clocks, draw offers, and a computer opponent.',
   minPlayers: 2, maxPlayers: 2,
+  options: [{ id: 'clock', label: '⏱ Clock', default: '10+5', choices: CLOCKS }],
   cover: `<svg viewBox="0 0 320 200" role="img" aria-label="Chess pieces on a wooden board">${DEFS.replace(/<svg[^>]*>|<\/svg>/g, '')}<defs><linearGradient id="chess-cv" x2="0" y2="1"><stop stop-color="#3a2314"/><stop offset="1" stop-color="#140a04"/></linearGradient></defs>
     <rect width="320" height="200" fill="url(#chess-cv)"/><g transform="translate(160 150) scale(1 .42) rotate(45)">${Array.from({ length: 36 }, (_, i) => `<rect x="${(i % 6) * 34 - 102}" y="${Math.floor(i / 6) * 34 - 102}" width="34" height="34" fill="${(i % 6 + Math.floor(i / 6)) % 2 ? '#a6764b' : '#ecd8b0'}"/>`).join('')}</g>
     <circle cx="160" cy="70" r="90" fill="#ffd890" opacity=".08"/>
@@ -518,10 +592,11 @@ export default {
       ['♚', 'Special moves', 'Castling (move the king two squares toward a rook) and en passant are supported automatically.'],
       ['½', 'Draws', 'Stalemate, threefold repetition, the fifty-move rule and bare kings end the game in a draw. You can also offer a draw, or resign.'],
     ],
-    tips: ['Colours are drawn at random. White moves first.', 'The captured-pieces row shows who is ahead in material.', 'Add a computer player to practise on one device.'],
+    tips: ['Colours are drawn at random. White moves first.', 'The host picks the clock in the lobby. Your time only runs on your turn, White’s starts after the first move, and each move can add a few bonus seconds. Run out and you lose (it’s a draw if your opponent can’t possibly checkmate).', 'The captured-pieces row shows who is ahead in material.', 'Add a computer player to practise on one device.'],
   },
   setup, act, bot,
   turnOf: (s) => (s.over ? [] : [s.players.find((p) => p.color === s.turn).id]),
-  view: (s) => JSON.parse(JSON.stringify(s)),
+  // The host's time travels with the view so every screen's clock agrees.
+  view: (s) => Object.assign(JSON.parse(JSON.stringify(s)), s.clock ? { hostNow: Date.now() } : {}),
   render,
 };

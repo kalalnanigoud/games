@@ -63,6 +63,18 @@ Online rooms use the v2 protocol, with private reconnect credentials separate fr
 Both players must reload the updated site. Saved online sessions from v1 cannot be safely resumed;
 create a new room. Saved shared-device games remain compatible.
 
+## Spectators
+
+Friends who open the room link after a game has started join as spectators: they see the live game
+(without anyone's hidden cards or clues) but cannot move. In the lobby, anyone can press
+**Just watch this game** to sit out the next game, or **Take a seat and play** to join it.
+
+## Chess clocks
+
+The host picks the chess clock in the lobby: no clock, 1, 3+2, 5, 10+5, 15+10 or 30 minutes. Each side's time
+only runs on its own turn, White's starts after the first move, and running out loses (or draws if the
+opponent has too little material to checkmate). Every screen's clock is synced to the host's time.
+
 ## If a friend can't connect
 Most home Wi-Fi works directly. Some mobile networks block direct connections.
 Add a free TURN relay (Cloudflare Realtime TURN or the Metered free plan) in `js/config.js`.

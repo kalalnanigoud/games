@@ -10,7 +10,8 @@ import { esc, toast, randomCode, uid, reconnectSecret } from './util.js';
 import { snapshot, flip, playFx, changed, confetti, wake, settleLoops } from './fx.js';
 import { sound, isMuted, setMuted } from './sound.js';
 
-const MAX_ROOM = 8;
+const MAX_ROOM = 8; // seats at the table
+const MAX_WATCHERS = 8; // spectators on top of that
 const BOT_NAMES = ['Ada', 'Bram', 'Cleo', 'Dax', 'Esme', 'Finn', 'Gus', 'Hana'];
 const app = document.getElementById('app');
 const topinfo = document.getElementById('topinfo');
@@ -33,10 +34,21 @@ const S = {
   status: '',
   timerSec: defaultTimer(GAMES[0]), // seconds per move, 0 = off (games with onTimeout only)
   timer: null, // {deadline (host clock), total, due: [ids]} while someone is on the clock
+  opts: defaultOpts(GAMES[0]), // host-chosen game options, e.g. { clock: '5+0' } (games with options only)
 };
 function defaultTimer(g) {
   return g?.onTimeout ? g.defaultTimer || 30 : 0;
 }
+// A game may export options: [{ id, label, default, choices: [[value, text]] }], picked by the host in the lobby.
+function defaultOpts(g) {
+  return Object.fromEntries((g?.options || []).map((o) => [o.id, o.default]));
+}
+function validOpts(g, opts) {
+  return Object.fromEntries((g?.options || []).map((o) => [o.id, o.choices.some(([v]) => v === opts?.[o.id]) ? opts[o.id] : o.default]));
+}
+// Spectators sit in the room but not at the table.
+const seated = () => S.players.filter((p) => !p.watch);
+const isWatching = (id) => !!S.players.find((p) => p.id === id)?.watch;
 sessionStorage.setItem('gn-token', S.token);
 sessionStorage.setItem('gn-secret', S.secret);
 
@@ -130,7 +142,7 @@ function saveSession() {
   if (!S.role) return;
   const data = S.role === 'client'
     ? { role: 'client', code: S.code, token: S.token, secret: S.secret }
-    : { role: S.role, code: S.code, token: S.token, secret: S.secret, credentials: S.credentials, gameId: S.gameId, players: S.players, started: S.started, game: S.game, viewAs: S.viewAs, timerSec: S.timerSec };
+    : { role: S.role, code: S.code, token: S.token, secret: S.secret, credentials: S.credentials, gameId: S.gameId, players: S.players, started: S.started, game: S.game, viewAs: S.viewAs, timerSec: S.timerSec, opts: S.opts };
   data.version = 2;
   const json = JSON.stringify(data);
   sessionStorage.setItem('gn-session', json);
@@ -203,6 +215,7 @@ function hostRoom(gameId, resume = null) {
     players: resume?.players?.map((p) => ({ ...p, connected: p.id === S.token || !!p.bot })) || [{ id: S.token, name: S.name, connected: true }],
     started: resume?.started || false,
     timerSec: resume?.timerSec ?? defaultTimer(getGame(resume?.gameId || gameId)),
+    opts: validOpts(getGame(resume?.gameId || gameId), resume?.opts),
     timer: null,
     game: resume?.game || null,
     screen: resume?.started ? 'game' : 'lobby',
@@ -283,9 +296,9 @@ function onHostMessage(conn, msg) {
       return reject(conn, 'Cannot reconnect: invalid player credentials.');
     }
     if (!p) {
-      if (S.started) return reject(conn, 'That game has already started.');
-      if (S.players.length >= MAX_ROOM) return reject(conn, 'Room is full.');
-      p = { id: String(msg.token), name, connected: true };
+      // Someone arriving after the start joins as a spectator.
+      if (S.started ? S.players.length >= MAX_ROOM + MAX_WATCHERS : seated().length >= MAX_ROOM) return reject(conn, 'Room is full.');
+      p = { id: String(msg.token), name, connected: true, ...(S.started ? { watch: true } : {}) };
       S.players.push(p);
       S.credentials.push([p.id, msg.secret]);
     }
@@ -300,7 +313,22 @@ function onHostMessage(conn, msg) {
   } else if (msg.t === 'action' && conn.pid && conns.get(conn.pid) === conn) {
     const err = applyAction(conn.pid, msg.action);
     if (err) conn.open && conn.send({ t: 'error', msg: err });
+  } else if (msg.t === 'watch' && conn.pid && conns.get(conn.pid) === conn) {
+    const err = setWatch(conn.pid, !!msg.on);
+    if (err) conn.open && conn.send({ t: 'error', msg: err });
   }
+}
+
+// Switch a room member between playing and watching (only between games).
+function setWatch(pid, on) {
+  const p = S.players.find((x) => x.id === pid);
+  if (!p || p.bot) return 'Only people can watch.';
+  if (S.started) return 'Wait until this game ends to change seats.';
+  if (!on && seated().length >= MAX_ROOM) return 'The table is full.';
+  if (on) p.watch = true; else delete p.watch;
+  saveSession();
+  broadcast();
+  return null;
 }
 
 function reject(conn, msg) {
@@ -318,6 +346,7 @@ function onConnClosed(conn) {
 
 function applyAction(pid, action) {
   if (!S.started || !action) return 'Game not running.';
+  if (isWatching(pid)) return 'You are watching this game.';
   const g = getGame(S.gameId);
   const before = JSON.stringify(S.game);
   const next = structuredClone(S.game);
@@ -434,7 +463,7 @@ function broadcast() {
     if (p.id === S.token || S.role === 'local') continue;
     const c = conns.get(p.id);
     if (c && c.open) {
-      c.send({ t: 'sync', code: S.code, players: S.players, gameId: S.gameId, started: S.started, hostId: S.token, view: viewFor(p.id), timerSec: S.timerSec, timer: S.timer, now });
+      c.send({ t: 'sync', code: S.code, players: S.players, gameId: S.gameId, started: S.started, hostId: S.token, view: viewFor(p.id), timerSec: S.timerSec, timer: S.timer, opts: S.opts, now });
     }
   }
   refreshLocalView();
@@ -443,7 +472,7 @@ function broadcast() {
 }
 
 function addBot() {
-  if (S.players.length >= MAX_ROOM) return toast('Room is full.');
+  if (seated().length >= MAX_ROOM) return toast('The table is full.');
   const used = new Set(S.players.map((p) => p.name));
   const name = (BOT_NAMES.find((n) => !used.has(n + ' 🤖')) || 'Bot' + S.players.length) + ' 🤖';
   S.players.push({ id: 'B' + uid(), name, connected: true, bot: true });
@@ -453,9 +482,11 @@ function addBot() {
 
 function startGame() {
   const g = getGame(S.gameId);
-  const n = S.players.length;
+  const table = seated();
+  const n = table.length;
   if (n < g.minPlayers || n > g.maxPlayers) return toast(`${g.name} needs ${g.minPlayers}–${g.maxPlayers} players.`);
-  S.game = g.setup(S.players.map((p) => ({ id: p.id, name: p.name })));
+  S.opts = validOpts(g, S.opts);
+  S.game = g.setup(table.map((p) => ({ id: p.id, name: p.name })), S.opts);
   S.started = true;
   S.screen = 'game';
   botFails = 0;
@@ -485,6 +516,7 @@ function localRoom(gameId, resume = null) {
     players: resume?.players || [{ id: 'L1', name: S.name || 'Player 1', connected: true }, { id: 'L2', name: 'Player 2', connected: true }],
     started: resume?.started || false,
     timerSec: resume?.timerSec ?? defaultTimer(getGame(resume?.gameId || gameId)),
+    opts: validOpts(getGame(resume?.gameId || gameId), resume?.opts),
     timer: null,
     game: resume?.game || null,
     viewAs: resume?.viewAs || 'L1',
@@ -584,7 +616,7 @@ function onClientMessage(msg) {
     S.status = 'online';
     retries = 0;
     clearTimeout(retryTimer);
-    Object.assign(S, { players: msg.players, gameId: msg.gameId, started: msg.started, view: msg.view, hostId: msg.hostId, synced: true, timerSec: msg.timerSec || 0, timer: msg.timer || null });
+    Object.assign(S, { players: msg.players, gameId: msg.gameId, started: msg.started, view: msg.view, hostId: msg.hostId, synced: true, timerSec: msg.timerSec || 0, timer: msg.timer || null, opts: msg.opts || {} });
     if (msg.now) clockSkew = msg.now - Date.now();
     S.screen = S.started ? 'game' : 'lobby';
     render();
@@ -733,8 +765,10 @@ function renderLobby() {
   const g = getGame(S.gameId);
   const isHost = S.role === 'host' || S.role === 'local';
   const link = S.code ? `${location.origin}${location.pathname}?room=${S.code}` : '';
-  const n = S.players.length;
+  const n = seated().length;
   const canStart = n >= g.minPlayers && n <= g.maxPlayers;
+  const me = S.players.find((p) => p.id === S.token);
+  const watchers = S.players.filter((p) => p.watch).length;
   app.innerHTML = `
     <div class="lobby stack">
       ${S.code ? `
@@ -749,7 +783,7 @@ function renderLobby() {
         </div>` : ''}
       </div>` : ''}
       <div class="panel stack">
-        <div class="row"><h3 class="grow gold" style="margin:0">Players (${n})</h3><span class="muted small">${esc(g.name)}: ${g.minPlayers}–${g.maxPlayers}</span></div>
+        <div class="row"><h3 class="grow gold" style="margin:0">Players (${n})${watchers ? ` · 👀 ${watchers} watching` : ''}</h3><span class="muted small">${esc(g.name)}: ${g.minPlayers}–${g.maxPlayers}</span></div>
         <ul class="plist">
           ${S.players.map((p) => `
             <li data-k="lp-${esc(p.id)}">
@@ -758,12 +792,14 @@ function renderLobby() {
               ${p.id === (S.hostId || S.token) && S.role !== 'local' ? '<span class="tag">HOST</span>' : ''}
               ${p.id === S.token && S.role !== 'local' ? '<span class="tag">YOU</span>' : ''}
               ${p.bot ? '<span class="tag">BOT</span>' : ''}
+              ${p.watch ? '<span class="tag">WATCHING</span>' : ''}
               ${isHost && p.id !== S.token && (S.role === 'local' || !p.connected || p.bot) ? `<button class="small bad" data-kick="${esc(p.id)}">Remove</button>` : ''}
             </li>`).join('')}
         </ul>
         ${S.role === 'local' ? `
           <div class="row"><input id="addName" class="grow" maxlength="20" placeholder="Add player name" style="min-width:0" /><button id="addBtn">Add</button></div>` : ''}
         ${isHost && g.bot ? `<button id="botBtn" style="width:100%">🤖 Add a computer player</button>` : ''}
+        ${S.role !== 'local' && me ? `<button id="watchBtn" style="width:100%">${me.watch ? '🎲 Take a seat and play' : '👀 Just watch this game'}</button>` : ''}
       </div>
       ${isHost ? `
       <div class="panel stack">
@@ -772,6 +808,11 @@ function renderLobby() {
         <select id="gameSel" style="width:100%">
           ${GAMES.map((x) => `<option value="${x.id}" ${x.id === S.gameId ? 'selected' : ''}>${esc(x.name)} (${x.minPlayers}–${x.maxPlayers})</option>`).join('')}
         </select>
+        ${(g.options || []).map((o) => `
+        <label class="row" style="justify-content:space-between">
+          <span>${esc(o.label)}</span>
+          <select data-opt="${o.id}">${o.choices.map(([v, t]) => `<option value="${esc(v)}" ${S.opts[o.id] === v ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
+        </label>`).join('')}
         ${g.onTimeout ? `
         <label class="row" style="justify-content:space-between">
           <span>⏱ Time per move</span>
@@ -787,6 +828,7 @@ function renderLobby() {
         ${S.status === 'online' ? `<div class="stack">
           <div>Waiting for the host to start <b>${esc(g?.name || '')}</b>…</div>
           ${S.timerSec ? `<div class="muted small">⏱ ${S.timerSec} seconds per move</div>` : ''}
+          ${(g?.options || []).map((o) => `<div class="muted small">${esc(o.label)}: ${esc(o.choices.find(([v]) => v === S.opts?.[o.id])?.[1] || '')}</div>`).join('')}
           ${g?.howTo ? `<div><button class="small" data-help="${g.id}">? How to play while you wait</button></div>` : ''}</div>` : `<div class="stack"><div>Status: ${esc(S.status)}</div><button id="retryBtn">Retry</button></div>`}
       </div>`}
     </div>`;
@@ -801,7 +843,8 @@ function renderLobby() {
     };
   }
   if (isHost) {
-    app.querySelector('#gameSel').onchange = (e) => { S.gameId = e.target.value; S.timerSec = defaultTimer(getGame(S.gameId)); saveSession(); broadcast(); };
+    app.querySelector('#gameSel').onchange = (e) => { S.gameId = e.target.value; S.timerSec = defaultTimer(getGame(S.gameId)); S.opts = defaultOpts(getGame(S.gameId)); saveSession(); broadcast(); };
+    app.querySelectorAll('[data-opt]').forEach((sel) => (sel.onchange = () => { S.opts = { ...S.opts, [sel.dataset.opt]: sel.value }; saveSession(); broadcast(); }));
     const timerSel = app.querySelector('#timerSel');
     if (timerSel) timerSel.onchange = (e) => { S.timerSec = +e.target.value; saveSession(); broadcast(); };
     app.querySelector('#startBtn').onclick = startGame;
@@ -827,6 +870,12 @@ function renderLobby() {
     app.querySelector('#addBtn').onclick = add;
     addIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
   }
+  const watchBtn = app.querySelector('#watchBtn');
+  if (watchBtn) watchBtn.onclick = () => {
+    const on = !me.watch;
+    if (S.role === 'client') { if (hostConn?.open) hostConn.send({ t: 'watch', on }); else toast('Not connected to the host yet.'); }
+    else { const err = setWatch(S.token, on); if (err) toast(err); }
+  };
   const retryBtn = app.querySelector('#retryBtn');
   if (retryBtn) retryBtn.onclick = () => joinRoom(S.code);
 }
@@ -861,6 +910,7 @@ function renderGame() {
     <div class="game-head">
       <h2>${esc(g.name)}</h2>
       ${helpBtn(g.id)}
+      ${isWatching(myId()) ? '<span class="tag">👀 WATCHING</span>' : S.players.some((p) => p.watch) ? `<span class="muted small" title="Spectators">👀 ${S.players.filter((p) => p.watch).length}</span>` : ''}
       <div id="turnTimer" class="turn-timer" hidden></div>
       ${S.role === 'local' && humans.length > 1 ? `<label class="small muted">Playing as
         <select id="viewAs">${humans.map((p) => `<option value="${esc(p.id)}" ${p.id === S.viewAs ? 'selected' : ''}>${esc(p.name)}${turn.includes(p.id) ? ' ◀' : ''}</option>`).join('')}</select></label>` : ''}

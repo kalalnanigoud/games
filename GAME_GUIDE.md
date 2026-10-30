@@ -35,6 +35,16 @@ export default {
 
 `ctx` = `{ me, players, name(id), isBot(id), send(action), isHost, local }`.
 
+### Lobby options (optional)
+Export `options: [{ id: 'clock', label: '⏱ Clock', default: '10+5', choices: [['none', 'No clock'], ['10+5', '10 min + 5 s']] }]`
+and the host picks each one in the lobby; guests see the choice. `setup(players, opts)` receives `{ clock: '10+5' }`
+(unknown values fall back to the default). Chess uses this for its clock.
+
+### Spectators
+People who join after the start, or who press "Just watch" in the lobby, are spectators: they are not passed to
+`setup`, cannot act, and get `view(state, theirId)` with an id that is not a player. Hide secrets accordingly and
+make sure `render` works when `ctx.me` is not at the table. `tools/render-audit.js` checks this.
+
 ### Simultaneous games (optional)
 Set `simultaneous: true` when `turnOf` lists every player all the time (the escape rooms do). The platform then
 skips the "your turn" chime and title. Bots in such games should usually return an action that changes nothing

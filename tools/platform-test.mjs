@@ -16,7 +16,7 @@ const src = fs.readFileSync(new URL('../js/app.js', import.meta.url), 'utf8').re
 vm.runInContext(src.slice(0, src.indexOf('/* ---------------- boot')) + '\n' + src.slice(src.indexOf('function requireMultiplayer()'), src.indexOf('\n{\n  // A refresh')) + `
 render = () => {};
 globalThis.test = { S, conns, onHostMessage, onConnClosed, saveSession, resume, parse, cleanup, localRoom, hostRoom, joinRoom, broadcast, requireMultiplayer,
-  startGame, armTimer, scheduleBots, onClientMessage, get timer() { return turnTimer; } };
+  startGame, armTimer, scheduleBots, onClientMessage, setWatch, get timer() { return turnTimer; } };
 `, context);
 const t = context.test;
 const secret = reconnectSecret(), otherSecret = reconnectSecret();
@@ -42,7 +42,12 @@ t.onHostMessage(first,{t:'action',action}); assert.equal(JSON.stringify(t.S.game
 t.onHostMessage(replacement,{t:'action',action}); assert.notEqual(JSON.stringify(t.S.game),before);
 const after=JSON.stringify(t.S.game);
 t.onHostMessage(replacement,{t:'action',action}); assert.equal(JSON.stringify(t.S.game),after); assert.equal(replacement.sent.at(-1).t,'error');
-const late=conn(); t.onHostMessage(late,{t:'hello',token:'late',secret:otherSecret}); assert.equal(late.sent[0].fatal,true);
+// Arriving after the start makes you a spectator: you see the game but cannot move or take a seat mid-game.
+const late=conn(); t.onHostMessage(late,{t:'hello',token:'late',secret:otherSecret,name:'Late'});
+assert.equal(late.pid,'late'); assert.equal(t.S.players.find(p=>p.id==='late').watch,true); assert.ok(late.sent.some(m=>m.t==='sync'&&m.started&&m.view));
+const watched=JSON.stringify(t.S.game); t.onHostMessage(late,{t:'action',action:{type:'take',gems:['white','black','red']}});
+assert.equal(JSON.stringify(t.S.game),watched); assert.match(late.sent.at(-1).msg,/watching/);
+t.onHostMessage(late,{t:'watch',on:false}); assert.match(late.sent.at(-1).msg,/game ends/); assert.equal(t.S.players.find(p=>p.id==='late').watch,true);
 t.S.players.push({id:'bot',name:'Bot',bot:true});
 const botThief=conn();t.onHostMessage(botThief,{t:'hello',token:'bot',secret});assert.equal(botThief.sent[0].fatal,true);
 t.saveSession();
@@ -56,11 +61,16 @@ const restored=conn();t.onHostMessage(restored,{t:'hello',token:'guest',secret})
 // No Peer library: online requests preserve the current session; local games remain available.
 assert.equal(t.requireMultiplayer(),false);
 const role=t.S.role;t.joinRoom('ABCDE');t.hostRoom('gems');assert.equal(t.S.role,role);
+// Between games, spectators keep out of the deal, and the host's game options reach setup().
+t.S.started=false; t.S.gameId='chess'; t.S.players=[{id:t.S.token,name:'Host',connected:true},{id:'guest',name:'Guest',connected:true},{id:'late',name:'Late',connected:true,watch:true}];
+t.S.opts={clock:'3+2'}; t.startGame(); assert.deepEqual(t.S.game.players.map(p=>p.id).sort(),[t.S.token,'guest'].sort()); assert.equal(t.S.game.clock.inc,2000);
+t.S.started=false; assert.equal(t.setWatch('late',false),null); assert.equal(t.S.players.find(p=>p.id==='late').watch,undefined);
+t.S.opts={clock:'bogus'}; t.S.players.pop(); t.startGame(); assert.equal(t.S.opts.clock,'10+5','unknown options fall back to the default');
 t.cleanup();tasks.clear();t.localRoom('hexisle');t.startGame(); assert.ok(t.timer); assert.ok(tasks.has(t.timer));
 const localSaved=JSON.parse(context.sessionStorage.getItem('gn-session'));
 t.cleanup();t.localRoom('hexisle',localSaved);assert.ok(t.timer,'resumed local game restarts clock');
 // A pending bot move must not survive leaving a room.
 t.S.players[0].bot=true;t.S.game.over=false;t.scheduleBots();assert.ok(tasks.size>0);
 t.cleanup();assert.equal(tasks.size,0);
-console.log('Platform regression checks passed: identity, secret privacy, valid reconnect, stale connections, rules enforcement, saved credentials, legacy sessions, local fallback and timers.');
+console.log('Platform regression checks passed: identity, secret privacy, valid reconnect, stale connections, rules enforcement, saved credentials, legacy sessions, local fallback, timers, spectators and game options.');
 

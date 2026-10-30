@@ -75,3 +75,29 @@ for (let r = 0; r < 30; r++) {
   const kind = s.reason.split(/[.!:]/)[0]; ends[kind] = (ends[kind] || 0) + 1;
 }
 console.log('Chess scripted games passed. Bot games ended by:', JSON.stringify(ends));
+
+// Clocks: White's starts after the first move, time is spent only on your own turn, increments
+// are added, a flag fall loses (or draws against a lone king), and early flag claims change nothing.
+{
+  const clocked = (clock) => { const s = chess.setup([{ id: 'A', name: 'Ana' }, { id: 'B', name: 'Ben' }], { clock }); s.players[0].color = 'w'; s.players[1].color = 'b'; return s; };
+  assert.equal(clocked('none').clock, null);
+  assert.equal(clocked('bogus').clock.name, '10+5');
+  const s = clocked('3+2');
+  assert.deepEqual(s.clock.left, { w: 180000, b: 180000 });
+  mv(s, 'A', 'e2', 'e4');
+  assert.equal(s.clock.left.w, 180000, 'no time spent before the first move');
+  s.clock.since -= 5000; mv(s, 'B', 'e7', 'e5');
+  assert.ok(Math.abs(s.clock.left.b - 177000) < 100, 'Black spent ~5 s and gained 2 s');
+  const before = JSON.stringify(s);
+  chess.act(s, 'B', { type: 'flag' });
+  assert.equal(JSON.stringify(s), before, 'an early flag claim changes nothing');
+  s.clock.since -= 181000 + 2000;
+  chess.act(s, 'B', { type: 'flag' });
+  assert.equal(s.over, true); assert.deepEqual(s.winners, ['B']); assert.match(s.reason, /ran out of time/); assert.equal(s.clock.left.w, 0);
+  const late = clocked('1+0'); mv(late, 'A', 'e2', 'e4'); late.clock.since -= 61000;
+  mv(late, 'B', 'e7', 'e5'); assert.deepEqual(late.winners, ['A'], 'a move after the flag falls loses on time'); assert.deepEqual(late.sans, ['e4']);
+  const bare = clocked('1+0'); Object.assign(bare, fromFEN('4k3/8/8/8/8/8/4P3/4K3 w - - 0 1')); bare.clock.since = Date.now() - 61000;
+  chess.act(bare, 'A', { type: 'flag' }); assert.equal(bare.result, '½-½', 'a lone king cannot win on time');
+  assert.ok(typeof chess.view(s, 'A').hostNow === 'number' && chess.view(clocked('none'), 'A').hostNow === undefined);
+}
+console.log('Chess clock checks passed.');

@@ -41,6 +41,7 @@ export async function audit(ids, { maxSteps = 600, every = 3 } = {}) {
             draw(due[0], 'active');
             const other = players.find((p) => !due.includes(p.id));
             if (other) draw(other.id, 'waiting');
+            draw('SPECTATOR', 'spectator'); // someone watching who is not at the table
           }
           const pid = due[Math.floor(Math.random() * due.length)];
           const a = g.bot(JSON.parse(JSON.stringify(g.view ? g.view(s, pid) : s)), pid);
