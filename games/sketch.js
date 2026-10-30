@@ -381,12 +381,12 @@ const STYLE = `
 .sk-clock .sk-time.low{background:#ff9a8c;box-shadow:0 0 0 3px var(--bad)}
 .sk-grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;grid-template-areas:"board chat" "board scores";gap:14px;align-items:start}
 .sk-boardcol{grid-area:board;min-width:0}.sk-chat{grid-area:chat}.sk-scores{grid-area:scores}
-.sk-board{position:relative;border-radius:14px;overflow:hidden;border:8px solid #6d4426;box-shadow:0 14px 30px rgba(0,0,0,.5),inset 0 0 0 1px #2a170a;background:#fff}
+.sk-board{position:relative;border-radius:18px;overflow:hidden;border:6px solid #24346e;box-shadow:0 0 0 1px rgba(160,190,255,.28),0 16px 34px rgba(2,4,16,.5);background:#fff}
 .sk-board canvas{display:block;width:100%;height:auto;aspect-ratio:4/3;touch-action:none;background:#fff}
 .sk-board canvas.mine{cursor:crosshair}
 .sk-over{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;padding:12px}
 .sk-over:empty{display:none}
-.sk-card{pointer-events:auto;max-width:92%;text-align:center;padding:18px 22px;border-radius:14px;color:var(--ink);background:linear-gradient(170deg,#fbf0d4,#e4cf9f);box-shadow:0 12px 30px rgba(0,0,0,.45)}
+.sk-card{pointer-events:auto;max-width:92%;text-align:center;padding:18px 22px;border-radius:16px;color:var(--ink);background:linear-gradient(180deg,#ffffff,#e9edfc);box-shadow:0 14px 34px rgba(2,4,16,.45)}
 .sk-card p{margin:0 0 10px}
 .sk-big{font-family:var(--font-display);font-size:1.8rem;font-weight:800;text-transform:capitalize}
 .sk-choices{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
@@ -394,13 +394,13 @@ const STYLE = `
 .sk-final{font-size:1.05rem;padding:3px 0}.sk-final.win{font-weight:800;color:#7a4c08}
 .sk-tools{margin-top:10px;display:flex;flex-direction:column;gap:8px}
 .sk-colors{display:flex;flex-wrap:wrap;gap:6px}
-.sk-swatch{width:40px;height:40px;min-height:40px;padding:0;border-radius:50%;background:var(--c);border:3px solid #2a170a;box-shadow:0 2px 0 #1f1208;color:#555;font-size:1rem;text-shadow:none}
+.sk-swatch{width:40px;height:40px;min-height:40px;padding:0;border-radius:50%;background:var(--c);border:3px solid #0e1530;box-shadow:0 0 0 1px rgba(160,190,255,.35),0 2px 6px rgba(0,0,0,.4);color:#555;font-size:1rem;text-shadow:none}
 .sk-swatch.on{box-shadow:0 0 0 3px var(--gold),0 2px 0 #1f1208;transform:scale(1.08)}
 .sk-size{min-width:44px}.sk-size i{display:inline-block;border-radius:50%;background:currentColor}
 .sk-size.on{box-shadow:inset 0 0 0 2px var(--gold),0 3px 0 #1f1208}
 .sk-tip{margin:0}
 .sk-feed{height:230px;overflow-y:auto;font-size:.88rem;line-height:1.4;padding-right:4px}
-.sk-msg{padding:3px 0;border-bottom:1px dashed rgba(242,200,130,.15);overflow-wrap:anywhere}
+.sk-msg{padding:3px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
 .sk-msg.right{color:var(--good);font-weight:800}.sk-msg.close{color:var(--gold);font-style:italic}.sk-msg.sys{color:var(--muted);font-style:italic}
 .sk-guess{display:flex;gap:6px;margin-top:10px}.sk-guess input{flex:1;min-width:0}
 .sk-scores h3{margin:0 0 6px}
@@ -417,7 +417,7 @@ export default {
     { id: 'rounds', label: '🔁 Rounds', default: '2', choices: [['1', '1 round'], ['2', '2 rounds'], ['3', '3 rounds']] },
     { id: 'time', label: '⏱ Drawing time', default: '80', choices: [['60', '60 seconds'], ['80', '80 seconds'], ['100', '100 seconds']] },
   ],
-  cover: `<svg viewBox="0 0 320 200" role="img" aria-label="A sketchbook with a doodled sun and house"><defs><linearGradient id="sk-cv" x2="0" y2="1"><stop stop-color="#4a2c19"/><stop offset="1" stop-color="#22140a"/></linearGradient></defs>
+  cover: `<svg viewBox="0 0 320 200" role="img" aria-label="A sketchbook with a doodled sun and house"><defs><linearGradient id="sk-cv" x2="0" y2="1"><stop stop-color="#2c3d86"/><stop offset="1" stop-color="#121a3f"/></linearGradient></defs>
     <rect width="320" height="200" fill="url(#sk-cv)"/><g transform="rotate(-4 160 100)"><rect x="52" y="26" width="216" height="150" rx="8" fill="#fffdf6" stroke="#2a170a" stroke-width="3"/>${Array.from({ length: 9 }, (_, i) => `<circle cx="${70 + i * 23}" cy="26" r="5" fill="none" stroke="#777" stroke-width="2.5"/>`).join('')}
     <circle cx="214" cy="70" r="20" fill="none" stroke="#f2a33c" stroke-width="5"/>${Array.from({ length: 8 }, (_, k) => { const a = (k * Math.PI) / 4; return `<path d="M${(214 + 28 * Math.cos(a)).toFixed(1)} ${(70 + 28 * Math.sin(a)).toFixed(1)}L${(214 + 38 * Math.cos(a)).toFixed(1)} ${(70 + 38 * Math.sin(a)).toFixed(1)}" stroke="#f2a33c" stroke-width="4" stroke-linecap="round"/>`; }).join('')}
     <path d="M92 150V110h60v40M84 114l38-32 38 32" fill="none" stroke="#8a5a33" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/><path d="M114 150v-22h16v22" fill="none" stroke="#3d7fd9" stroke-width="4"/>

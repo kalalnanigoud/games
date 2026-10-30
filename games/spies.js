@@ -223,19 +223,19 @@ const STYLE = `
 .spy-bar.r{border-color:#e0604a}.spy-bar.b{border-color:#4b8fe8}
 .spy-turn{font-family:var(--font-display);font-weight:800}.spy-bar.r .spy-turn{color:#ff9b88}.spy-bar.b .spy-turn{color:#8fc0ff}
 .spy-role{font-size:.8rem;color:var(--muted)}
-.spy-board{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;padding:12px;border-radius:16px;background:linear-gradient(145deg,#2c4a3a,#14241c);border:6px solid #6d4426;box-shadow:0 14px 30px rgba(0,0,0,.5)}
-.spy-card{position:relative;min-height:66px;padding:6px 4px;border-radius:10px;font-family:var(--font-display);font-weight:800;font-size:.82rem;letter-spacing:.03em;text-transform:uppercase;color:#3b2a17;text-shadow:none;background:linear-gradient(170deg,#fbf0d4,#e4cf9f);border:1px solid #8a6a3a;box-shadow:0 3px 0 #7a5a2a,0 6px 10px rgba(0,0,0,.35);overflow-wrap:anywhere;line-height:1.1}
+.spy-board{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;padding:12px;border-radius:16px;background:radial-gradient(120% 90% at 50% 0%,#24407e,#132453 60%,#0b1636);border:1px solid rgba(160,190,255,.22);box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 16px 34px rgba(2,4,16,.5)}
+.spy-card{position:relative;min-height:66px;padding:6px 4px;border-radius:10px;font-family:var(--font-display);font-weight:800;font-size:.82rem;letter-spacing:.03em;text-transform:uppercase;color:#1b2347;text-shadow:none;background:linear-gradient(180deg,#ffffff,#e4e9fa);border:1px solid #b9c3e8;box-shadow:0 3px 0 #9aa6d6,0 6px 12px rgba(2,4,16,.35);transition:transform .15s;overflow-wrap:anywhere;line-height:1.1}
 .spy-card span{position:relative;z-index:1}
 .spy-card i{position:absolute;top:4px;right:6px;font-style:normal;font-size:.95rem;line-height:1}
 .spy-card.can:hover{transform:translateY(-2px)}
-.spy-card.pick{box-shadow:0 0 0 3px var(--gold),0 3px 0 #7a5a2a,0 0 18px rgba(242,193,78,.6)}
-.spy-card.known.r{box-shadow:inset 0 0 0 4px #e0604a,0 3px 0 #7a5a2a}.spy-card.known.b{box-shadow:inset 0 0 0 4px #4b8fe8,0 3px 0 #7a5a2a}
-.spy-card.known.x{box-shadow:inset 0 0 0 4px #1d1714,0 3px 0 #7a5a2a}.spy-card.known.r i{color:#c0402c}.spy-card.known.b i{color:#2a6ac8}.spy-card.known.x i{color:#000}
+.spy-card.pick{box-shadow:0 0 0 3px var(--gold),0 3px 0 #9aa6d6,0 0 18px rgba(242,193,78,.6)}
+.spy-card.known.r{box-shadow:inset 0 0 0 4px #e0604a,0 3px 0 #9aa6d6}.spy-card.known.b{box-shadow:inset 0 0 0 4px #4b8fe8,0 3px 0 #9aa6d6}
+.spy-card.known.x{box-shadow:inset 0 0 0 4px #1d1714,0 3px 0 #9aa6d6}.spy-card.known.r i{color:#c0402c}.spy-card.known.b i{color:#2a6ac8}.spy-card.known.x i{color:#000}
 .spy-card.open{color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.6);box-shadow:inset 0 2px 8px rgba(0,0,0,.4)}
 .spy-card.open span{opacity:.75}
 .spy-card.open.r{background:repeating-linear-gradient(45deg,#d0503c 0 10px,#bf4431 10px 20px)}
 .spy-card.open.b{background:repeating-linear-gradient(-45deg,#3d7fd9 0 10px,#336fc4 10px 20px)}
-.spy-card.open.n{background:#b9a77e;color:#3b2a17;text-shadow:none}
+.spy-card.open.n{background:#aab2cf;color:#1b2347;text-shadow:none}
 .spy-card.open.x{background:#1d1714}
 .spy-card.open i{color:#fff;font-size:1.3rem}
 .spy-clue{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:12px}

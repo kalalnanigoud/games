@@ -5,6 +5,8 @@
 import { injectCSS, snapshot, flip } from '../js/fx.js';
 import { esc, log, addFx, shuffle, rand, toast, PLAYER_COLORS } from '../js/util.js';
 import { sound } from '../js/sound.js';
+import { icon } from '../js/icons.js';
+import { portrait } from '../js/avatar.js';
 
 /* =====================================================================
    Constants
@@ -884,40 +886,76 @@ function ensureDefs() {
   document.body.appendChild(d.firstElementChild);
 }
 
-/* Cover art: a glowing treasure chest spilling gems (self-contained ids) */
+/* Cover art: a night bazaar. The merchant raises a glowing diamond over trays of gems
+   while a customer looks on (self-contained ids). */
 function coverSVG() {
-  const gem = (c, x, y, s, rot = 0) => `<g transform="translate(${x} ${y}) rotate(${rot}) scale(${s})">${gemMarkup(c, 'gmc')}</g>`;
+  const gem = (c, x, y, sc, rot = 0) => `<g transform="translate(${x} ${y}) rotate(${rot}) scale(${sc})">${gemMarkup(c, 'gmc')}</g>`;
   const glow = (x, y, r, col, o = 0.55) => `<circle cx="${x}" cy="${y}" r="${r}" fill="${col}" opacity="${o}" filter="url(#gmc-blur)"/>`;
-  const coin = (x, y, s = 1) => `<g transform="translate(${x} ${y}) scale(${s})"><ellipse cx="0" cy="2.4" rx="11" ry="4.2" fill="#7a4c0a"/><ellipse cx="0" cy="0" rx="11" ry="4.2" fill="url(#gmc-coin)" stroke="#9a6410" stroke-width=".6"/><ellipse cx="0" cy="0" rx="7" ry="2.5" fill="none" stroke="#fff3b8" stroke-opacity=".6" stroke-width=".6"/></g>`;
-  const stack = (x, y, n) => Array.from({ length: n }, (_, i) => coin(x + (i % 2 ? 0.8 : -0.6), y - i * 3.2)).join('');
-  const sp = (x, y, s) => sparkle(x, y, s);
+  const coin = (x, y, sc = 1) => `<g transform="translate(${x} ${y}) scale(${sc})"><ellipse cx="0" cy="2.2" rx="9" ry="3.4" fill="#7a4c0a"/><ellipse cx="0" cy="0" rx="9" ry="3.4" fill="url(#gmc-coin)" stroke="#9a6410" stroke-width=".5"/></g>`;
+  const stack = (x, y, n) => Array.from({ length: n }, (_, i) => coin(x + (i % 2 ? 0.7 : -0.5), y - i * 2.8)).join('');
+  // String of lanterns: a sagging curve, lanterns hung along it.
+  const curve = (t) => [320 * t, (1 - t) ** 2 * 24 + 2 * t * (1 - t) * 52 + t * t * 20];
+  const lantern = (t, col) => {
+    const [x, y] = curve(t);
+    return `${glow(x, y + 13, 13, col, 0.7)}<path d="M${x} ${y} v5" stroke="#ffd9a0" stroke-width=".8"/>` +
+      `<rect x="${x - 3}" y="${y + 4}" width="6" height="2.4" rx="1" fill="#e8b04a"/><ellipse cx="${x}" cy="${y + 13}" rx="5.4" ry="7.5" fill="${col}"/>` +
+      `<ellipse cx="${x - 1.6}" cy="${y + 11}" rx="1.6" ry="3.6" fill="#fff" opacity=".45"/><rect x="${x - 2.4}" y="${y + 20}" width="4.8" height="2" rx="1" fill="#e8b04a"/>`;
+  };
+  const awning = Array.from({ length: 11 }, (_, i) => {
+    const x = 52 + i * 20;
+    return `<path d="M${x} 64 h20 v16 a10 10 0 0 1 -20 0z" fill="${i % 2 ? '#fff1d6' : '#ff5d8f'}"/>`;
+  }).join('');
+  const stars = [[22, 12, 0.9], [64, 30, 0.6], [118, 10, 0.8], [196, 14, 0.7], [252, 8, 0.9], [300, 46, 0.6], [140, 34, 0.5], [12, 70, 0.6], [306, 84, 0.5]]
+    .map(([x, y, o]) => `<circle cx="${x}" cy="${y}" r="1" fill="#fff" opacity="${o}"/>`).join('');
   return `<svg viewBox="0 0 320 200" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice"><defs>` +
-    rg('gmc-bg', [[0, '#4a2a62'], [0.45, '#1e0f30'], [1, '#07040c']], 0.5, 0.42, 0.75) +
-    rg('gmc-glow', [[0, '#fff3b0', 0.95], [0.35, '#ffc24a', 0.6], [1, '#ff8a1a', 0]]) +
+    lg('gmc-sky', [[0, '#120f3d'], [0.45, '#2c2382'], [0.78, '#6a3f9e'], [1, '#ff9a6b']]) +
+    rg('gmc-warm', [[0, '#ffd27a', 0.9], [0.5, '#ff9a5a', 0.35], [1, '#ff7a4a', 0]]) +
+    rg('gmc-gemglow', [[0, '#ffffff', 1], [0.3, '#bfe6ff', 0.7], [1, '#7cc8ff', 0]]) +
     rg('gmc-coin', [[0, '#fff6c4'], [0.5, '#f2c14e'], [1, '#a86f12']], 0.4, 0.3, 0.8) +
-    lg('gmc-wood', [[0, '#8a5530'], [1, '#3a1f0c']]) +
-    lg('gmc-lid', [[0, '#5a1424'], [1, '#2a0610']]) +
-    lg('gmc-band', [[0, '#ffe9a0'], [0.5, '#d8a23a'], [1, '#8a5a10']], 1, 0) +
-    lg('gmc-ray', [[0, '#fff6d0', 0.35], [1, '#fff6d0', 0]], 0, 0) +
-    rg('gmc-velvet', [[0, '#6a1028'], [1, '#14040a']], 0.5, 0.2, 0.8) +
-    `<filter id="gmc-blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="9"/></filter></defs>` +
-    `<rect width="320" height="200" fill="url(#gmc-bg)"/>` +
-    `<g opacity=".6"><path d="M160 96 L96 -10 L130 -10Z" fill="url(#gmc-ray)"/><path d="M160 96 L148 -10 L176 -10Z" fill="url(#gmc-ray)"/><path d="M160 96 L196 -10 L232 -10Z" fill="url(#gmc-ray)"/><path d="M160 96 L40 0 L64 -10Z" fill="url(#gmc-ray)"/><path d="M160 96 L262 -10 L290 0Z" fill="url(#gmc-ray)"/></g>` +
-    `<ellipse cx="160" cy="206" rx="230" ry="62" fill="url(#gmc-velvet)"/>` +
-    `<circle cx="160" cy="92" r="96" fill="url(#gmc-glow)" opacity=".38"/>` +
-    `<path d="M108 98 L114 50 Q160 34 206 50 L212 98Z" fill="url(#gmc-lid)" stroke="#2a0a10" stroke-width="2"/><path d="M114 50 Q160 34 206 50" fill="none" stroke="url(#gmc-band)" stroke-width="5"/>` +
-    `<path d="M126 52 L122 98 M194 52 L198 98" stroke="url(#gmc-band)" stroke-width="5"/>` +
-    `<ellipse cx="160" cy="100" rx="56" ry="14" fill="url(#gmc-glow)"/>` +
-    gem('blue', 136, 92, 12, -20) + gem('green', 182, 90, 12, 14) + gem('white', 159, 86, 13) +
-    `<path d="M104 100 H216 L210 160 H110Z" fill="url(#gmc-wood)" stroke="#1e0e05" stroke-width="2"/>` +
-    `<path d="M104 100 H216 L215 110 H105Z" fill="url(#gmc-band)"/><path d="M124 100 L126 160 M196 100 L194 160" stroke="url(#gmc-band)" stroke-width="6"/>` +
-    `<path d="M108 124 H212" stroke="#2a1508" stroke-width="1.2" opacity=".6"/><path d="M109 140 H211" stroke="#2a1508" stroke-width="1.2" opacity=".6"/>` +
-    `<rect x="150" y="112" width="20" height="22" rx="3" fill="url(#gmc-band)" stroke="#5a3a0a" stroke-width="1.2"/><circle cx="160" cy="121" r="3" fill="#2a1508"/><path d="M158.6 122 L157.6 129 H162.4 L161.4 122Z" fill="#2a1508"/>` +
-    stack(62, 170, 6) + stack(84, 176, 4) + stack(252, 172, 7) + stack(232, 178, 3) +
-    coin(112, 182, 1) + coin(206, 186, 0.9) + coin(282, 186, 0.8) + coin(40, 186, 0.8) +
-    glow(118, 160, 26, '#3d7fff') + glow(206, 158, 26, '#2fe08a') + glow(146, 180, 20, '#ff3a5a') + glow(176, 182, 18, '#9aa4c0', 0.35) + glow(160, 132, 30, '#cfe8ff', 0.4) +
-    gem('blue', 118, 160, 19, -14) + gem('green', 206, 158, 20, 10) + gem('red', 144, 178, 16, 8) + gem('black', 178, 180, 14, -8) + gem('white', 160, 140, 24) +
-    sp(96, 70, 7) + sp(226, 60, 6) + sp(178, 128, 5) + sp(128, 146, 4) + sp(262, 140, 5) + sp(52, 128, 4) + sp(290, 96, 3) + sp(30, 70, 3) +
+    lg('gmc-robe', [[0, '#5b4bd6'], [1, '#2e2580']]) +
+    lg('gmc-turban', [[0, '#ffd36b'], [1, '#f08a3c']]) +
+    lg('gmc-cloth', [[0, '#1f7d9a'], [1, '#0f3f58']]) +
+    lg('gmc-trim', [[0, '#ffe9a0'], [0.5, '#e0aa3e'], [1, '#9a6a14']], 1, 0) +
+    lg('gmc-ray', [[0, '#e8f6ff', 0.55], [1, '#e8f6ff', 0]], 1, 0) +
+    `<filter id="gmc-blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter></defs>` +
+    // sky, stars, warm glow behind the stall, a skyline of domes and a minaret
+    `<rect width="320" height="200" fill="url(#gmc-sky)"/>${stars}<circle cx="160" cy="150" r="150" fill="url(#gmc-warm)" opacity=".55"/>` +
+    `<path d="M0 150 V128 a20 20 0 0 1 40 0 V118 h8 l5 -20 l5 20 h8 V132 a16 16 0 0 1 32 0 V150z M228 150 V134 a18 18 0 0 1 36 0 V96 l7 -22 l7 22 V150 h4 V124 a19 19 0 0 1 38 0 V150z" fill="#1d1650" opacity=".9"/>` +
+    // stall: posts, striped awning, lantern string
+    `<rect x="56" y="70" width="7" height="90" rx="2" fill="#2a1f5e"/><rect x="257" y="70" width="7" height="90" rx="2" fill="#2a1f5e"/>` +
+    `<path d="M46 66 L160 48 L274 66z" fill="#c23a6b"/><rect x="48" y="60" width="224" height="6" rx="2" fill="url(#gmc-trim)"/>${awning}` +
+    `<path d="M0 24 Q160 80 320 20" fill="none" stroke="#ffd9a0" stroke-width=".9" opacity=".8"/>` +
+    lantern(0.1, '#ff8a5a') + lantern(0.32, '#ffcf5c') + lantern(0.68, '#ff6fae') + lantern(0.9, '#ffb35a') +
+    // the merchant: robe, raised arm, face, turban with a jewel and plume
+    glow(160, 118, 40, '#ffcf7a', 0.35) +
+    `<path d="M124 162 C124 132 138 116 160 116 C182 116 196 132 196 162z" fill="url(#gmc-robe)"/>` +
+    `<path d="M150 117 L160 133 L170 117z" fill="url(#gmc-trim)"/><path d="M160 133 V162" stroke="#ffd36b" stroke-width="1.4" opacity=".7"/>` +
+    `<path d="M184 122 C197 114 202 102 203 90 L213 92 C212 108 204 124 192 133z" fill="url(#gmc-robe)"/><circle cx="208" cy="88" r="6.2" fill="#d99a6c"/>` +
+    `<path d="M137 124 C127 131 122 141 124 152 L137 152 C137 143 141 135 147 129z" fill="url(#gmc-robe)"/><ellipse cx="131" cy="153" rx="7" ry="4.5" fill="#d99a6c"/>` +
+    `<rect x="154" y="106" width="12" height="11" rx="4" fill="#c98a5e"/><circle cx="160" cy="97" r="17" fill="#e0a57a"/>` +
+    `<circle cx="150" cy="101.5" r="3" fill="#ff7f8f" opacity=".35"/><circle cx="170" cy="101.5" r="3" fill="#ff7f8f" opacity=".35"/>` +
+    `<path d="M150.5 95 q3 -3.4 6 0 M163.5 95 q3 -3.4 6 0" fill="none" stroke="#2a1c1a" stroke-width="1.8" stroke-linecap="round"/>` +
+    `<path d="M149 104 q5.5 -4.5 11 -.5 q5.5 -4 11 .5 q-5.5 4.5 -11 1 q-5.5 3.5 -11 -1z" fill="#3b2418"/><path d="M155 109.5 q5 4.2 10 0" fill="none" stroke="#7a2e35" stroke-width="1.6" stroke-linecap="round"/>` +
+    `<path d="M167 76 C175 70 178 60 186 54 C182 64 180 72 172 80z" fill="#3ee0a1"/><path d="M168 77 C174 72 176 64 182 60" fill="none" stroke="#c9ffe8" stroke-width=".8"/>` +
+    `<ellipse cx="160" cy="83" rx="21" ry="12.5" fill="url(#gmc-turban)"/><path d="M141 86 Q160 74 179 86 M143 80 Q160 70 177 80" fill="none" stroke="#c86a28" stroke-width="1.3" opacity=".7"/>` +
+    gem('red', 160, 80, 4.8) +
+    // the diamond held high, with light rays and glints
+    `<g opacity=".85"><path d="M209 66 L320 22 L320 46z" fill="url(#gmc-ray)"/><path d="M209 66 L320 84 L320 104z" fill="url(#gmc-ray)"/><path d="M209 66 L262 0 L284 0z" fill="url(#gmc-ray)"/></g>` +
+    `<circle cx="209" cy="66" r="30" fill="url(#gmc-gemglow)" opacity=".75"/>` + gem('white', 209, 66, 15, -8) +
+    sparkle(226, 52, 5) + sparkle(193, 50, 3.5) + sparkle(231, 80, 3) +
+    // counter with cloth and gold trim, trays of gems, stacks of coins
+    `<path d="M48 150 H272 V200 H48z" fill="url(#gmc-cloth)"/><rect x="48" y="148" width="224" height="7" rx="2" fill="url(#gmc-trim)"/>` +
+    Array.from({ length: 12 }, (_, i) => `<path d="M${52 + i * 18.5} 155 l5 7 l5 -7z" fill="#e0aa3e" opacity=".85"/>`).join('') +
+    `<ellipse cx="96" cy="150" rx="30" ry="6.5" fill="#5a1430"/><ellipse cx="226" cy="150" rx="30" ry="6.5" fill="#1e1a5a"/>` +
+    glow(92, 143, 16, '#3d7fff', 0.5) + glow(232, 143, 14, '#2fe08a', 0.5) +
+    gem('blue', 84, 144, 8, -14) + gem('green', 102, 143, 7.5, 12) + gem('red', 93, 148, 6, 6) +
+    gem('green', 220, 144, 8, 10) + gem('black', 237, 144, 7, -10) + gem('blue', 228, 148, 6, 8) +
+    stack(66, 150, 5) + stack(254, 150, 4) + coin(150, 154, 0.9) + coin(170, 155, 0.8) +
+    // a customer in the foreground, leaning in
+    `<path d="M-6 200 C-4 174 10 162 30 162 C50 162 62 174 64 200z" fill="#7a2d6b"/><circle cx="30" cy="148" r="16" fill="#a63d86"/>` +
+    `<path d="M15 152 C15 136 24 130 30 130 C40 130 47 138 46 150 C42 144 36 141 30 141 C24 141 18 145 15 152z" fill="#ff6fae"/>` +
+    `<path d="M38 168 C48 166 56 160 62 152" fill="none" stroke="#ff6fae" stroke-width="7" stroke-linecap="round"/><circle cx="63" cy="151" r="4.5" fill="#c3814f"/>` +
+    sparkle(120, 128, 3) + sparkle(276, 118, 3.5) + sparkle(40, 100, 2.5) +
     `</svg>`;
 }
 
@@ -969,6 +1007,9 @@ let renders = 0;
 let prevSeed = null;
 let prevMarket = new Set();
 let prevRes = new Set();
+let prevPoints = new Map(); // seed + player id -> prestige at the last render, for the "scored" flash
+// The ledger folds away on phones so the table gets the screen; it stays as the player left it.
+let ledgerOpen = typeof matchMedia === 'function' ? matchMedia('(min-width: 901px)').matches : true;
 let prevSel = [];
 
 function rerender() {
@@ -1005,7 +1046,7 @@ function render(el, v, ctx) {
   // ---- nobles ----
   const choices = v.phase === 'noble' && myTurn ? v.nobleChoices || [] : [];
   const nobles = v.nobles.map((nb) => `<div class="gems-nwrap">${nobleHTML(nb, {
-    cls: choices.includes(nb.id) ? 'pulse-glow gems-choose' : choices.length ? 'gems-dim' : '',
+    cls: choices.includes(nb.id) ? 'gems-choose' : choices.length ? 'gems-dim' : '',
     attrs: `data-k="${nb.id}" data-act="noble" data-id="${nb.id}" role="button" tabindex="0" aria-label="${esc(nb.name)}"`,
   })}<div class="gems-nname">${esc(nb.name)}</div></div>`).join('');
 
@@ -1018,7 +1059,8 @@ function render(el, v, ctx) {
       let cls = '', dd = '';
       if (initial) { cls = 'gems-deal'; dd = `--dd:${(0.2 + ((3 - t) * 4 + i) * 0.08).toFixed(2)}s;`; }
       else if (fresh.has(c.id)) { cls = 'gems-deal'; dd = '--dd:.42s;'; }
-      if (canPlay && payment(meP, c)) cls += ' gems-can pulse-glow';
+      if (canPlay && payment(meP, c)) cls += ' gems-can';
+      if (ui.modal?.id === c.id) cls += ' gems-picked';
       return cardHTML(c, { back: true, cls, attrs: `data-k="${c.id}" data-noenter data-act="card" data-id="${c.id}" role="button" tabindex="0" aria-label="${NAME[c.c]} card, ${c.p} prestige" style="--slot:${i};${dd}"` });
     }).join('');
     return `<div class="gems-tier">${deck}${slots}</div>`;
@@ -1052,10 +1094,13 @@ function render(el, v, ctx) {
       ${trayHTML(v, meP, myTurn)}
     </div></div>
     <div class="side gems-side">${panels}
-      <div class="parchment gems-ledger"><h4>Ledger</h4><div class="log">${(v.log || []).map((l) => `<div>${esc(l)}</div>`).join('')}</div></div>
+      <details class="panel drawer gems-ledger" ${ledgerOpen ? 'open' : ''}><summary>${icon('sparkle')}<span>Ledger</span><span class="note">${esc(v.log?.[0] || '')}</span>${icon('chevron', 'chev')}</summary>
+        <div class="drawer-body"><div class="log">${(v.log || []).map((l) => `<div>${esc(l)}</div>`).join('')}</div></div></details>
     </div>
   </div>${modalHTML(v, meP, myTurn)}`;
 
+  el.querySelector('.gems-ledger')?.addEventListener('toggle', (e) => { ledgerOpen = e.currentTarget.open; });
+  prevPoints = new Map(v.players.map((p) => [v.seed + p.id, p.points]));
   prevSel = ui.sel.slice();
   prevSeed = v.seed;
   prevMarket = new Set(marketIds);
@@ -1073,7 +1118,7 @@ function statusHTML(v, ctx, meP, myTurn) {
   if (v.over) {
     const ws = v.winners.map((id) => v.players.find((p) => p.id === id)?.name || '?');
     const ranked = [...v.players].sort((a, b) => b.points - a.points || a.cards.length - b.cards.length);
-    return `<div class="gems-status gems-over"><div class="winner-banner">🏆 ${esc(ws.join(' & '))} ${ws.length > 1 ? 'share the win' : 'wins'}!</div>
+    return `<div class="gems-status gems-over"><div class="winner-banner">${icon('trophy')} ${esc(ws.join(' & '))} ${ws.length > 1 ? 'share the win' : 'wins'}!</div>
       <div class="gems-standings">${ranked.map((p, i) => `<span class="${v.winners.includes(p.id) ? 'gems-win' : ''}"><b>${i + 1}.</b> ${esc(p.name)} <em>${p.points}★</em> <small>${plural(p.cards.length, 'card')}</small></span>`).join('')}</div></div>`;
   }
   const cur = v.players[v.cur];
@@ -1083,7 +1128,7 @@ function statusHTML(v, ctx, meP, myTurn) {
   else if (v.phase === 'discard') hint = `You hold ${tokenCount(meP)} gems. Return ${tokenCount(meP) - LIMIT} to the bank.`;
   else if (v.phase === 'noble') hint = 'Several patrons admire you. Choose who visits.';
   else hint = 'Take 3 different gems, 2 of one colour, reserve or buy';
-  return `<div class="gems-status"><div class="gems-turnline"><span class="swatch" style="background:${col}"></span>` +
+  return `<div class="gems-status"><div class="gems-turnline"><span class="gems-face-sm" style="--pc:${col}">${portrait({ id: cur.id, bot: ctx.isBot(cur.id) })}</span>` +
     `<span class="status ${myTurn ? 'myturn' : ''}">${myTurn ? 'Your turn' : esc(cur.name) + "'s turn"}</span>` +
     `${v.finalRound ? '<span class="gems-flag">Final round</span>' : ''}<span class="gems-round">Round ${v.round}</span></div>` +
     `<div class="gems-hint">${hint}</div></div>`;
@@ -1136,11 +1181,13 @@ function panelHTML(v, p, ctx, meP, canPlay, freshRes) {
   const res = p.reserved.map((c, i) => {
     const can = isMe && canPlay && !c.hidden && payment(p, c);
     const attrs = `data-k="r-${c.id}" data-noenter data-a="p-${p.id}-res-${i}" data-act="res" data-id="${c.id}" data-owner="${p.id}" role="button" tabindex="0"`;
-    const inner = c.hidden ? hiddenCardHTML(c.t) : cardHTML(c, { cls: can ? 'gems-can pulse-glow' : '' });
+    const inner = c.hidden ? hiddenCardHTML(c.t) : cardHTML(c, { cls: (can ? 'gems-can' : '') + (ui.modal?.id === c.id ? ' gems-picked' : '') });
     return `<div class="gems-res ${freshRes.has(c.id) ? 'gems-arrive' : ''}" ${attrs}>${inner}</div>`;
   }).join('');
-  return `<div class="panel gems-pp ${isCur ? 'gems-turn' : ''} ${isMe ? 'gems-me' : ''}" data-k="pp-${p.id}">
-    <div class="gems-pphead"><span class="swatch" style="background:${col}"></span><span class="gems-ppname">${esc(p.name)}</span>${isMe ? '<span class="tag">YOU</span>' : ''}
+  const had = prevPoints.get(v.seed + p.id);
+  const scored = had != null && p.points > had ? 'gems-scored' : '';
+  return `<div class="panel gems-pp ${isCur ? 'gems-turn' : ''} ${isMe ? 'gems-me' : ''} ${scored}" data-k="pp-${p.id}" style="--pc:${col}">
+    <div class="gems-pphead"><span class="gems-face-sm">${portrait({ id: p.id, bot: ctx.isBot(p.id) })}</span><span class="gems-ppname">${esc(p.name)}</span>${isMe ? '<span class="tag t-you">You</span>' : ''}
       <span class="gems-pptok ${tokens > LIMIT ? 'gems-over10' : ''}" title="Gems held">${tokens}/${LIMIT}</span>
       <span class="gems-ppnob ${p.nobles.length ? '' : 'gems-zero'}" data-a="p-${p.id}-nobles" title="Patrons: ${p.nobles.map((n) => esc(n.name)).join(', ') || 'none'}">${CREST}<b>${p.nobles.length}</b></span>
       <span class="gems-ppscore" data-a="p-${p.id}-score" title="Prestige">${p.points}<small>★</small></span></div>
@@ -1168,7 +1215,7 @@ function modalHTML(v, meP, myTurn) {
   const still = ui.shown ? 'gems-still' : '';
   const turnReason = !meP ? 'You are watching this game.' : v.over ? 'The game is over.' : !myTurn ? "It's not your turn." : v.phase !== 'play' ? 'Finish your turn first.' : '';
   const wrap = (art, body) => `<div class="modal-bg gems-mbg ${still}" data-act="close"><div class="modal panel gems-modal" data-act="noop" role="dialog" aria-modal="true">` +
-    `<div class="gems-mart">${art}</div><div class="gems-minfo">${body}</div><button class="small gems-mclose" data-act="close" aria-label="Close">✕</button></div></div>`;
+    `<div class="gems-mart">${art}</div><div class="gems-minfo">${body}</div><button class="icon-btn gems-mclose" data-act="close" aria-label="Close">${icon('close')}</button></div></div>`;
 
   if (m.kind === 'noble') {
     const nb = v.nobles.find((n) => n.id === m.id);
@@ -1345,7 +1392,16 @@ const COLOR_VARS = TOKENS.map((c) => {
 const CSS = `
 ${COLOR_VARS}
 .gems-layout { align-items: start; }
-.gems-felt { container: gemsfelt / inline-size; padding: 12px 14px 14px; }
+/* Night bazaar: indigo velvet under lantern light, with a scatter of gem glints. */
+.gems-felt { container: gemsfelt / inline-size; padding: 14px 16px 16px;
+  background:
+    radial-gradient(1.5px 1.5px at 12% 18%, rgba(255,240,200,.55), transparent 60%),
+    radial-gradient(1.5px 1.5px at 78% 9%, rgba(200,220,255,.5), transparent 60%),
+    radial-gradient(2px 2px at 91% 64%, rgba(255,220,150,.45), transparent 60%),
+    radial-gradient(1.5px 1.5px at 6% 82%, rgba(220,200,255,.45), transparent 60%),
+    radial-gradient(120% 70% at 50% -10%, rgba(255,190,90,.22), transparent 55%),
+    radial-gradient(120% 100% at 50% 0%, #3b2f8f 0%, #251f68 40%, #161442 72%, #0e0c2c 100%);
+  border-color: rgba(255, 207, 92, .22); }
 @media (max-width: 900px) { .gems-felt { padding: 8px; } }
 .gems-table { display: grid; gap: 12px 14px; justify-content: center; grid-template-columns: minmax(0, 600px) 84px;
   grid-template-areas: "status status" "nobles nobles" "tiers bank" "tray tray"; }
@@ -1354,17 +1410,20 @@ ${COLOR_VARS}
 /* status */
 .gems-status { display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; }
 .gems-turnline { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; }
-.gems-hint { font-size: .9rem; color: #e2f1e7; font-style: italic; text-shadow: 0 1px 2px rgba(0,0,0,.7); }
-.gems-round { font-size: .72rem; color: #cfe6d8; opacity: .7; letter-spacing: .06em; text-transform: uppercase; }
+.gems-hint { font-size: .9rem; color: #dcd8ff; }
+.gems-round { font-size: .72rem; color: #b9b3ee; letter-spacing: .08em; text-transform: uppercase; font-weight: 800; }
+.gems-face-sm { width: 30px; height: 30px; flex: none; border-radius: 50%; box-shadow: 0 0 0 2px var(--pc, #fff), 0 2px 6px rgba(0,0,0,.4); }
+.gems-face-sm .portrait { width: 100%; height: 100%; display: block; border-radius: 50%; }
 .gems-flag { font: 800 .68rem/1 var(--font-display); letter-spacing: .08em; text-transform: uppercase; padding: 5px 9px; border-radius: 20px;
-  background: linear-gradient(#ffe48a, #c98a1e); color: #3a2405; box-shadow: 0 0 14px rgba(255,200,80,.6); animation: gems-flag 1.6s ease-in-out infinite; }
+  background: linear-gradient(135deg, #ffd36b, #ff9f5a); color: #3b1d00; box-shadow: 0 0 14px rgba(255,190,90,.5); animation: gems-flag 2s ease-in-out infinite; }
 @keyframes gems-flag { 50% { box-shadow: 0 0 22px rgba(255,210,90,.95); } }
 .gems-over .winner-banner { padding: 4px; }
 .gems-standings { display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: center; font-size: .9rem; }
-.gems-standings span { background: rgba(0,0,0,.28); padding: 4px 10px; border-radius: 20px; }
+.gems-standings span { background: rgba(10,10,40,.45); border: 1px solid rgba(255,255,255,.1); padding: 4px 12px; border-radius: 20px; }
 .gems-standings em { font-style: normal; font-family: var(--font-display); font-weight: 800; color: var(--gold); }
 .gems-standings small { color: var(--muted); }
-.gems-standings .gems-win { box-shadow: 0 0 0 1.5px var(--gold), 0 0 12px rgba(242,193,78,.5); }
+.gems-standings .gems-win { box-shadow: 0 0 0 1.5px var(--gold), 0 0 14px rgba(255,207,92,.45); }
+.gems-over .winner-banner .ic { width: 1em; height: 1em; vertical-align: -.12em; }
 
 /* nobles */
 .gems-nobles { display: flex; justify-content: center; gap: 14px; padding: 4px 4px 0; }
@@ -1381,16 +1440,21 @@ ${COLOR_VARS}
   background: linear-gradient(160deg, var(--p1), var(--p2) 50%, var(--p3)); box-shadow: 0 1px 2px rgba(0,0,0,.75), inset 0 0 0 1px rgba(255,255,255,.4); }
 .gems-nb svg { position: absolute; width: 80%; height: 80%; color: var(--pw); }
 .gems-nb b { position: relative; font: 800 14cqw/1 var(--font-display); color: var(--pi); text-shadow: 0 0 2px var(--ps), 0 1px 1px var(--ps); }
-.gems-nname { font: 600 .66rem/1.15 var(--font-display); color: #f3e6c4; text-align: center; text-shadow: 0 1px 2px #000; max-width: 100%; }
+.gems-nname { font: 600 .7rem/1.15 var(--font-display); color: #e6e1ff; text-align: center; text-shadow: 0 1px 2px #000; max-width: 100%; }
 .gems-dim { filter: grayscale(.6) brightness(.7); }
-.gems-choose { box-shadow: 0 0 0 2px #fff3b0, 0 0 0 4px #e9b949, 0 0 18px 4px rgba(255,220,120,.7); }
+.gems-choose { box-shadow: 0 0 0 2px #fff3b0, 0 0 0 4px #e9b949, 0 0 18px 4px rgba(255,220,120,.6); animation: gems-lure 2.4s ease-in-out infinite; }
+@keyframes gems-lure { 50% { box-shadow: 0 0 0 2px #fff3b0, 0 0 0 4px #e9b949, 0 0 26px 7px rgba(255,220,120,.35); } }
 
 /* tiers & cards */
 .gems-tiers { display: grid; gap: 10px; align-content: start; }
 .gems-tier { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; --tg: 10px; --dfix: 0px; }
 .gems-card, .gems-slot { aspect-ratio: 5 / 7; }
 .gems-card { position: relative; container-type: inline-size; border-radius: 8% / 5.7%; perspective: 800px; cursor: pointer; -webkit-user-select: none; user-select: none; transition: transform .2s var(--ease); }
-@media (hover: hover) { .gems-tier .gems-card:hover, .gems-res:hover .gems-card { transform: translateY(-3px); } }
+@media (hover: hover) { .gems-tier .gems-card:hover, .gems-res:hover .gems-card { transform: translateY(-4px); } }
+.gems-tier .gems-card:active, .gems-res .gems-card:active { transform: translateY(-2px) scale(.97); }
+/* The card you are looking at lifts off the table. */
+.gems-card.gems-picked { transform: translateY(-8px) scale(1.04); z-index: 6; }
+.gems-card.gems-picked .gems-face { box-shadow: 0 0 0 2px #fff, 0 14px 26px rgba(0,0,0,.55); }
 .gems-flipper { position: absolute; inset: 0; border-radius: inherit; transform-style: preserve-3d; }
 .gems-face { position: absolute; inset: 0; border-radius: inherit; overflow: hidden; -webkit-backface-visibility: hidden; backface-visibility: hidden; background: #161210;
   box-shadow: 0 1px 1px rgba(0,0,0,.7), 0 5px 12px rgba(0,0,0,.45); }
@@ -1417,20 +1481,23 @@ ${COLOR_VARS}
 .gems-pipx { width: 28px; height: 28px; flex: none; box-shadow: 0 1px 3px rgba(0,0,0,.7), inset 0 0 0 1.5px rgba(255,255,255,.3); }
 .gems-pipx b { font-size: 15px; }
 .gems-slot { border-radius: 8% / 5.7%; border: 2px dashed rgba(255,255,255,.14); background: rgba(0,0,0,.14); }
-.gems-can .gems-face { box-shadow: 0 0 0 2px #ffe27a, 0 0 16px 3px rgba(255,214,90,.6), 0 5px 12px rgba(0,0,0,.45); }
+/* Cards you can afford: a warm rim with a slow breath (opacity only, cheap to animate). */
+.gems-can .gems-face { box-shadow: 0 0 0 2px #ffe27a, 0 5px 12px rgba(0,0,0,.45); }
+.gems-can::after { content: ''; position: absolute; inset: -2px; border-radius: inherit; pointer-events: none; z-index: 6;
+  box-shadow: 0 0 16px 4px rgba(255,214,90,.55); animation: gems-breathe 2.6s ease-in-out infinite; }
+@keyframes gems-breathe { 50% { opacity: .3; } }
 
 /* deck */
 .gems-deck { position: relative; border-radius: 8% / 5.7%; cursor: pointer; background: #111; }
 .gems-deck > svg { border-radius: inherit; }
 .gems-deck::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; box-shadow: inset 0 0 0 1px rgba(0,0,0,.7), inset 0 0 0 3px var(--fr2), inset 1px 1px 0 3px rgba(255,255,255,.18); }
-.gems-dcount { position: absolute; left: 50%; bottom: 7%; transform: translateX(-50%); font: 800 .8rem/1 var(--font-display); color: #fff3c8; white-space: nowrap;
-  background: rgba(0,0,0,.65); border: 1px solid var(--fr1); border-radius: 20px; padding: 3px 7px; box-shadow: 0 2px 4px rgba(0,0,0,.5); }
+.gems-dcount { position: absolute; left: 50%; bottom: 7%; transform: translateX(-50%); font: 700 .8rem/1 var(--font-display); color: #fff3c8; white-space: nowrap;
+  background: rgba(12,12,40,.8); border: 1px solid var(--fr1); border-radius: 20px; padding: 3px 7px; box-shadow: 0 2px 4px rgba(0,0,0,.5); }
 .gems-dempty { background: rgba(0,0,0,.14); border: 2px dashed rgba(255,255,255,.14); }
 .gems-dempty::after { display: none; }
 
 /* deal from the deck with a 3D flip */
 .gems-deal { z-index: 5; animation: gems-deal .6s cubic-bezier(.25,.8,.25,1) var(--dd, .4s) both; }
-.gems-deal.pulse-glow { animation: gems-deal .6s cubic-bezier(.25,.8,.25,1) var(--dd, .4s) both, pulseglow 1.4s ease-in-out calc(var(--dd, .4s) + .9s) infinite; }
 .gems-deal > .gems-flipper { animation: gems-flip .55s ease-in-out calc(var(--dd, .4s) + .32s) both; }
 @keyframes gems-deal { from { transform: translateX(calc(-1 * ((var(--slot) + 1) * (100% + var(--tg)) + var(--dfix)))); } }
 @keyframes gems-flip { from { transform: rotateY(180deg); } 50% { transform: rotateY(90deg) scale(1.1); } to { transform: rotateY(0deg); } }
@@ -1438,8 +1505,8 @@ ${COLOR_VARS}
 @keyframes gems-arrive { from { opacity: 0; transform: scale(.6); } }
 
 /* bank */
-.gems-bank { display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 4px; --chip: 50px; padding: 8px 2px; border-radius: 16px;
-  background: radial-gradient(ellipse at 50% 30%, rgba(255,255,255,.07), rgba(0,0,0,.28)); box-shadow: inset 0 2px 10px rgba(0,0,0,.5), 0 1px 0 rgba(255,255,255,.07); }
+.gems-bank { display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 4px; --chip: 50px; padding: 8px 2px; border-radius: 18px;
+  background: radial-gradient(ellipse at 50% 30%, rgba(255,255,255,.07), rgba(8,6,30,.4)); border: 1px solid rgba(255,255,255,.07); box-shadow: inset 0 2px 10px rgba(0,0,0,.45); }
 .gems-pile { position: relative; cursor: pointer; padding: 3px 8px 2px; border-radius: 14px; touch-action: manipulation; -webkit-tap-highlight-color: transparent; transition: background .2s; }
 .gems-stack { position: relative; width: var(--chip); height: calc(var(--chip) + 15px); }
 .gems-layer, .gems-anchor, .gems-lift, .gems-ghostchip { position: absolute; left: 0; width: var(--chip); height: var(--chip); }
@@ -1454,7 +1521,7 @@ ${COLOR_VARS}
 @keyframes gems-pop { 0% { transform: translateY(14px) scale(.9); } 60% { transform: translateY(-8px) scale(1.08); } 100% { transform: none; } }
 .gems-ghostchip { bottom: 0; border-radius: 50%; border: 2px dashed rgba(255,255,255,.22); }
 .gems-count { position: absolute; right: 1px; bottom: 0; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 11px; z-index: 3;
-  font: 800 12px/20px var(--font-display); text-align: center; color: #ffeebf; background: radial-gradient(circle at 40% 30%, #4a3018, #1a0f07); border: 1px solid #c8953a; box-shadow: 0 2px 4px rgba(0,0,0,.6); }
+  font: 700 12px/20px var(--font-display); text-align: center; color: #fff3cf; background: #1a1846; border: 1px solid rgba(255,207,92,.75); box-shadow: 0 2px 4px rgba(0,0,0,.6); }
 .gems-pick { background: radial-gradient(ellipse at 50% 60%, rgba(255,240,180,.1), transparent 70%); }
 @media (hover: hover) { .gems-pick:hover { background: radial-gradient(ellipse at 50% 60%, rgba(255,240,180,.22), transparent 70%); } }
 .gems-pick:active .gems-stack { transform: scale(.95); }
@@ -1462,9 +1529,11 @@ ${COLOR_VARS}
 .gems-pempty .gems-count { opacity: .6; }
 
 /* tray */
-.gems-tray { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 10px; min-height: 54px; padding: 8px 12px; border-radius: 14px;
-  background: rgba(0,0,0,.26); box-shadow: inset 0 2px 8px rgba(0,0,0,.45), 0 1px 0 rgba(255,255,255,.06); color: #eaf4ee; font-size: .9rem; text-align: center; }
-.gems-tray-idle { color: #cfe3d6; font-style: italic; font-size: .85rem; }
+.gems-tray { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 10px; min-height: 58px; padding: 8px 12px; border-radius: 16px;
+  background: rgba(8,6,30,.45); border: 1px solid rgba(255,255,255,.08); color: #eeeaff; font-size: .9rem; text-align: center; }
+.gems-tray-sel { border-color: rgba(255,207,92,.45); box-shadow: 0 0 22px rgba(255,200,80,.15); animation: gems-trayin .25s var(--spring); }
+@keyframes gems-trayin { from { transform: translateY(6px); opacity: .5; } }
+.gems-tray-idle { color: #b9b3ee; font-size: .86rem; }
 .gems-tray-disc, .gems-tray > .gems-tline { flex-direction: column; }
 .gems-tray-disc { display: flex; }
 .gems-tline { width: 100%; }
@@ -1473,29 +1542,31 @@ ${COLOR_VARS}
 .gems-tchips { display: flex; gap: 2px; }
 .gems-tchips .gems-chip { width: 34px; height: 34px; filter: drop-shadow(0 0 5px rgba(255,236,150,.8)); animation: gems-bob 1.5s ease-in-out infinite; }
 .gems-tname { font-weight: 800; }
-.gems-ttip { font-size: .78rem; color: #cfe3d6; font-style: italic; }
+.gems-ttip { font-size: .78rem; color: #b9b3ee; }
 .gems-warn { color: #ffd2a0; font-weight: 800; font-size: .82rem; }
 .gems-tbtns { display: flex; gap: 8px; }
 .gems-tok { position: relative; width: 44px; height: 44px; cursor: pointer; }
 .gems-tok .gems-chip { filter: drop-shadow(0 2px 2px rgba(0,0,0,.5)); }
-.gems-tok b { position: absolute; right: -5px; bottom: -3px; min-width: 19px; height: 19px; border-radius: 10px; background: #1a0f07; border: 1px solid #c8953a; font: 800 11px/17px var(--font-display); color: #ffeebf; }
+.gems-tok b { position: absolute; right: -5px; bottom: -3px; min-width: 19px; height: 19px; border-radius: 10px; background: #1a1846; border: 1px solid rgba(255,207,92,.75); font: 700 11px/17px var(--font-display); color: #fff3cf; }
 .gems-tok.gems-back .gems-chip { filter: drop-shadow(0 0 6px rgba(255,140,110,.9)); }
 .gems-nbtn { font-family: var(--font-display); }
 
 /* players */
-.gems-pp { padding: 12px 13px 11px; transition: box-shadow .3s; }
-.gems-pp.gems-turn { box-shadow: 0 0 0 2px var(--gold), 0 0 22px rgba(242,193,78,.5), inset 0 1px 0 rgba(255,220,170,.18), inset 0 0 30px rgba(0,0,0,.35); }
+.gems-pp { padding: 14px 13px 11px; transition: box-shadow .3s; overflow: hidden; }
+.gems-pp::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--pc); opacity: .85; }
+.gems-pp.gems-turn { box-shadow: 0 0 0 2px var(--gold), 0 0 24px rgba(255,207,92,.35), var(--shadow); }
+.gems-pp.gems-scored { animation: gems-scored 1.2s ease-out .8s; }
+@keyframes gems-scored { 20% { box-shadow: 0 0 0 2px #fff3b0, 0 0 34px 6px rgba(255,214,90,.55); } }
 .gems-pphead, .gems-ppmat, .gems-ppres { position: relative; z-index: 1; }
-.gems-ppmat { margin-top: 7px; padding: 3px 6px 7px; border-radius: 11px; background: linear-gradient(180deg, rgba(0,0,0,.3), rgba(0,0,0,.18));
-  box-shadow: inset 0 2px 7px rgba(0,0,0,.55), 0 1px 0 rgba(255,220,170,.1); }
+.gems-ppmat { margin-top: 8px; padding: 3px 6px 7px; border-radius: 12px; background: rgba(6,10,30,.4); border: 1px solid rgba(255,255,255,.05); }
 .gems-pphead { display: flex; align-items: center; gap: 7px; min-height: 28px; }
 .gems-ppname { font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.gems-pptok { margin-left: auto; font-size: .74rem; color: var(--muted); white-space: nowrap; background: rgba(0,0,0,.25); padding: 2px 7px; border-radius: 10px; }
+.gems-pptok { margin-left: auto; font-size: .74rem; font-weight: 800; color: var(--muted); white-space: nowrap; background: rgba(255,255,255,.06); padding: 2px 8px; border-radius: 10px; }
 .gems-pptok.gems-over10 { color: #2c0703; background: var(--bad); font-weight: 800; }
-.gems-ppnob { display: inline-flex; align-items: center; gap: 1px; font: 800 .9rem/1 var(--font-display); color: #f3dca0; }
+.gems-ppnob { display: inline-flex; align-items: center; gap: 1px; font: 700 .9rem/1 var(--font-display); color: #ffe4a3; }
 .gems-ppnob svg { width: 20px; height: 20px; }
 .gems-ppnob.gems-zero { opacity: .35; filter: grayscale(.6); }
-.gems-ppscore { font: 800 1.6rem/1 var(--font-display); color: var(--gold); text-shadow: 0 2px 0 #2a1706, 0 0 12px rgba(242,193,78,.35); min-width: 1.7em; text-align: right; white-space: nowrap; }
+.gems-ppscore { font: 700 1.6rem/1 var(--font-display); color: var(--gold); text-shadow: 0 0 14px rgba(255,207,92,.35); min-width: 1.7em; text-align: right; white-space: nowrap; }
 .gems-ppscore small { font-size: .55em; vertical-align: super; margin-left: 1px; }
 .gems-pprow { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); justify-items: center; align-items: end; gap: 2px; }
 .gems-ppbonus { margin-top: 2px; min-height: 40px; }
@@ -1506,19 +1577,22 @@ ${COLOR_VARS}
 .gems-bst.gems-zero { background: transparent; border: 1.5px dashed rgba(255,255,255,.25); opacity: .5; filter: none; }
 .gems-bst.gems-zero svg { color: rgba(255,255,255,.25); }
 .gems-bcount { display: flex; flex-direction: column; align-items: center; line-height: 1; }
-.gems-bcount b { font: 800 14px/1 var(--font-display); color: #f3dca0; }
+.gems-bcount b { font: 700 14px/1 var(--font-display); color: #ffe4a3; }
 .gems-bcount small { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
 .gems-pptoks { margin-top: 5px; }
 .gems-ptok { position: relative; width: 34px; height: 34px; }
 .gems-ptok .gems-chip { filter: drop-shadow(0 2px 2px rgba(0,0,0,.55)); }
-.gems-ptok b { position: absolute; right: -7px; bottom: -3px; min-width: 18px; height: 18px; border-radius: 9px; background: #1a0f07; border: 1px solid #c8953a;
-  font: 800 11px/16px var(--font-display); color: #ffeebf; text-align: center; }
+.gems-ptok b { position: absolute; right: -7px; bottom: -3px; min-width: 18px; height: 18px; border-radius: 9px; background: #1a1846; border: 1px solid rgba(255,207,92,.75);
+  font: 700 11px/16px var(--font-display); color: #fff3cf; text-align: center; }
 .gems-zero { opacity: .32; filter: grayscale(.7); }
 .gems-ppres { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
 .gems-reslbl { font: 800 .62rem/1.1 var(--font-display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); writing-mode: vertical-rl; transform: rotate(180deg); }
 .gems-res { width: 56px; cursor: pointer; }
-.gems-ledger h4 { margin: 0 0 6px; font: 800 .8rem/1 var(--font-display); letter-spacing: .14em; text-transform: uppercase; color: #6b4a22; }
-.gems-ledger .log { max-height: 220px; }
+.gems-ledger > summary .note { min-width: 0; max-width: 60%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gems-ledger[open] > summary .note { visibility: hidden; }
+.gems-ledger .log { max-height: 220px; color: var(--muted); }
+.gems-ledger .log div { border-bottom-color: var(--line); }
+.gems-ledger .log div:first-child { color: var(--text); }
 
 /* modal */
 .gems-mbg.gems-still, .gems-mbg.gems-still .modal { animation: none; }
@@ -1527,7 +1601,7 @@ ${COLOR_VARS}
 .gems-mart .gems-card, .gems-mart .gems-noble, .gems-mart .gems-slot { width: 100%; }
 .gems-mart .gems-card { cursor: default; }
 .gems-minfo { flex: 1; min-width: 0; position: relative; z-index: 1; }
-.gems-mtitle { font: 800 1.2rem/1.2 var(--font-display); color: var(--gold); padding-right: 36px; }
+.gems-mtitle { font: 600 1.25rem/1.2 var(--font-display); color: var(--text); padding-right: 40px; }
 .gems-mtitle small { font-size: .7rem; color: var(--muted); letter-spacing: .08em; }
 .gems-msub { color: var(--muted); font-size: .86rem; margin: 3px 0 8px; }
 .gems-msub b { color: var(--text); }
@@ -1538,13 +1612,13 @@ ${COLOR_VARS}
 .gems-ok { color: var(--good); font-weight: 800; margin-left: auto; }
 .gems-no { color: var(--bad); font-weight: 800; margin-left: auto; }
 .gems-gold { color: var(--gold); font-weight: 800; margin-left: auto; }
-.gems-mpay { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding: 6px 10px; border-radius: 10px; background: rgba(0,0,0,.25); font-size: .82rem; color: var(--muted); }
+.gems-mpay { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding: 7px 12px; border-radius: 12px; background: rgba(255,255,255,.05); border: 1px solid var(--line); font-size: .82rem; color: var(--muted); }
 .gems-mpc { position: relative; width: 28px; height: 28px; display: inline-block; }
-.gems-mpc b { position: absolute; right: -6px; bottom: -3px; min-width: 16px; height: 16px; border-radius: 8px; background: #1a0f07; border: 1px solid #c8953a; font: 800 10px/14px var(--font-display); color: #ffeebf; text-align: center; }
+.gems-mpc b { position: absolute; right: -6px; bottom: -3px; min-width: 16px; height: 16px; border-radius: 8px; background: #1a1846; border: 1px solid rgba(255,207,92,.75); font: 700 10px/14px var(--font-display); color: #fff3cf; text-align: center; }
 .gems-mbtns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .gems-mbtns button { flex: 1; min-width: 110px; }
-.gems-mreason { font-size: .8rem; color: #ffc9b8; margin-top: 7px; }
-.gems-mclose { position: absolute; top: 10px; right: 10px; min-width: 36px; z-index: 2; }
+.gems-mreason { font-size: .8rem; color: #ffb3c0; margin-top: 7px; }
+.gems-mclose { position: absolute; top: 10px; right: 10px; z-index: 2; }
 @media (max-width: 520px) {
   .gems-modal { flex-direction: column; align-items: stretch; gap: 10px; }
   .gems-mart { flex: none; width: 128px; margin: 0 auto; }

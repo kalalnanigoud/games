@@ -17,6 +17,7 @@
 import { esc, log, addFx, uid } from '../js/util.js';
 import { injectCSS } from '../js/fx.js';
 import { sound } from '../js/sound.js';
+import { icon } from '../js/icons.js';
 
 const browser = typeof document !== 'undefined';
 const own = (o, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
@@ -232,7 +233,7 @@ export function escapeRoom(spec) {
         <div class="esc-goal"><small>${v.over ? 'Complete' : 'Current goal'}</small><b>${esc(v.over ? spec.doneLabel : ob?.label || '')}</b></div>
         <div class="esc-stat"><small>Time</small><b class="esc-clock" data-start="${v.started}" data-end="${v.endedAt || ''}">${clock((v.endedAt || Date.now()) - v.started)}</b></div>
         <div class="esc-stat"><small>Hints</small><b>${v.hintsUsed}</b></div>
-        <button class="small" data-open="story:intro">📜 Story</button>
+        <button class="small" data-open="story:intro">${icon('book')}Story</button>
       </div>
       <div class="game-layout">
         <div class="esc-main">
@@ -255,7 +256,7 @@ export function escapeRoom(spec) {
           ${spec.fragments ? `<div class="panel"><h3 class="gold">${esc(spec.fragLabel)}</h3>
             ${myFrags.length ? myFrags.map((f) => `<button class="esc-note ${f.shared ? '' : 'mine'}" data-open="frag:${f.id}"><b>${esc(f.title)}</b><span>${f.shared ? 'Shared with the team' : 'Only you can read this. Tap to open.'}</span></button>`).join('') : '<p class="muted small">Your terminal recovered nothing. Ask your teammates what they see.</p>'}
             ${theirs.map((f) => `<div class="esc-other">${pawn(v, v.players.find((p) => p.id === f.owner))} <span><b>${esc(v.players.find((p) => p.id === f.owner)?.name)}</b> holds “${esc(f.title)}”</span></div>`).join('')}</div>` : ''}
-          <div class="panel"><div class="row"><h3 class="gold grow" style="margin:0">Hints</h3>${ob && !v.over ? `<button class="small ${stuck ? 'pulse-glow' : ''}" data-hint ${(v.hintTier[ob.id] || 0) >= ob.hints.length ? 'disabled' : ''}>💡 Ask for a hint</button>` : ''}</div>
+          <div class="panel"><div class="row"><h3 class="gold grow" style="margin:0">Hints</h3>${ob && !v.over ? `<button class="small ${stuck ? 'pulse-glow' : ''}" data-hint ${(v.hintTier[ob.id] || 0) >= ob.hints.length ? 'disabled' : ''}>${icon('bulb')}Ask for a hint</button>` : ''}</div>
             ${hints.length ? `<ol class="esc-hints">${hints.map((h) => `<li>${h.text}</li>`).join('')}</ol>` : `<p class="muted small" style="margin:8px 0 0">${stuck ? 'Feeling stuck? Hints start gentle and get more specific.' : 'Stuck? Hints start gentle and get more specific.'}</p>`}</div>
           <div class="parchment esc-journal"><h3>Team journal</h3>
             ${journal.length || sharedFrags.length ? `${journal.map((o) => `<button class="esc-entry" data-open="obj:${o.id}"><b>${esc(o.name)}</b> <i>${esc(rooms[o.room].name)}</i><span>${o.clue(v)}</span></button>`).join('')}
@@ -332,7 +333,7 @@ export function escapeRoom(spec) {
         if (L && lockReady(v, L)) {
           const vals = (UI.dials[o.id] ||= L.slots.map(() => 0));
           act += `<div class="esc-dials" data-a="esc-lock-${o.id}">${L.slots.map((opts, i) => `<div class="esc-dial">${L.labels ? `<span>${L.labels[i]}</span>` : ''}
-            <button class="small" data-dial="${o.id}:${i}:1" aria-label="Next value">▲</button><div class="esc-val">${opts[vals[i]]}</div><button class="small" data-dial="${o.id}:${i}:-1" aria-label="Previous value">▼</button></div>`).join('')}</div>
+            <button class="small" data-dial="${o.id}:${i}:1" aria-label="Next value">${icon('up')}</button><div class="esc-val">${opts[vals[i]]}</div><button class="small" data-dial="${o.id}:${i}:-1" aria-label="Previous value">${icon('chevron')}</button></div>`).join('')}</div>
             <button class="primary" data-try="${o.id}" style="width:100%">${esc(L.verb || 'Try it')}</button>`;
         } else if (L && !v.flags[L.flag] && L.notYet) act += `<p class="esc-note-line">${esc(L.notYet)}</p>`;
         if (v.inv.length) act += `<div class="esc-use"><small>Use an item here</small><div class="row">${v.inv.map((it) => `<button class="small" data-use="${o.id}:${it}"><svg viewBox="0 0 40 40" aria-hidden="true">${spec.items[it].icon}</svg>${esc(spec.items[it].name)}</button>`).join('')}</div></div>`;
@@ -343,7 +344,7 @@ export function escapeRoom(spec) {
       body = `${info.art ? `<div class="esc-closeart">${info.art}</div>` : ''}<div class="esc-text">${info.text}</div>${act}`;
     } else { UI.open = null; return ''; }
     return `<div class="modal-bg esc-modal"><div class="modal panel esc-close" role="dialog" aria-label="${esc(title)}">
-      <button class="small icon esc-x" data-close aria-label="Close">✕</button><h3 class="gold">${esc(title)}</h3>${body}</div></div>`;
+      <button class="icon-btn esc-x" data-close aria-label="Close">${icon('close')}</button><h3 class="gold">${esc(title)}</h3>${body}</div></div>`;
   }
 
   function ending(v) {
@@ -374,7 +375,7 @@ const STYLE = `
 .esc-tabs{display:flex;gap:6px;margin-bottom:8px}
 .esc-tab{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 6px;font-size:.78rem;line-height:1.15}
 .esc-tab>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
-.esc-tab.here{color:#2a1804;text-shadow:none;background:linear-gradient(180deg,#fbe39c,#e2b14d 60%,#b07b1c);border-color:#6b440c}
+.esc-tab.here{color:#fff;text-shadow:none;background:linear-gradient(135deg,var(--brand),var(--brand-2));border-color:transparent;box-shadow:var(--glow-brand)}
 .esc-dots{display:flex;gap:3px;min-height:16px}
 .esc-pawn{width:16px;height:16px;border-radius:50%;display:inline-grid;place-items:center;font-size:8px;color:#1b1206;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.6);flex:none;text-shadow:none}
 .esc-scene{position:relative;border-radius:16px;overflow:hidden;border:3px solid #1a1009;background:var(--deep);box-shadow:0 16px 34px rgba(0,0,0,.6),0 0 0 1px rgba(255,220,160,.18)}
@@ -392,7 +393,7 @@ const STYLE = `
 .esc-objs button.fresh::after{content:' ✦';color:var(--accent)}
 .esc-invpanel h3{margin:0 0 8px}
 .esc-inv{display:flex;flex-wrap:wrap;gap:8px}
-.esc-item{width:76px;min-height:76px;padding:6px 4px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:.66rem;line-height:1.1;background:radial-gradient(circle at 50% 35%,#3c2a1a,#1d130b);border-radius:12px}
+.esc-item{width:76px;min-height:76px;padding:6px 4px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:.66rem;line-height:1.1;background:radial-gradient(circle at 50% 35%,#2b3b78,#121a3d);border:1px solid var(--line);border-radius:14px}
 .esc-item svg{width:40px;height:40px;filter:drop-shadow(0 2px 2px rgba(0,0,0,.6))}
 .esc-flyitem{width:100%;height:100%;display:grid;place-items:center;background:radial-gradient(circle,#4b3520,#1d130b);border-radius:12px;border:2px solid var(--accent)}
 .esc-flyitem svg{width:80%;height:80%}
@@ -431,7 +432,7 @@ const STYLE = `
 .esc-use svg{width:22px;height:22px}
 .esc-note-line{padding:10px 12px;border-radius:10px;background:rgba(0,0,0,.3);border-left:3px solid var(--accent);font-size:.9rem}
 .esc-close>button+button{margin-top:8px}
-.esc-itembig{display:grid;place-items:center;padding:16px;background:radial-gradient(circle,#4b3520,#140d07);border-radius:14px}
+.esc-itembig{display:grid;place-items:center;padding:16px;background:radial-gradient(circle,#2f4084,#0c1330);border-radius:16px}
 .esc-itembig svg{width:120px;height:120px;filter:drop-shadow(0 6px 8px rgba(0,0,0,.7))}
 .esc-ending{display:grid;grid-template-columns:minmax(0,260px) 1fr;gap:18px;align-items:center;padding:18px;margin-bottom:14px;border-radius:18px;border:2px solid var(--accent);background:linear-gradient(135deg,rgba(0,0,0,.55),rgba(0,0,0,.25));box-shadow:0 14px 30px rgba(0,0,0,.5)}
 .esc-ending .winner-banner{text-align:left;padding:0 0 6px}
