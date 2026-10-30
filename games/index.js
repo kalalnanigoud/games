@@ -19,7 +19,8 @@ import temple from './temple.js';
 import ember from './ember.js';
 import keeper from './keeper.js';
 import signal from './signal.js';
+import chess from './chess.js';
 
-export const GAMES = [hexisle, gems, mosaic, bluff, temple, ember, keeper, signal];
+export const GAMES = [hexisle, gems, mosaic, bluff, chess, temple, ember, keeper, signal];
 
 export const getGame = (id) => GAMES.find((g) => g.id === id) || GAMES[0];
