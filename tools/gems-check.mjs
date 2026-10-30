@@ -57,7 +57,8 @@ throws(() => G.act(clone(s), 'P0', { type: 'pass' }), 'pass with legal moves');
   throws(() => G.act(clone(t), 'P0', { type: 'discard', gems: { white: 2 } }), 'wrong discard count');
   throws(() => G.act(clone(t), 'P0', { type: 'take', gems: ['red'] }), 'take during discard');
   G.act(t, 'P0', { type: 'discard', gems: { white: 1 } });
-  ok(t.phase === 'play' && t.cur === 1 && t.bank.white === s.bank.white - 1 + 1 - 0 + 0 || true, 'discard done');
+  ok(t.phase === 'play', 'discard returns to play phase');
+  ok(t.bank.white === s.bank.white && p.gems.white === 3, 'discard returns one white gem to bank');
   ok(t.cur === 1, 'turn passes after discard');
 }
 {

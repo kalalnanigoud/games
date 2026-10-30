@@ -6,7 +6,7 @@
 
 import CONFIG from './config.js';
 import { GAMES, getGame } from '../games/index.js';
-import { esc, toast, randomCode, uid } from './util.js';
+import { esc, toast, randomCode, uid, reconnectSecret } from './util.js';
 import { snapshot, flip, playFx, changed, confetti, wake, settleLoops } from './fx.js';
 import { sound, isMuted, setMuted } from './sound.js';
 
@@ -20,6 +20,8 @@ const S = {
   name: sessionStorage.getItem('gn-name') || localStorage.getItem('gn-name') || '',
   // Per-tab identity, so two tabs on one computer count as two players.
   token: sessionStorage.getItem('gn-token') || uid(),
+  secret: sessionStorage.getItem('gn-secret') || reconnectSecret(),
+  credentials: [], // host-only [public player ID, private reconnect secret] pairs
   role: null, // host | client | local
   code: null,
   players: [], // [{id, name, connected}]
@@ -36,6 +38,7 @@ function defaultTimer(g) {
   return g?.onTimeout ? g.defaultTimer || 30 : 0;
 }
 sessionStorage.setItem('gn-token', S.token);
+sessionStorage.setItem('gn-secret', S.secret);
 
 function adoptToken(token) {
   if (!token) return;
@@ -126,8 +129,9 @@ function maybeAutoHelp() {
 function saveSession() {
   if (!S.role) return;
   const data = S.role === 'client'
-    ? { role: 'client', code: S.code, token: S.token }
-    : { role: S.role, code: S.code, token: S.token, gameId: S.gameId, players: S.players, started: S.started, game: S.game, viewAs: S.viewAs, timerSec: S.timerSec };
+    ? { role: 'client', code: S.code, token: S.token, secret: S.secret }
+    : { role: S.role, code: S.code, token: S.token, secret: S.secret, credentials: S.credentials, gameId: S.gameId, players: S.players, started: S.started, game: S.game, viewAs: S.viewAs, timerSec: S.timerSec };
+  data.version = 2;
   const json = JSON.stringify(data);
   sessionStorage.setItem('gn-session', json);
   localStorage.setItem('gn-session', json);
@@ -135,6 +139,8 @@ function saveSession() {
 const parse = (s) => {
   try {
     const v = JSON.parse(s);
+    // Old online sessions used public IDs as credentials and cannot be resumed safely.
+    if (v && v.role !== 'local' && v.version !== 2) return null;
     // Ignore sessions for games that no longer exist.
     if (v && v.role !== 'client' && !GAMES.some((g) => g.id === v.gameId)) return null;
     return v;
@@ -145,25 +151,34 @@ const loadSession = () => loadTabSession() || parse(localStorage.getItem('gn-ses
 const clearSession = () => { sessionStorage.removeItem('gn-session'); localStorage.removeItem('gn-session'); };
 
 function resume(session) {
+  if (session.role !== 'local' && !requireMultiplayer()) return;
   adoptToken(session.token);
+  if (session.secret) {
+    S.secret = session.secret;
+    sessionStorage.setItem('gn-secret', S.secret);
+  }
   if (session.role === 'client') joinRoom(session.code);
   else if (session.role === 'host') hostRoom(session.gameId, session);
   else localRoom(session.gameId, session);
 }
 
 function cleanup() {
+  clearTimeout(botTimer);
   clearTimeout(retryTimer);
   clearTimeout(turnTimer);
   turnTimer = null;
   timedGame = null;
   S.timer = null;
   retries = 0;
-  for (const c of conns.values()) try { c.close(); } catch {}
+  const previous = [...conns.values()];
   conns.clear();
-  if (hostConn) try { hostConn.close(); } catch {}
+  for (const c of previous) try { c.close(); } catch {}
+  const oldHost = hostConn;
   hostConn = null;
-  if (peer) try { peer.destroy(); } catch {}
+  if (oldHost) try { oldHost.close(); } catch {}
+  const oldPeer = peer;
   peer = null;
+  if (oldPeer) try { oldPeer.destroy(); } catch {}
 }
 
 function leave() {
@@ -178,12 +193,14 @@ function leave() {
 /* ---------------- host ---------------- */
 
 function hostRoom(gameId, resume = null) {
+  if (!requireMultiplayer()) return;
   cleanup();
   Object.assign(S, {
     role: 'host',
+    credentials: resume?.credentials || [],
     code: resume?.code || randomCode(),
     gameId: resume?.gameId || gameId,
-    players: resume?.players?.map((p) => ({ ...p, connected: p.id === S.token })) || [{ id: S.token, name: S.name, connected: true }],
+    players: resume?.players?.map((p) => ({ ...p, connected: p.id === S.token || !!p.bot })) || [{ id: S.token, name: S.name, connected: true }],
     started: resume?.started || false,
     timerSec: resume?.timerSec ?? defaultTimer(getGame(resume?.gameId || gameId)),
     timer: null,
@@ -194,6 +211,7 @@ function hostRoom(gameId, resume = null) {
   const me = S.players.find((p) => p.id === S.token);
   if (me) me.name = S.name;
   refreshLocalView();
+  armTimer();
   render();
   scheduleBots();
   openHostPeer(!!resume);
@@ -223,7 +241,7 @@ function openHostPeer(isResume) {
   });
   p.on('connection', (conn) => {
     if (p !== peer) return conn.close();
-    conn.on('data', (msg) => onHostMessage(conn, msg));
+    conn.on('data', (msg) => { if (p === peer && S.role === 'host') onHostMessage(conn, msg); });
     conn.on('close', () => onConnClosed(conn));
     conn.on('error', () => onConnClosed(conn));
   });
@@ -256,23 +274,30 @@ function openHostPeer(isResume) {
 function onHostMessage(conn, msg) {
   if (!msg || typeof msg !== 'object') return;
   if (msg.t === 'hello') {
+    if (typeof msg.token !== 'string' || !/^[a-zA-Z0-9]{1,80}$/.test(msg.token) ||
+        typeof msg.secret !== 'string' || !/^[a-f0-9]{64}$/.test(msg.secret)) return reject(conn, 'Invalid player credentials.');
+    if (conn.pid && conn.pid !== msg.token) return reject(conn, 'This connection already belongs to another player.');
     const name = String(msg.name || 'Player').slice(0, 20);
     let p = S.players.find((x) => x.id === msg.token);
+    if (p && (p.id === S.token || p.bot || !S.credentials.some(([id, secret]) => id === p.id && secret === msg.secret))) {
+      return reject(conn, 'Cannot reconnect: invalid player credentials.');
+    }
     if (!p) {
       if (S.started) return reject(conn, 'That game has already started.');
       if (S.players.length >= MAX_ROOM) return reject(conn, 'Room is full.');
       p = { id: String(msg.token), name, connected: true };
       S.players.push(p);
+      S.credentials.push([p.id, msg.secret]);
     }
     p.name = name;
     p.connected = true;
     const old = conns.get(p.id);
-    if (old && old !== conn) try { old.close(); } catch {}
     conn.pid = p.id;
     conns.set(p.id, conn);
+    if (old && old !== conn) try { old.close(); } catch {}
     saveSession();
     broadcast();
-  } else if (msg.t === 'action' && conn.pid) {
+  } else if (msg.t === 'action' && conn.pid && conns.get(conn.pid) === conn) {
     const err = applyAction(conn.pid, msg.action);
     if (err) conn.open && conn.send({ t: 'error', msg: err });
   }
@@ -451,6 +476,7 @@ function localRoom(gameId, resume = null) {
   cleanup();
   Object.assign(S, {
     role: 'local',
+    credentials: [],
     code: null,
     gameId: resume?.gameId || gameId,
     players: resume?.players || [{ id: 'L1', name: S.name || 'Player 1', connected: true }, { id: 'L2', name: 'Player 2', connected: true }],
@@ -464,6 +490,7 @@ function localRoom(gameId, resume = null) {
   });
   refreshLocalView();
   saveSession();
+  armTimer();
   render();
   scheduleBots();
 }
@@ -471,6 +498,7 @@ function localRoom(gameId, resume = null) {
 /* ---------------- client ---------------- */
 
 function joinRoom(code) {
+  if (!requireMultiplayer()) return;
   cleanup();
   Object.assign(S, { role: 'client', code: code.toUpperCase().trim(), screen: 'lobby', status: 'connecting', players: [], started: false, view: null, synced: false });
   history.replaceState(null, '', '?room=' + S.code);
@@ -499,10 +527,12 @@ function openClientPeer() {
 }
 
 function cleanupPeerOnly() {
-  if (hostConn) try { hostConn.close(); } catch {}
+  const oldHost = hostConn;
   hostConn = null;
-  if (peer) try { peer.destroy(); } catch {}
+  if (oldHost) try { oldHost.close(); } catch {}
+  const oldPeer = peer;
   peer = null;
+  if (oldPeer) try { oldPeer.destroy(); } catch {}
 }
 
 function connectToHost() {
@@ -510,12 +540,13 @@ function connectToHost() {
   const conn = peer.connect(roomPeerId(S.code), { reliable: true });
   hostConn = conn;
   conn.on('open', () => {
+    if (hostConn !== conn || S.role !== 'client') return conn.close();
     retries = 0;
     S.status = 'online';
-    conn.send({ t: 'hello', token: S.token, name: S.name });
+    conn.send({ t: 'hello', token: S.token, secret: S.secret, name: S.name });
     render();
   });
-  conn.on('data', onClientMessage);
+  conn.on('data', (msg) => { if (hostConn === conn && S.role === 'client') onClientMessage(msg); });
   conn.on('close', () => {
     if (hostConn !== conn) return;
     S.status = 'disconnected';
@@ -547,6 +578,9 @@ function scheduleClientRetry() {
 function onClientMessage(msg) {
   if (!msg || typeof msg !== 'object') return;
   if (msg.t === 'sync') {
+    S.status = 'online';
+    retries = 0;
+    clearTimeout(retryTimer);
     Object.assign(S, { players: msg.players, gameId: msg.gameId, started: msg.started, view: msg.view, hostId: msg.hostId, synced: true, timerSec: msg.timerSec || 0, timer: msg.timer || null });
     if (msg.now) clockSkew = msg.now - Date.now();
     S.screen = S.started ? 'game' : 'lobby';
@@ -772,6 +806,7 @@ function renderLobby() {
     if (botBtn) botBtn.onclick = addBot;
     app.querySelectorAll('[data-kick]').forEach((b) => (b.onclick = () => {
       S.players = S.players.filter((p) => p.id !== b.dataset.kick);
+      S.credentials = S.credentials.filter(([id]) => id !== b.dataset.kick);
       saveSession();
       broadcast();
     }));
@@ -906,11 +941,15 @@ setInterval(tickTimer, 1000);
 
 /* ---------------- boot ---------------- */
 
-if (typeof Peer === 'undefined') {
-  app.innerHTML = '<div class="panel">Could not load the multiplayer library. Check your internet connection and reload.</div>';
-} else {
+function requireMultiplayer() {
+  if (typeof Peer !== 'undefined') return true;
+  toast('Online play is unavailable. Check your connection and reload, or choose One device.', 'info');
+  return false;
+}
+
+{
   // A refresh of this tab drops you straight back into your room.
   const tabSession = loadTabSession();
-  if (tabSession && S.name) resume(tabSession);
+  if (tabSession && (tabSession.role === 'local' || (S.name && typeof Peer !== 'undefined'))) resume(tabSession);
   else render();
 }

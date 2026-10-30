@@ -16,5 +16,5 @@ export default {
   ],
   // Prefix for room IDs on the PeerJS broker. Change it if you fork the site
   // so your rooms don't collide with other copies.
-  roomPrefix: 'gamenight-v1-',
+  roomPrefix: 'gamenight-v2-',
 };

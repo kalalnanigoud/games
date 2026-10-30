@@ -45,6 +45,24 @@ node serve.js
 ```
 Open http://localhost:8080 in two browser tabs: host in one, join with the code in the other.
 
+Requires a current Node.js release (tested with Node 24). The development server binds to
+`127.0.0.1` by default. Set `HOST` explicitly only if you intend to allow access from other machines.
+
+## Checks
+
+Run `node tools/test.mjs` for syntax checks, server and multiplayer regressions, rule scenarios,
+and 50 simulated games at every supported player count. An optional number changes the simulation
+count, for example `node tools/test.mjs 10`.
+
+With the local server running, open `/tools/browser-test.html` and click **Run all games**
+at phone and desktop viewport sizes. It reports render failures, horizontal overflow, and buttons
+smaller than 30px. Open `/tools/local-boot-test.html` to exercise shared-device play without PeerJS.
+Also verify hosting/joining in two tabs, moves in both directions, and guest/host refresh recovery.
+
+Online rooms use the v2 protocol, with private reconnect credentials separate from public player IDs.
+Both players must reload the updated site. Saved online sessions from v1 cannot be safely resumed;
+create a new room. Saved shared-device games remain compatible.
+
 ## If a friend can't connect
 Most home Wi-Fi works directly. Some mobile networks block direct connections.
 Add a free TURN relay (Cloudflare Realtime TURN or the Metered free plan) in `js/config.js`.

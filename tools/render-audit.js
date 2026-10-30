@@ -11,7 +11,7 @@ export async function audit(ids, { maxSteps = 600, every = 3 } = {}) {
   const out = [];
   for (const id of ids) {
     const g = (await import(`/games/${id}.js?audit=${Date.now()}`)).default;
-    for (const n of [...new Set([g.minPlayers, Math.min(g.maxPlayers, g.minPlayers + 2), g.maxPlayers])]) {
+    for (const n of Array.from({ length: g.maxPlayers - g.minPlayers + 1 }, (_, i) => g.minPlayers + i)) {
       const players = Array.from({ length: n }, (_, i) => ({ id: 'P' + i, name: 'Player ' + i }));
       const ctx = (pid) => ({ me: pid, players, name: (x) => players.find((p) => p.id === x)?.name || '?', isBot: () => false, send: () => {}, isHost: true, local: false });
       const r = { game: id, players: n, renders: 0, crashes: [], overflow: [], smallButtons: new Set(), steps: 0, finished: false };

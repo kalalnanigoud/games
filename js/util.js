@@ -14,6 +14,9 @@ export function shuffle(arr) {
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 
+// Private reconnect credentials must never be used as public player IDs.
+export const reconnectSecret = () => Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) => b.toString(16).padStart(2, '0')).join('');
+
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 export const randomCode = (len = 5) => Array.from({ length: len }, () => CODE_CHARS[rand(CODE_CHARS.length)]).join('');
 
