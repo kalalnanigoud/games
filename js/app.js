@@ -9,6 +9,8 @@ import { GAMES, getGame } from '../games/index.js';
 import { esc, toast, randomCode, uid, reconnectSecret } from './util.js';
 import { snapshot, flip, playFx, changed, confetti, wake, settleLoops } from './fx.js';
 import { sound, isMuted, setMuted } from './sound.js';
+import { createVoice } from './voice.js';
+import { createTour, currentMatch, recordResult, standings, tourLine } from './tour.js';
 
 const MAX_ROOM = 8; // seats at the table
 const MAX_WATCHERS = 8; // spectators on top of that
@@ -35,6 +37,8 @@ const S = {
   timerSec: defaultTimer(GAMES[0]), // seconds per move, 0 = off (games with onTimeout only)
   timer: null, // {deadline (host clock), total, due: [ids]} while someone is on the clock
   opts: defaultOpts(GAMES[0]), // host-chosen game options, e.g. { clock: '5+0' } (games with options only)
+  voice: [], // [player id, PeerJS id] for everyone in voice chat (kept by the host)
+  tour: null, // tournament in progress (js/tour.js), kept by the host
 };
 function defaultTimer(g) {
   return g?.onTimeout ? g.defaultTimer || 30 : 0;
@@ -77,6 +81,7 @@ const peerOptions = () => ({ config: { iceServers: CONFIG.iceServers }, debug: 0
 const roomPeerId = (code) => CONFIG.roomPrefix + code;
 const myId = () => (S.role === 'local' ? S.viewAs : S.token);
 const playerName = (id) => S.players.find((p) => p.id === id)?.name ?? '???';
+const voice = createVoice({ toast, onChange: () => renderTopbar() });
 
 /* ---------------- how to play ---------------- */
 // Each game supplies howTo = { goal, turn: [[icon, title, text]], tips: [text] }.
@@ -142,7 +147,7 @@ function saveSession() {
   if (!S.role) return;
   const data = S.role === 'client'
     ? { role: 'client', code: S.code, token: S.token, secret: S.secret }
-    : { role: S.role, code: S.code, token: S.token, secret: S.secret, credentials: S.credentials, gameId: S.gameId, players: S.players, started: S.started, game: S.game, viewAs: S.viewAs, timerSec: S.timerSec, opts: S.opts };
+    : { role: S.role, code: S.code, token: S.token, secret: S.secret, credentials: S.credentials, gameId: S.gameId, players: S.players, started: S.started, game: S.game, viewAs: S.viewAs, timerSec: S.timerSec, opts: S.opts, tour: S.tour };
   data.version = 2;
   const json = JSON.stringify(data);
   sessionStorage.setItem('gn-session', json);
@@ -175,6 +180,8 @@ function resume(session) {
 }
 
 function cleanup() {
+  voice.leave();
+  S.voice = [];
   clearTimeout(botTimer);
   clearTimeout(retryTimer);
   clearTimeout(turnTimer);
@@ -197,7 +204,7 @@ function leave() {
   if (S.role === 'host' && S.started && !confirm('Leave and close this room for everyone?')) return;
   cleanup();
   clearSession();
-  Object.assign(S, { screen: 'home', role: null, code: null, players: [], started: false, game: null, view: null, status: '' });
+  Object.assign(S, { screen: 'home', role: null, code: null, players: [], started: false, game: null, view: null, status: '', tour: null });
   history.replaceState(null, '', location.pathname);
   render();
 }
@@ -216,6 +223,7 @@ function hostRoom(gameId, resume = null) {
     started: resume?.started || false,
     timerSec: resume?.timerSec ?? defaultTimer(getGame(resume?.gameId || gameId)),
     opts: validOpts(getGame(resume?.gameId || gameId), resume?.opts),
+    tour: resume?.tour || null,
     timer: null,
     game: resume?.game || null,
     screen: resume?.started ? 'game' : 'lobby',
@@ -258,6 +266,7 @@ function openHostPeer(isResume) {
     conn.on('close', () => onConnClosed(conn));
     conn.on('error', () => onConnClosed(conn));
   });
+  p.on('call', (call) => (p === peer ? voice.answer(call) : call.close()));
   keepAlive(p);
   p.on('error', (err) => {
     if (p !== peer) return;
@@ -313,10 +322,20 @@ function onHostMessage(conn, msg) {
   } else if (msg.t === 'action' && conn.pid && conns.get(conn.pid) === conn) {
     const err = applyAction(conn.pid, msg.action);
     if (err) conn.open && conn.send({ t: 'error', msg: err });
+  } else if (msg.t === 'voice' && conn.pid && conns.get(conn.pid) === conn) {
+    if (msg.on && (typeof msg.peer !== 'string' || !/^[\w-]{1,64}$/.test(msg.peer))) return;
+    setVoiceMember(conn.pid, msg.on ? msg.peer : null);
   } else if (msg.t === 'watch' && conn.pid && conns.get(conn.pid) === conn) {
     const err = setWatch(conn.pid, !!msg.on);
     if (err) conn.open && conn.send({ t: 'error', msg: err });
   }
+}
+
+// Who is in voice chat. Everyone gets the list and links up with the others.
+function setVoiceMember(pid, peerId) {
+  S.voice = S.voice.filter(([id]) => id !== pid);
+  if (peerId) S.voice.push([pid, peerId]);
+  broadcast();
 }
 
 // Switch a room member between playing and watching (only between games).
@@ -341,6 +360,7 @@ function onConnClosed(conn) {
   conns.delete(conn.pid);
   const p = S.players.find((x) => x.id === conn.pid);
   if (p) p.connected = false;
+  S.voice = S.voice.filter(([id]) => id !== conn.pid);
   broadcast();
 }
 
@@ -358,6 +378,10 @@ function applyAction(pid, action) {
   // A move that changed nothing (a bot pausing to think) needs no save or resend.
   if (JSON.stringify(next) === before) { scheduleBots(); return null; }
   S.game = next;
+  if (S.tour && !S.tour.done && S.game.over && S.tour.gameNo && S.tour.recorded !== S.tour.gameNo) {
+    notice('🏆 ' + recordResult(S.tour, S.game));
+    if (S.tour.done) restoreSeats();
+  }
   if (S.role === 'local') followTurn();
   saveSession();
   broadcast();
@@ -463,9 +487,10 @@ function broadcast() {
     if (p.id === S.token || S.role === 'local') continue;
     const c = conns.get(p.id);
     if (c && c.open) {
-      c.send({ t: 'sync', code: S.code, players: S.players, gameId: S.gameId, started: S.started, hostId: S.token, view: viewFor(p.id), timerSec: S.timerSec, timer: S.timer, opts: S.opts, now });
+      c.send({ t: 'sync', code: S.code, players: S.players, gameId: S.gameId, started: S.started, hostId: S.token, view: viewFor(p.id), timerSec: S.timerSec, timer: S.timer, opts: S.opts, voice: S.voice, tour: S.tour, now });
     }
   }
+  if (S.role === 'host') voice.sync(S.voice, peer);
   refreshLocalView();
   render();
   scheduleBots();
@@ -495,6 +520,62 @@ function startGame() {
   broadcast();
 }
 
+/* ---------------- tournaments (host) ---------------- */
+
+function startTour(mode, games) {
+  try { S.tour = createTour(mode, games, seated()); } catch (e) { return toast(e.message); }
+  playTour();
+}
+// Seat the next match (everyone else in the tournament watches) and start it.
+function playTour() {
+  const m = S.tour && currentMatch(S.tour);
+  if (!m) return;
+  if (S.gameId !== m.gameId) { S.gameId = m.gameId; S.opts = defaultOpts(getGame(m.gameId)); S.timerSec = defaultTimer(getGame(m.gameId)); }
+  for (const e of S.tour.entrants) {
+    const p = S.players.find((x) => x.id === e.id);
+    if (p && m.seats.includes(e.id)) delete p.watch; else if (p) p.watch = true;
+  }
+  S.tour.gameNo++;
+  startGame();
+}
+function restoreSeats() {
+  for (const e of S.tour?.entrants || []) { const p = S.players.find((x) => x.id === e.id); if (p) delete p.watch; }
+}
+function closeTour() {
+  if (S.tour && !S.tour.done && !confirm('Cancel this tournament?')) return;
+  restoreSeats();
+  S.tour = null;
+  saveSession();
+  broadcast();
+}
+function tourPanel(isHost) {
+  const t = S.tour;
+  if (!t) {
+    if (!isHost) return '';
+    const n = seated().length, g = getGame(S.gameId);
+    const fits = GAMES.filter((x) => n >= x.minPlayers && n <= x.maxPlayers);
+    const koOk = g.minPlayers <= 2 && g.maxPlayers >= 2 && n >= 3;
+    return `<div class="panel stack">
+      <h3 class="gold" style="margin:0">🏆 Tournament</h3>
+      <details class="tour-setup"><summary>Set up a tournament</summary>
+        <div class="stack" style="margin-top:10px">
+          <div><b>Series</b> <span class="muted small">Everyone plays each game you tick. Every win is a point.</span></div>
+          <div class="tour-games">${fits.map((x) => `<label><input type="checkbox" data-tg="${x.id}"> ${esc(x.name)}</label>`).join('') || '<span class="muted small">No game fits this many players.</span>'}</div>
+          <button id="tourSeries" ${fits.length ? '' : 'disabled'}>Start series</button>
+          <div><b>Knockout</b> <span class="muted small">${esc(g.name)} in one-on-one matches. Everyone else watches; winners go through.</span></div>
+          <button id="tourKnock" ${koOk ? '' : 'disabled'}>${koOk ? `Start knockout (${n} players)` : 'Needs 3+ players and a game for two'}</button>
+        </div>
+      </details></div>`;
+  }
+  const table = standings(t).map((p) => `<li class="${t.champions.includes(p.id) ? 'champ' : ''}"><span class="grow">${t.champions.includes(p.id) ? '🏆 ' : ''}${esc(p.name)}</span><b>${p.wins}</b></li>`).join('');
+  return `<div class="panel stack tour-panel">
+    <h3 class="gold" style="margin:0">${esc(tourLine(t, (id) => getGame(id).name))}</h3>
+    ${t.done ? '<div class="winner-banner">Tournament complete!</div>' : ''}
+    <ol class="tour-table">${table}</ol>
+    ${isHost ? `<div class="row">${t.done ? '' : `<button class="primary grow" id="tourGo" ${S.started ? 'disabled' : ''}>Play the next game ▸</button>`}<button class="small" id="tourClose">${t.done ? 'Close tournament' : 'Cancel'}</button></div>` : ''}
+  </div>`;
+}
+
 function endGame() {
   if (!confirm('End this game and go back to the lobby?')) return;
   S.started = false;
@@ -517,6 +598,7 @@ function localRoom(gameId, resume = null) {
     started: resume?.started || false,
     timerSec: resume?.timerSec ?? defaultTimer(getGame(resume?.gameId || gameId)),
     opts: validOpts(getGame(resume?.gameId || gameId), resume?.opts),
+    tour: resume?.tour || null,
     timer: null,
     game: resume?.game || null,
     viewAs: resume?.viewAs || 'L1',
@@ -545,6 +627,7 @@ function joinRoom(code) {
 function openClientPeer() {
   const p = (peer = new Peer(peerOptions()));
   p.on('open', () => p === peer && connectToHost());
+  p.on('call', (call) => (p === peer ? voice.answer(call) : call.close()));
   keepAlive(p);
   p.on('error', (err) => {
     if (p !== peer) return;
@@ -579,6 +662,7 @@ function connectToHost() {
     retries = 0;
     S.status = 'online';
     conn.send({ t: 'hello', token: S.token, secret: S.secret, name: S.name });
+    if (voice.active) conn.send({ t: 'voice', on: true, peer: peer.id }); // rejoin voice after a reconnect
     render();
   });
   conn.on('data', (msg) => { if (hostConn === conn && S.role === 'client') onClientMessage(msg); });
@@ -616,7 +700,8 @@ function onClientMessage(msg) {
     S.status = 'online';
     retries = 0;
     clearTimeout(retryTimer);
-    Object.assign(S, { players: msg.players, gameId: msg.gameId, started: msg.started, view: msg.view, hostId: msg.hostId, synced: true, timerSec: msg.timerSec || 0, timer: msg.timer || null, opts: msg.opts || {} });
+    Object.assign(S, { players: msg.players, gameId: msg.gameId, started: msg.started, view: msg.view, hostId: msg.hostId, synced: true, timerSec: msg.timerSec || 0, timer: msg.timer || null, opts: msg.opts || {}, voice: msg.voice || [], tour: msg.tour || null });
+    voice.sync(S.voice, peer);
     if (msg.now) clockSkew = msg.now - Date.now();
     S.screen = S.started ? 'game' : 'lobby';
     render();
@@ -654,11 +739,29 @@ function renderTopbar() {
   topinfo.innerHTML = `
     ${S.code ? `<span>Room <b class="gold">${esc(S.code)}</b></span>` : ''}
     ${S.role ? `<span><span class="dot ${online ? 'on' : 'off'}"></span> <span class="status-text">${esc(S.status)}</span></span>` : ''}
+    ${S.role === 'host' || S.role === 'client' ? (voice.active
+      ? `<button class="small voice-on ${voice.muted ? 'muted' : ''}" id="micBtn" title="${voice.muted ? 'Unmute' : 'Mute'} your microphone">${voice.muted ? '🔇' : '🎙'} ${S.voice.length}</button><button class="small icon" id="voiceOff" title="Leave voice chat">📵</button>`
+      : `<button class="small icon" id="voiceBtn" title="Join voice chat${S.voice.length ? ' (' + S.voice.length + ' talking)' : ''}">🎙${S.voice.length ? '<sup>' + S.voice.length + '</sup>' : ''}</button>`) : ''}
     <button class="small icon" id="muteBtn" title="Sound on/off">${isMuted() ? '🔇' : '🔊'}</button>
     ${S.role ? '<button class="small" id="leaveBtn">Leave</button>' : ''}`;
   topinfo.querySelector('#muteBtn').onclick = () => { setMuted(!isMuted()); renderTopbar(); if (!isMuted()) sound('chime'); };
   const lb = topinfo.querySelector('#leaveBtn');
   if (lb) lb.onclick = leave;
+  topinfo.querySelector('#voiceBtn')?.addEventListener('click', joinVoice);
+  topinfo.querySelector('#micBtn')?.addEventListener('click', () => voice.toggleMute());
+  topinfo.querySelector('#voiceOff')?.addEventListener('click', leaveVoice);
+}
+
+async function joinVoice() {
+  if (!peer?.open || !peer.id) return toast('Wait until you are connected to the room.');
+  if (!(await voice.join())) return;
+  if (S.role === 'host') setVoiceMember(S.token, peer.id);
+  else if (hostConn?.open) hostConn.send({ t: 'voice', on: true, peer: peer.id });
+}
+function leaveVoice() {
+  voice.leave();
+  if (S.role === 'host') setVoiceMember(S.token, null);
+  else if (hostConn?.open) hostConn.send({ t: 'voice', on: false });
 }
 
 function renderHome() {
@@ -793,19 +896,21 @@ function renderLobby() {
               ${p.id === S.token && S.role !== 'local' ? '<span class="tag">YOU</span>' : ''}
               ${p.bot ? '<span class="tag">BOT</span>' : ''}
               ${p.watch ? '<span class="tag">WATCHING</span>' : ''}
+              ${S.voice.some(([id]) => id === p.id) ? '<span title="In voice chat">🎙</span>' : ''}
               ${isHost && p.id !== S.token && (S.role === 'local' || !p.connected || p.bot) ? `<button class="small bad" data-kick="${esc(p.id)}">Remove</button>` : ''}
             </li>`).join('')}
         </ul>
         ${S.role === 'local' ? `
           <div class="row"><input id="addName" class="grow" maxlength="20" placeholder="Add player name" style="min-width:0" /><button id="addBtn">Add</button></div>` : ''}
         ${isHost && g.bot ? `<button id="botBtn" style="width:100%">🤖 Add a computer player</button>` : ''}
-        ${S.role !== 'local' && me ? `<button id="watchBtn" style="width:100%">${me.watch ? '🎲 Take a seat and play' : '👀 Just watch this game'}</button>` : ''}
+        ${S.role !== 'local' && me && !S.tour ? `<button id="watchBtn" style="width:100%">${me.watch ? '🎲 Take a seat and play' : '👀 Just watch this game'}</button>` : ''}
       </div>
+      ${tourPanel(isHost)}
       ${isHost ? `
       <div class="panel stack">
         <div class="row"><h3 class="gold grow" style="margin:0">Game</h3>${g.howTo ? `<button class="small" data-help="${g.id}">? How to play</button>` : ''}</div>
         ${g.cover ? `<div class="lobby-cover">${g.cover}</div>` : ''}
-        <select id="gameSel" style="width:100%">
+        <select id="gameSel" style="width:100%" ${S.tour && !S.tour.done ? 'disabled' : ''}>
           ${GAMES.map((x) => `<option value="${x.id}" ${x.id === S.gameId ? 'selected' : ''}>${esc(x.name)} (${x.minPlayers}–${x.maxPlayers})</option>`).join('')}
         </select>
         ${(g.options || []).map((o) => `
@@ -848,6 +953,11 @@ function renderLobby() {
     const timerSel = app.querySelector('#timerSel');
     if (timerSel) timerSel.onchange = (e) => { S.timerSec = +e.target.value; saveSession(); broadcast(); };
     app.querySelector('#startBtn').onclick = startGame;
+    const pick = (mode) => startTour(mode, [...app.querySelectorAll('[data-tg]:checked')].map((c) => c.dataset.tg));
+    app.querySelector('#tourSeries')?.addEventListener('click', () => pick('series'));
+    app.querySelector('#tourKnock')?.addEventListener('click', () => startTour('knockout', [S.gameId]));
+    app.querySelector('#tourGo')?.addEventListener('click', playTour);
+    app.querySelector('#tourClose')?.addEventListener('click', closeTour);
     const botBtn = app.querySelector('#botBtn');
     if (botBtn) botBtn.onclick = addBot;
     app.querySelectorAll('[data-kick]').forEach((b) => (b.onclick = () => {
@@ -906,7 +1016,8 @@ function renderGame() {
   const before = snapshot(app);
   const hadModal = !!app.querySelector('.modal');
   const humans = S.players.filter((p) => !p.bot);
-  app.innerHTML = `
+  const tourReady = S.tour && S.view.over && S.tour.recorded === S.tour.gameNo;
+  const head = `
     <div class="game-head">
       <h2>${esc(g.name)}</h2>
       ${helpBtn(g.id)}
@@ -914,9 +1025,13 @@ function renderGame() {
       <div id="turnTimer" class="turn-timer" hidden></div>
       ${S.role === 'local' && humans.length > 1 ? `<label class="small muted">Playing as
         <select id="viewAs">${humans.map((p) => `<option value="${esc(p.id)}" ${p.id === S.viewAs ? 'selected' : ''}>${esc(p.name)}${turn.includes(p.id) ? ' ◀' : ''}</option>`).join('')}</select></label>` : ''}
-      ${isHost ? `<button class="small" id="restartBtn">New game</button><button class="small" id="lobbyBtn">Lobby</button>` : ''}
-    </div>
-    <div id="gamebox"></div>`;
+      ${isHost ? `${S.tour ? (tourReady ? `<button class="small primary" id="tourNext">${S.tour.done ? '🏆 Results' : 'Next game ▸'}</button>` : '') : '<button class="small" id="restartBtn">New game</button>'}<button class="small" id="lobbyBtn">Lobby</button>` : ''}
+      ${S.tour ? `<div class="tour-bar">${esc(tourLine(S.tour, (id) => getGame(id).name))}${S.tour.mode === 'series' || S.tour.done ? ' · ' + standings(S.tour).map((p) => `${esc(p.name)} ${p.wins}`).join(' · ') : ''}</div>` : ''}
+    </div>`;
+  // Games that manage their own DOM (keepDom) keep #gamebox between updates, so inputs keep focus.
+  const keep = g.keepDom && app.querySelector('#gamebox')?.dataset.game === g.id && app.querySelector('.game-head');
+  if (keep) app.querySelector('.game-head').outerHTML = head;
+  else app.innerHTML = head + `<div id="gamebox" data-game="${g.id}"></div>`;
 
   const ctx = {
     me: myId(),
@@ -960,10 +1075,14 @@ function renderGame() {
   if (viewAs) viewAs.onchange = (e) => { S.viewAs = e.target.value; saveSession(); refreshLocalView(); render(); };
   if (isHost) {
     app.querySelector('#lobbyBtn').onclick = endGame;
-    app.querySelector('#restartBtn').onclick = () => {
+    app.querySelector('#tourNext')?.addEventListener('click', () => {
+      if (!S.tour.done) return playTour();
+      S.started = false; S.game = null; S.screen = 'lobby'; saveSession(); broadcast();
+    });
+    app.querySelector('#restartBtn')?.addEventListener('click', () => {
       if (!S.view.over && !confirm('Restart the game from the beginning?')) return;
       startGame();
-    };
+    });
   }
 }
 

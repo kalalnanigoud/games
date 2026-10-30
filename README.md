@@ -63,6 +63,35 @@ Online rooms use the v2 protocol, with private reconnect credentials separate fr
 Both players must reload the updated site. Saved online sessions from v1 cannot be safely resumed;
 create a new room. Saved shared-device games remain compatible.
 
+## Party games
+
+- **Sketch Party** (2–8): each turn one player draws a secret word and everyone else races to type it.
+  Letter hints appear as time runs down; faster guesses score more. The host picks rounds and drawing time.
+- **Word Spies** (4–8): two teams, 25 words. Spymasters see the secret key and give one-word clues;
+  teammates reveal words and must avoid the assassin.
+
+`node tools/party-test.mjs` checks both games' rules, that guessers never receive the secret word or key,
+and the tournament brackets.
+
+## Voice chat
+
+In an online room, tap 🎙 in the top bar to talk to everyone else who joined voice (tap again to mute,
+📵 to leave). Audio goes directly between players' browsers, like the games. The browser asks for
+microphone access the first time, and it needs the site on https (GitHub Pages is) or localhost.
+
+## Tournaments
+
+In the lobby, the host can open **🏆 Tournament**:
+- **Series**: tick several games; everyone plays each one and every win scores a point.
+- **Knockout**: one-on-one matches of the selected game in a bracket (byes for odd numbers, rematches
+  after draws). Players not in the current match watch.
+After each game the host presses **Next game ▸**; the last game crowns the champion.
+
+## Chess computer levels
+
+The host picks the computer's strength in the lobby: Easy (the built-in player) or Club, Strong and
+Master, which use Stockfish at limited strength on the host's device.
+
 ## Spectators
 
 Friends who open the room link after a game has started join as spectators: they see the live game

@@ -200,6 +200,7 @@ function setup(players, opts = {}) {
     ids: Array.from({ length: 64 }, (_, i) => (START[i] === '.' ? 0 : i + 1)),
     sans: [], last: null, counts: {}, taken: { w: [], b: [] }, drawOffer: null, log: [],
     clock: makeClock(opts.clock),
+    level: LEVELS.some(([v]) => v === opts.level) ? opts.level : 'easy',
   };
   s.counts[posKey(s)] = 1;
   log(s, `${s.players.find((p) => p.color === 'w').name} plays White and moves first.`);
@@ -212,6 +213,7 @@ function act(s, pid, a) {
   if (!me) throw Error('You are not playing in this game.');
   if (!a || typeof a !== 'object') throw Error('Choose a move.');
   const them = s.players.find((p) => p !== me);
+  if (a.type === 'wait') return; // a computer player still thinking
   if (a.type === 'flag') {
     // Either player's screen reports a clock that reached zero; the host's own clock decides.
     const c = s.clock;
@@ -264,9 +266,53 @@ function act(s, pid, a) {
   if (insufficient(s.board)) return finish(s, null, 'Draw: neither side can checkmate.');
 }
 
-// A quick, honest club player: grabs safe material, avoids hanging pieces, finds mate in one.
+/* ---------------- computer levels ---------------- */
+// Easy is the quick built-in player below. Club, Strong and Master ask Stockfish (on the host's
+// device) at limited strength. bot() must answer at once, so it returns 'wait' while the engine
+// thinks and the platform asks again a moment later. Without a browser engine, Easy plays.
+const LEVELS = [['easy', 'Easy'], ['club', 'Club (Stockfish)'], ['strong', 'Strong (Stockfish)'], ['master', 'Master (Stockfish)']];
+const LEVEL_SETTINGS = { club: { skill: 3, depth: 4, ms: 300 }, strong: { skill: 11, depth: 10, ms: 700 }, master: { skill: 20, depth: 18, ms: 1500 } };
+const BOT = { worker: null, broken: false, pending: null, since: 0, result: null };
+function botEngine() {
+  if (BOT.worker || BOT.broken) return BOT.worker;
+  try {
+    const w = new Worker(URL.createObjectURL(new Blob([`importScripts(${JSON.stringify(ENGINE_URLS[0])});`], { type: 'application/javascript' })));
+    w.onmessage = (e) => {
+      const line = String(e.data);
+      if (line.startsWith('bestmove') && BOT.pending) { BOT.result = { fen: BOT.pending, uci: line.split(' ')[1] }; BOT.pending = null; }
+    };
+    w.onerror = () => { BOT.broken = true; BOT.worker = null; BOT.pending = null; };
+    w.postMessage('uci');
+    BOT.worker = w;
+  } catch { BOT.broken = true; }
+  return BOT.worker;
+}
+function engineMove(v, P) {
+  const f = fen(P);
+  if (BOT.result?.fen === f) {
+    const m = legal(P).find((x) => sqName(x.from) + sqName(x.to) + (x.promo || '') === BOT.result.uci);
+    BOT.result = null;
+    return m ? { type: 'move', from: m.from, to: m.to, promo: m.promo } : null;
+  }
+  if (BOT.pending === f) return Date.now() - BOT.since > 8000 ? null : { type: 'wait' }; // a stuck engine: play Easy instead
+  const w = botEngine();
+  if (!w) return null;
+  const L = LEVEL_SETTINGS[v.level];
+  BOT.pending = f; BOT.since = Date.now(); BOT.result = null;
+  w.postMessage('stop');
+  w.postMessage(`setoption name Skill Level value ${L.skill}`);
+  w.postMessage('position fen ' + f);
+  w.postMessage(`go depth ${L.depth} movetime ${L.ms}`);
+  return { type: 'wait' };
+}
+
+// Easy: a quick, honest club player that grabs safe material, avoids hanging pieces and finds mate in one.
 function bot(v, pid) {
   const me = seatOf(v, pid), P = pos(v), moves = legal(P);
+  if (v.level && v.level !== 'easy' && browser && typeof Worker !== 'undefined' && !(v.drawOffer && v.drawOffer !== pid)) {
+    const a = engineMove(v, P);
+    if (a) return a;
+  }
   let best = null, bestScore = -Infinity;
   for (const m of moves) {
     const n = play(P, m);
@@ -579,7 +625,7 @@ export default {
   id: 'chess', name: 'Chess',
   description: 'The classic game of kings, on a walnut board. Full rules, chess clocks, draw offers, and a computer opponent.',
   minPlayers: 2, maxPlayers: 2,
-  options: [{ id: 'clock', label: '⏱ Clock', default: '10+5', choices: CLOCKS }],
+  options: [{ id: 'clock', label: '⏱ Clock', default: '10+5', choices: CLOCKS }, { id: 'level', label: '🤖 Computer level', default: 'easy', choices: LEVELS }],
   cover: `<svg viewBox="0 0 320 200" role="img" aria-label="Chess pieces on a wooden board">${DEFS.replace(/<svg[^>]*>|<\/svg>/g, '')}<defs><linearGradient id="chess-cv" x2="0" y2="1"><stop stop-color="#3a2314"/><stop offset="1" stop-color="#140a04"/></linearGradient></defs>
     <rect width="320" height="200" fill="url(#chess-cv)"/><g transform="translate(160 150) scale(1 .42) rotate(45)">${Array.from({ length: 36 }, (_, i) => `<rect x="${(i % 6) * 34 - 102}" y="${Math.floor(i / 6) * 34 - 102}" width="34" height="34" fill="${(i % 6 + Math.floor(i / 6)) % 2 ? '#a6764b' : '#ecd8b0'}"/>`).join('')}</g>
     <circle cx="160" cy="70" r="90" fill="#ffd890" opacity=".08"/>
@@ -592,7 +638,7 @@ export default {
       ['♚', 'Special moves', 'Castling (move the king two squares toward a rook) and en passant are supported automatically.'],
       ['½', 'Draws', 'Stalemate, threefold repetition, the fifty-move rule and bare kings end the game in a draw. You can also offer a draw, or resign.'],
     ],
-    tips: ['Colours are drawn at random. White moves first.', 'The host picks the clock in the lobby. Your time only runs on your turn, White’s starts after the first move, and each move can add a few bonus seconds. Run out and you lose (it’s a draw if your opponent can’t possibly checkmate).', 'The captured-pieces row shows who is ahead in material.', 'Add a computer player to practise on one device.'],
+    tips: ['Colours are drawn at random. White moves first.', 'The host picks the clock in the lobby. Your time only runs on your turn, White’s starts after the first move, and each move can add a few bonus seconds. Run out and you lose (it’s a draw if your opponent can’t possibly checkmate).', 'The captured-pieces row shows who is ahead in material.', 'Add a computer player to practise. The host picks its level in the lobby, from Easy up to Master.'],
   },
   setup, act, bot,
   turnOf: (s) => (s.over ? [] : [s.players.find((p) => p.color === s.turn).id]),
