@@ -5,6 +5,8 @@
 import { esc, log, addFx, rand, shuffle } from '../js/util.js';
 import { injectCSS } from '../js/fx.js';
 import { sound } from '../js/sound.js';
+import { icon } from '../js/icons.js';
+import { portrait } from '../js/avatar.js';
 
 const browser = typeof document !== 'undefined';
 
@@ -160,8 +162,29 @@ function bot(v, pid) {
 /* ---------------- interface ---------------- */
 
 const UI = { pick: null, clue: '', n: 1, key: '' };
-const MARK = { r: '◆', b: '●', n: '·', x: '✖' };
 const MARK_NAME = { r: 'red agent', b: 'blue agent', n: 'bystander', x: 'assassin' };
+const TCOL = { r: '#ff5a6a', b: '#4d94ff' };
+// Every colour also has a shape (diamond = Red, circle = Blue, dot = bystander, cross = assassin),
+// and revealed cards add a pattern (Red stripes, Blue dots).
+const shape = (d) => `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">${d}</svg>`;
+const MARK = {
+  r: shape('<path d="M10 1.5l8.5 8.5-8.5 8.5L1.5 10z" fill="currentColor"/>'),
+  b: shape('<circle cx="10" cy="10" r="8" fill="currentColor"/>'),
+  n: shape('<circle cx="10" cy="10" r="3.4" fill="currentColor"/>'),
+  x: shape('<path d="M4 4l12 12M16 4L4 16" stroke="currentColor" stroke-width="3.6" stroke-linecap="round"/>'),
+};
+// Who was behind a revealed card: an agent in a fedora, a passer-by, or the assassin's crosshair.
+const SIL = {
+  r: '<svg class="spy-sil" viewBox="0 0 40 40" aria-hidden="true"><path d="M8 16.5h24l-3.4-1.4-1.5-6a2 2 0 0 0-2.5-1.5L20 8.6l-4.6-1a2 2 0 0 0-2.5 1.5l-1.5 6z"/><path d="M13 18.5c0 4.6 3 8 7 8s7-3.4 7-8z"/><path d="M5 40c1-7 7-11.5 15-11.5S34 33 35 40z"/></svg>',
+  n: '<svg class="spy-sil" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="17" r="7.5"/><path d="M6 40c1-7 6.5-11.5 14-11.5S33 33 34 40z"/></svg>',
+  x: '<svg class="spy-sil" viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><circle cx="20" cy="20" r="12"/><circle cx="20" cy="20" r="3" fill="currentColor"/><path d="M20 3v8M20 29v8M3 20h8M29 20h8"/></svg>',
+};
+SIL.b = SIL.r;
+const SPY_IC = '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 11.5h18M6.5 11.5l1.2-5.2A1.5 1.5 0 0 1 9.6 5.2L12 6l2.4-.8a1.5 1.5 0 0 1 1.9 1.1l1.2 5.2"/><circle cx="8" cy="16.5" r="2.6"/><circle cx="16" cy="16.5" r="2.6"/><path d="M10.6 16.3c.9-.6 1.9-.6 2.8 0"/></svg>';
+// The rosters and the mission log fold away on phones so the board gets the screen; they stay as the player left them.
+const wide = () => (typeof matchMedia === 'function' ? matchMedia('(min-width: 901px)').matches : true);
+let teamsOpen = wide(), logOpen = wide();
+let prev = null; // the last board this screen drew: fresh reveals flip, a team that found an agent flashes
 
 function render(el, v, ctx) {
   injectCSS('spies', STYLE);
@@ -172,34 +195,70 @@ function render(el, v, ctx) {
   const guessing = myTurn && v.phase === 'guess' && !me.spy, cluing = myTurn && v.phase === 'clue' && me.spy;
   if (!guessing || v.open[UI.pick]) UI.pick = null;
   const spy = spyOf(v, v.turn);
+  // Agents still hidden. Guessers' copy of the key only shows revealed cards, so count from the team sizes:
+  // the team that gave the first clue started with 9 agents, the other with 8.
+  const first = v.clues.length ? v.clues[0].team : v.turn;
+  const hiddenOf = (t) => (t === first ? 9 : 8) - v.key.filter((k, i) => v.open[i] && k === t).length;
+  const left = { r: hiddenOf('r'), b: hiddenOf('b') };
+  const same = prev?.key === key;
+  const found = { r: same && left.r < prev.left.r, b: same && left.b < prev.left.b };
+  const flipIn = new Set(same ? v.open.map((o, i) => (o && !prev.open[i] ? i : -1)).filter((i) => i >= 0) : []);
+  const newClue = same && v.clues.length > prev.clues;
+  prev = { key, left, open: v.open.slice(), clues: v.clues.length };
+  const face = (p, t) => `<span class="spy-face" style="--tc:${TCOL[t]}">${portrait({ id: p.id, bot: !!ctx.isBot?.(p.id) })}</span>`;
+  const guesses = (n) => `${n} guess${n === 1 ? '' : 'es'} left`;
+
+  // ---- the operations desk: both teams' counters around whose turn it is ----
+  const score = (t) => `<div class="spy-score ${t} ${!v.over && v.turn === t ? 'on' : ''} ${v.over && v.winner === t ? 'win' : ''} ${found[t] ? 'spy-scored' : ''}" data-a="spy-left-${t}" title="${left[t]} ${TEAM[t]} agent${left[t] === 1 ? '' : 's'} still hidden">`
+    + `<i>${MARK[t]}</i><b>${left[t]}</b><small>${TEAM[t]}<span> left</span></small></div>`;
   const status = v.over ? `${TEAM[v.winner]} team wins!`
-    : v.phase === 'clue' ? (cluing ? 'Your team is waiting for your clue' : `${esc(spy.name)} (${TEAM[v.turn]} spymaster) is thinking of a clue…`)
-    : guessing ? `Your clue: <b>${esc(v.clue.word.toUpperCase())}</b> ${v.clue.n} · ${v.left} guess${v.left === 1 ? '' : 'es'} left`
-    : `${TEAM[v.turn]} team is guessing <b>${esc(v.clue.word.toUpperCase())}</b> ${v.clue.n}`;
-  const team = (t) => `<div class="spy-team ${t}"><h3>${TEAM[t]} · ${agentsLeft(v, t)} left</h3>${v.players.filter((p) => p.team === t).map((p) => `<div class="spy-member ${p.id === ctx.me ? 'me' : ''}">${p.spy ? '🕵️ ' : ''}${esc(p.name)}${p.spy ? ' <small>spymaster</small>' : ''}${p.id === ctx.me ? ' <small>· you</small>' : ''}</div>`).join('')}</div>`;
+    : v.phase === 'clue' ? (cluing ? 'Your team is waiting for your clue' : `${face(spy, v.turn)}<span>${esc(spy.name)} (${TEAM[v.turn]} spymaster) is thinking of a clue…</span>`)
+    : `<span>${guessing ? 'Your team is guessing' : `${TEAM[v.turn]} team is guessing`}</span>`;
+  const slip = !v.over && v.phase === 'guess' && v.clue
+    ? `<div class="spy-slip ${newClue ? 'new' : ''}"><span class="spy-slipword">${esc(v.clue.word.toUpperCase())}</span><span class="spy-n">${v.clue.n}</span></div>`
+      + `<div class="spy-guesses"><span class="spy-pips" aria-hidden="true">${Array.from({ length: v.clue.n + 1 }, (_, j) => `<i class="${j < v.left ? 'on' : ''}"></i>`).join('')}</span>${guesses(v.left)}</div>` : '';
+  const turn = v.over ? `${icon('trophy')}Mission complete` : `<span class="spy-radar"></span>${MARK[v.turn]}${TEAM[v.turn]} turn`;
+  const role = me ? `<span class="spy-role ${me.team}">${me.spy ? SPY_IC : icon('users')}${me.spy ? 'You are the spymaster' : 'You are an agent'} · ${TEAM[me.team]}</span>` : `<span class="spy-role">${icon('eye')}Watching</span>`;
+  const hint = v.over ? (me ? (me.team === v.winner ? 'Well played, agent. The whole key is shown.' : 'Better luck next mission. The whole key is shown.') : 'The whole key is shown.')
+    : cluing ? 'Give a one-word clue and how many of your words it covers.'
+    : guessing ? (UI.pick == null ? 'Tap a word, then tap it again to reveal it.' : 'Tap it again, or press Reveal.')
+    : me && me.team === v.turn ? (me.spy ? 'Your team is guessing. No hints now!' : 'Wait for your spymaster’s clue.')
+    : me ? `The ${TEAM[v.turn]} team is playing.` : '';
 
-  el.innerHTML = `<div class="spy-root">
-    ${v.over ? `<div class="winner-banner">${me ? (me.team === v.winner ? 'Your team wins!' : `${TEAM[v.winner]} team wins`) : `${TEAM[v.winner]} team wins`}</div>` : ''}
-    <div class="spy-bar ${v.turn}"><span class="spy-turn">${v.over ? '🏁' : v.turn === 'r' ? '◆ Red turn' : '● Blue turn'}</span><span class="grow">${status}</span>${me ? `<span class="spy-role">${me.spy ? '🕵️ You are the spymaster' : 'You are an agent'} · ${TEAM[me.team]}</span>` : '<span class="spy-role">👀 Watching</span>'}</div>
-    <div class="game-layout">
-      <div class="spy-main">
-        <div class="spy-board ${me?.spy && !v.over ? 'spymaster' : ''}">${v.words.map((w, i) => {
-          const k = v.key[i], open = v.open[i];
-          const cls = ['spy-card', open ? 'open ' + k : '', !open && k ? 'known ' + k : '', guessing && !open ? 'can' : '', UI.pick === i ? 'pick' : ''].filter(Boolean).join(' ');
-          return `<button class="${cls}" data-card="${i}" data-a="spy-card-${i}" ${guessing && !open ? '' : 'tabindex="-1"'} aria-label="${esc(w)}${k ? ', ' + MARK_NAME[k] : ''}${open ? ', revealed' : ''}">${k ? `<i>${MARK[k]}</i>` : ''}<span>${esc(w)}</span></button>`;
-        }).join('')}</div>
-        ${cluing ? `<form class="panel spy-clue"><label class="grow"><small>One-word clue</small><input id="spyClue" maxlength="20" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(UI.clue)}" placeholder="e.g. ocean"></label>
-          <label><small>Words</small><select id="spyN">${Array.from({ length: 9 }, (_, i) => `<option ${UI.n === i + 1 ? 'selected' : ''}>${i + 1}</option>`).join('')}</select></label><button class="primary">Give clue</button></form>
-          <p class="muted small">Your words have the ${v.turn === 'r' ? '◆' : '●'} mark. Avoid the ✖ assassin!</p>` : ''}
-        ${guessing ? `<div class="row spy-actions"><button class="primary grow" id="spyGo" ${UI.pick == null ? 'disabled' : ''}>${UI.pick == null ? 'Tap a word, then reveal it' : `Reveal ${esc(v.words[UI.pick].toUpperCase())}`}</button><button id="spyPass">End turn</button></div>` : ''}
-      </div>
-      <div class="side">
-        ${team('r')}${team('b')}
-        <div class="panel"><h3 class="gold" style="margin:0 0 6px">Clues</h3>${v.clues.length ? v.clues.slice().reverse().map((c) => `<div class="spy-clueline ${c.team}">${MARK[c.team]} ${esc(c.word.toUpperCase())} <b>${c.n}</b></div>`).join('') : '<p class="muted small" style="margin:0">No clues yet.</p>'}</div>
-        <div class="parchment log">${v.log.slice(0, 6).map((l) => `<div>${esc(l)}</div>`).join('')}</div>
-      </div>
-    </div></div>`;
+  const board = v.words.map((w, i) => {
+    const k = v.key[i], open = v.open[i];
+    const cls = ['spy-card', open ? 'open ' + k : '', !open && k ? 'known ' + k : '', guessing && !open ? 'can' : '', UI.pick === i ? 'pick' : '', flipIn.has(i) ? 'spy-flip' : '', w.length >= 8 ? 'long' : ''].filter(Boolean).join(' ');
+    return `<button class="${cls}" data-card="${i}" data-a="spy-card-${i}" style="--i:${i}" ${guessing && !open ? '' : 'tabindex="-1"'} aria-label="${esc(w)}${k ? ', ' + MARK_NAME[k] : ''}${open ? ', revealed' : ''}">${open ? SIL[k] : ''}${k ? `<i>${MARK[k]}</i>` : ''}<span>${esc(w)}</span></button>`;
+  }).join('');
 
+  // ---- side: rosters with faces, and the mission log ----
+  const team = (t) => `<div class="spy-team ${t}"><h3>${MARK[t]}${TEAM[t]}<span class="spy-teamleft">${left[t]} left</span></h3>${v.players.filter((p) => p.team === t).map((p) => `<div class="spy-member ${p.id === ctx.me ? 'me' : ''}">${face(p, t)}<span class="spy-mname">${esc(p.name)}</span>${p.spy ? `<span class="tag spy-tag">${SPY_IC}Spymaster</span>` : ''}${p.id === ctx.me ? '<span class="tag t-you">You</span>' : ''}</div>`).join('')}</div>`;
+  const last = v.clues.at(-1);
+  const clues = v.clues.length ? v.clues.slice().reverse().map((c) => `<span class="spy-clueline ${c.team}">${MARK[c.team]}<b>${esc(c.word.toUpperCase())}</b><em>${c.n}</em></span>`).join('') : '<p class="muted small" style="margin:0">No clues yet.</p>';
+
+  const active = typeof document !== 'undefined' ? document.activeElement : null;
+  const typing = active && active.id === 'spyClue' && el.contains(active) ? [active.selectionStart, active.selectionEnd] : null;
+  el.innerHTML = `<div class="spy-root"><div class="game-layout spy-layout">
+    <div class="spy-main felt spy-felt">
+      ${v.over ? `<div class="winner-banner">${icon('trophy')}${me ? (me.team === v.winner ? 'Your team wins!' : `${TEAM[v.winner]} team wins`) : `${TEAM[v.winner]} team wins`}</div>` : ''}
+      <div class="spy-hud">${score('r')}<div class="spy-bar ${v.over ? v.winner : v.turn}"><span class="spy-turn">${turn}</span><span class="spy-status">${status}</span>${slip}</div>${score('b')}</div>
+      <div class="spy-rolebar">${role}${hint ? `<span class="spy-hint">${hint}</span>` : ''}</div>
+      <div class="spy-board ${me?.spy && !v.over ? 'spymaster' : ''}">${board}</div>
+      ${cluing ? `<form class="panel spy-clue"><label class="grow"><small>One-word clue</small><input id="spyClue" maxlength="20" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(UI.clue)}" placeholder="e.g. ocean"></label>
+        <label><small>Words</small><select id="spyN">${Array.from({ length: 9 }, (_, i) => `<option ${UI.n === i + 1 ? 'selected' : ''}>${i + 1}</option>`).join('')}</select></label><button class="primary">${icon('check')}Give clue</button></form>
+        <p class="spy-note"><span>Your words have the</span><i class="${v.turn}">${MARK[v.turn]}</i><span>mark. Avoid the</span><i class="x">${MARK.x}</i><span>assassin!</span></p>` : ''}
+      ${guessing ? `<div class="row spy-actions"><button class="primary grow ${UI.pick == null ? '' : 'spy-ready'}" id="spyGo" ${UI.pick == null ? 'disabled' : ''}>${icon('eye')}${UI.pick == null ? 'Tap a word, then reveal it' : `Reveal ${esc(v.words[UI.pick].toUpperCase())}`}</button><button id="spyPass">End turn</button></div>` : ''}
+    </div>
+    <div class="side spy-side">
+      <details class="panel drawer spy-teams" ${teamsOpen ? 'open' : ''}><summary>${icon('users')}<span>Agents</span><span class="note">${v.players.length} players</span>${icon('chevron', 'chev')}</summary>
+        <div class="drawer-body">${team('r')}${team('b')}</div></details>
+      <details class="panel drawer spy-logbook" ${logOpen ? 'open' : ''}><summary>${icon('book')}<span>Mission log</span><span class="note">${last ? esc(last.word.toUpperCase()) + ' ' + last.n : ''}</span>${icon('chevron', 'chev')}</summary>
+        <div class="drawer-body"><div class="spy-clues">${clues}</div><div class="parchment log">${v.log.slice(0, 8).map((l) => `<div>${esc(l)}</div>`).join('')}</div></div></details>
+    </div>
+  </div></div>`;
+
+  el.querySelector('.spy-teams')?.addEventListener('toggle', (e) => { teamsOpen = e.currentTarget.open; });
+  el.querySelector('.spy-logbook')?.addEventListener('toggle', (e) => { logOpen = e.currentTarget.open; });
   el.querySelectorAll('[data-card]').forEach((b) => (b.onclick = () => {
     if (!guessing) return;
     const i = +b.dataset.card;
@@ -215,49 +274,248 @@ function render(el, v, ctx) {
     input.oninput = () => (UI.clue = input.value);
     sel.onchange = () => (UI.n = +sel.value);
     form.onsubmit = (e) => { e.preventDefault(); ctx.send({ type: 'clue', word: input.value, n: +sel.value }); };
+    // An update while the spymaster is typing shouldn't knock them out of the box.
+    if (typing) { input.focus({ preventScroll: true }); try { input.setSelectionRange(...typing); } catch {} }
   }
 }
 
+/* Cover art: a night-time operations room. Two spymasters in trench coats face a glowing word grid;
+   Red holds up the clue, Blue points at a card (self-contained ids, prefixed spc-). */
+function coverSVG() {
+  const stops = (list) => list.map(([o, c, a = 1]) => `<stop offset="${o}" stop-color="${c}"${a === 1 ? '' : ` stop-opacity="${a}"`}/>`).join('');
+  const lg = (id, list, extra = 'x1="0" y1="0" x2="0" y2="1"') => `<linearGradient id="${id}" ${extra}>${stops(list)}</linearGradient>`;
+  const rg = (id, list) => `<radialGradient id="${id}">${stops(list)}</radialGradient>`;
+  const FONT = 'font-family="Fredoka,Nunito,sans-serif" font-weight="700" text-anchor="middle"';
+  // city skyline in the window, with a few lit windows
+  const towers = [[18, 70, 22], [42, 54, 18], [62, 80, 26], [90, 46, 15], [107, 66, 22], [196, 62, 20], [218, 42, 17], [237, 74, 24], [263, 52, 18], [283, 68, 22]];
+  const city = towers.map(([x, y, w]) => {
+    let lit = '';
+    for (let yy = y + 6; yy < 108; yy += 8) for (let xx = x + 3; xx < x + w - 3; xx += 6) if ((xx * 7 + yy * 3) % 11 < 3) lit += `<rect x="${xx}" y="${yy}" width="2.4" height="3.2" fill="#ffd98a" opacity=".8"/>`;
+    return `<rect x="${x}" y="${y}" width="${w}" height="${112 - y}" fill="#0a1236"/>${lit}`;
+  }).join('');
+  const stars = [[30, 20], [70, 30], [128, 16], [150, 40], [176, 22], [200, 34], [290, 22], [302, 46], [120, 52]].map(([x, y], i) => `<circle cx="${x}" cy="${y}" r="${i % 3 ? 0.8 : 1.1}" fill="#fff" opacity=".7"/>`).join('');
+  // the glowing board: 5 x 4 word cards, a few already revealed
+  const GRID = ['hrhbh', 'bhnhr', 'hhhbt', 'rhnhh'];
+  const cards = GRID.flatMap((row, r) => [...row].map((k, c) => {
+    const x = +(106 + c * 22.4).toFixed(1), y = 58 + r * 17.5;
+    const base = `<rect x="${x}" y="${y}" width="18.4" height="13.5" rx="2.4" fill="${{ r: '#ff4d5e', b: '#3d8bff', n: '#b9b6a8' }[k] || '#eaf6ff'}" opacity="${k === 'h' || k === 't' ? 0.92 : 1}"/>`;
+    const mark = k === 'r' ? `<path d="M${x + 9.2} ${y + 3}l3.6 3.75-3.6 3.75-3.6-3.75z" fill="#fff"/>`
+      : k === 'b' ? `<circle cx="${x + 9.2}" cy="${y + 6.75}" r="3" fill="#fff"/>`
+      : k === 'n' ? '' : `<rect x="${x + 4}" y="${y + 5.6}" width="10.4" height="2.4" rx="1" fill="#1b2347" opacity=".45"/>`;
+    const ring = k === 't' ? `<rect x="${x - 1.5}" y="${y - 1.5}" width="21.4" height="16.5" rx="3.5" fill="none" stroke="#ffd166" stroke-width="1.6"/>` : '';
+    return base + mark + ring;
+  })).join('');
+  const coat = (dir, cx, grad, lapel, belt, skin, hatTop, hatBrim, band) => {
+    const X = (d) => cx + dir * d; // mirror around the figure's centre line
+    return `<path d="M${X(-40)} 200L${X(-31)} 138C${X(-28)} 122 ${X(-16)} 113 ${cx} 113C${X(16)} 113 ${X(27)} 122 ${X(30)} 138L${X(39)} 200z" fill="url(#${grad})"/>`
+      + `<path d="M${X(-15)} 116L${X(-2)} 146L${X(-6)} 113zM${X(15)} 116L${X(2)} 146L${X(6)} 113z" fill="${lapel}"/><path d="M${cx} 146V200" stroke="${belt}" stroke-width="1.5"/>`
+      + `<rect x="${cx - 34}" y="160" width="68" height="7" rx="2" fill="${belt}"/><rect x="${cx - 5}" y="159" width="10" height="9" rx="2" fill="none" stroke="#ffd166" stroke-width="1.6"/>`
+      + `<rect x="${cx - 5}" y="104" width="11" height="12" rx="4" fill="${skin}" opacity=".85"/><circle cx="${X(1)}" cy="98" r="12.5" fill="${skin}"/>`
+      + `<path d="M${X(-12)} 108L${X(-8)} 122L${X(-2)} 112zM${X(14)} 108L${X(10)} 122L${X(4)} 112z" fill="${lapel}"/>`
+      + `<rect x="${dir > 0 ? cx + 2 : cx - 13}" y="94" width="11" height="5" rx="2" fill="#0b0b14"/><path d="M${dir > 0 ? cx + 5 : cx - 10} 95.5h4" stroke="#fff" stroke-opacity=".6" stroke-width="1"/>`
+      + `<path d="M${dir > 0 ? cx + 5 : cx - 11} 105q3 1.6 6-.6" fill="none" stroke="#3a2220" stroke-width="1.4" stroke-linecap="round"/>`
+      + `<path d="M${cx - 12} 89C${cx - 12} 76 ${cx + 12} 76 ${cx + 12} 89z" fill="${hatTop}"/><rect x="${cx - 12}" y="85" width="24" height="4" fill="${band}"/><ellipse cx="${cx}" cy="89.5" rx="20" ry="4.2" fill="${hatBrim}"/>`;
+  };
+  return `<svg viewBox="0 0 320 200" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Two spymasters in trench coats face a glowing grid of word cards"><defs>` +
+    lg('spc-sky', [[0, '#050920'], [0.6, '#0f1a4c'], [1, '#1d2c70']], 'gradientUnits="userSpaceOnUse" x1="0" y1="8" x2="0" y2="112"') +
+    lg('spc-wall', [[0, '#0d1538'], [1, '#060a1f']]) +
+    rg('spc-red', [[0, '#ff4d5e', 0.5], [1, '#ff4d5e', 0]]) +
+    rg('spc-blue', [[0, '#3d8bff', 0.55], [1, '#3d8bff', 0]]) +
+    lg('spc-screen', [[0, '#7fe3ff', 0.34], [1, '#3d8bff', 0.14]]) +
+    lg('spc-beam', [[0, '#8be6ff', 0.05], [1, '#8be6ff', 0.36]]) +
+    lg('spc-coatR', [[0, '#b52a45'], [1, '#5c1026']]) +
+    lg('spc-coatB', [[0, '#3566d1'], [1, '#142a66']]) +
+    lg('spc-desk', [[0, '#1c2864'], [1, '#0a1134']]) +
+    `<filter id="spc-blur" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="8"/></filter></defs>` +
+    // the room: a big night window over the city
+    `<rect width="320" height="200" fill="url(#spc-wall)"/><rect x="14" y="8" width="292" height="104" rx="6" fill="url(#spc-sky)"/>${stars}` +
+    `<path d="M248 21a11 11 0 1 0 9.5 16.5a9 9 0 1 1-9.5-16.5z" fill="#fff4cf"/>` +
+    `<path d="M70 112L34 8H50z M250 112L292 8H306V14z" fill="#8be6ff" opacity=".06"/>${city}` +
+    `<path d="M14 60H306M111 8V112M209 8V112" stroke="#050817" stroke-width="3.5"/><rect x="14" y="8" width="292" height="104" rx="6" fill="none" stroke="#1d2a60" stroke-width="3"/>` +
+    // team lamps either side, floor
+    `<circle cx="16" cy="130" r="96" fill="url(#spc-red)"/><circle cx="304" cy="130" r="96" fill="url(#spc-blue)"/>` +
+    `<path d="M0 164H320V200H0z" fill="#050817" opacity=".85"/><path d="M40 178H280M20 192H300" stroke="#8be6ff" stroke-opacity=".08"/>` +
+    // the console projecting the glowing grid
+    `<path d="M130 164H190L224 133H96z" fill="url(#spc-beam)"/>` +
+    `<rect x="92" y="44" width="136" height="94" rx="14" fill="#5cc8ff" opacity=".28" filter="url(#spc-blur)"/>` +
+    `<rect x="98" y="50" width="124" height="82" rx="8" fill="url(#spc-screen)" stroke="#8be6ff" stroke-width="1.4"/>${cards}` +
+    `<path d="M102 54h12M102 54v8M218 54h-12M218 54v8M102 128h12M102 128v-8M218 128h-12M218 128v-8" stroke="#bff1ff" stroke-width="1.2" opacity=".8"/>` +
+    `<path d="M98 164H222L236 200H84z" fill="url(#spc-desk)"/><path d="M98 164H222" stroke="#8be6ff" stroke-opacity=".75" stroke-width="1.5"/>` +
+    `<circle cx="118" cy="184" r="2.6" fill="#ff4d5e"/><circle cx="202" cy="184" r="2.6" fill="#4d94ff"/>` +
+    `<g transform="rotate(-5 160 178)"><rect x="140" y="171" width="40" height="13" rx="1.5" fill="#f2d48a"/><rect x="140" y="168.5" width="14" height="4" rx="1" fill="#f2d48a"/><text x="160" y="180.4" ${FONT} font-size="5.6" fill="#c0392b" letter-spacing=".4">TOP SECRET</text></g>` +
+    // Red spymaster raises the clue card
+    coat(1, 60, 'spc-coatR', '#d8455e', '#4a0d1d', '#e0a57a', '#2a1020', '#1c0b16', '#ff4d5e') +
+    `<path d="M80 132Q98 124 104 104" stroke="url(#spc-coatR)" stroke-width="11" stroke-linecap="round" fill="none"/><circle cx="105" cy="100" r="5" fill="#e0a57a"/>` +
+    `<g transform="rotate(-10 117 86)"><rect x="98" y="74" width="38" height="22" rx="3" fill="#fffdf3"/><text x="113" y="89" ${FONT} font-size="8.5" fill="#1b2347">MOON</text>` +
+    `<circle cx="130.5" cy="85" r="5.5" fill="#ff4d5e"/><text x="130.5" y="88" ${FONT} font-size="7.5" fill="#fff">2</text></g>` +
+    // Blue spymaster points at a card
+    coat(-1, 260, 'spc-coatB', '#4f84ec', '#0d1d4a', '#9a5d36', '#16224a', '#0a1230', '#4d94ff') +
+    `<path d="M240 132Q226 122 220 108" stroke="url(#spc-coatB)" stroke-width="11" stroke-linecap="round" fill="none"/><circle cx="218" cy="105" r="5" fill="#9a5d36"/>` +
+    `<path d="M216 102L211.5 97.5" stroke="#9a5d36" stroke-width="3.2" stroke-linecap="round"/><circle cx="208" cy="99" r="7" fill="#ffd166" opacity=".25"/>` +
+    `</svg>`;
+}
+
 const STYLE = `
-.spy-bar{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:10px 14px;margin-bottom:12px;border-radius:12px;background:rgba(0,0,0,.35);border-left:5px solid #888}
-.spy-bar.r{border-color:#e0604a}.spy-bar.b{border-color:#4b8fe8}
-.spy-turn{font-family:var(--font-display);font-weight:800}.spy-bar.r .spy-turn{color:#ff9b88}.spy-bar.b .spy-turn{color:#8fc0ff}
-.spy-role{font-size:.8rem;color:var(--muted)}
-.spy-board{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;padding:12px;border-radius:16px;background:linear-gradient(145deg,#2c4a3a,#14241c);border:6px solid #6d4426;box-shadow:0 14px 30px rgba(0,0,0,.5)}
-.spy-card{position:relative;min-height:66px;padding:6px 4px;border-radius:10px;font-family:var(--font-display);font-weight:800;font-size:.82rem;letter-spacing:.03em;text-transform:uppercase;color:#3b2a17;text-shadow:none;background:linear-gradient(170deg,#fbf0d4,#e4cf9f);border:1px solid #8a6a3a;box-shadow:0 3px 0 #7a5a2a,0 6px 10px rgba(0,0,0,.35);overflow-wrap:anywhere;line-height:1.1}
-.spy-card span{position:relative;z-index:1}
-.spy-card i{position:absolute;top:4px;right:6px;font-style:normal;font-size:.95rem;line-height:1}
-.spy-card.can:hover{transform:translateY(-2px)}
-.spy-card.pick{box-shadow:0 0 0 3px var(--gold),0 3px 0 #7a5a2a,0 0 18px rgba(242,193,78,.6)}
-.spy-card.known.r{box-shadow:inset 0 0 0 4px #e0604a,0 3px 0 #7a5a2a}.spy-card.known.b{box-shadow:inset 0 0 0 4px #4b8fe8,0 3px 0 #7a5a2a}
-.spy-card.known.x{box-shadow:inset 0 0 0 4px #1d1714,0 3px 0 #7a5a2a}.spy-card.known.r i{color:#c0402c}.spy-card.known.b i{color:#2a6ac8}.spy-card.known.x i{color:#000}
-.spy-card.open{color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.6);box-shadow:inset 0 2px 8px rgba(0,0,0,.4)}
-.spy-card.open span{opacity:.75}
-.spy-card.open.r{background:repeating-linear-gradient(45deg,#d0503c 0 10px,#bf4431 10px 20px)}
-.spy-card.open.b{background:repeating-linear-gradient(-45deg,#3d7fd9 0 10px,#336fc4 10px 20px)}
-.spy-card.open.n{background:#b9a77e;color:#3b2a17;text-shadow:none}
-.spy-card.open.x{background:#1d1714}
-.spy-card.open i{color:#fff;font-size:1.3rem}
-.spy-clue{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:12px}
-.spy-clue label{display:flex;flex-direction:column;gap:4px}.spy-clue small{color:var(--muted);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase}
-.spy-clue input{min-width:0;width:100%}
-.spy-actions{margin-top:12px}
-.spy-team{padding:12px 14px;border-radius:12px;background:rgba(0,0,0,.3);border-left:5px solid}
-.spy-team.r{border-color:#e0604a}.spy-team.b{border-color:#4b8fe8}
-.spy-team h3{margin:0 0 6px;font-size:.95rem}.spy-team.r h3{color:#ff9b88}.spy-team.b h3{color:#8fc0ff}
-.spy-member{font-size:.9rem;padding:2px 0}.spy-member.me{font-weight:800}.spy-member small{color:var(--muted)}
-.spy-clueline{font-size:.9rem;padding:2px 0}.spy-clueline.r{color:#ff9b88}.spy-clueline.b{color:#8fc0ff}
-@media(max-width:640px){.spy-board{gap:4px;padding:6px;border-width:4px}.spy-card{min-height:54px;font-size:.58rem;padding:4px 2px;letter-spacing:0}.spy-card i{font-size:.7rem;top:2px;right:3px}}
+/* Night-time operations room: midnight glass over a blueprint grid, a red lamp on one side and a blue one on the other. */
+.spy-layout{align-items:start}
+.spy-felt{padding:14px 16px 16px;border-color:rgba(120,200,255,.22);
+  background:
+    radial-gradient(55% 60% at 0% 45%,rgba(255,80,100,.2),transparent 70%),
+    radial-gradient(55% 60% at 100% 45%,rgba(70,150,255,.24),transparent 70%),
+    radial-gradient(80% 45% at 50% 0%,rgba(120,220,255,.12),transparent 70%),
+    repeating-linear-gradient(0deg,rgba(140,200,255,.055) 0 1px,transparent 1px 26px),
+    repeating-linear-gradient(90deg,rgba(140,200,255,.055) 0 1px,transparent 1px 26px),
+    linear-gradient(180deg,#0c1534 0%,#080e26 65%,#060a1d 100%)}
+.spy-felt .winner-banner{display:flex;align-items:center;justify-content:center;gap:10px;padding:2px 0 12px}
+.spy-felt .winner-banner .ic{width:1em;height:1em}
+
+/* the desk: counters and the current clue */
+.spy-hud{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:stretch}
+.spy-score{--tc:#ff5a6a;--tl:#ffb3ba;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-width:84px;padding:8px 10px;border-radius:16px;background:rgba(5,9,28,.65);border:1px solid rgba(255,255,255,.08);transition:box-shadow .3s,border-color .3s}
+.spy-score.b{--tc:#4d94ff;--tl:#b8d4ff}
+.spy-score i{display:block;width:16px;height:16px;color:var(--tc)}
+.spy-score i svg,.spy-card i svg,.spy-note i svg{display:block;width:100%;height:100%}
+.spy-score b{display:inline-block;font:700 1.9rem/1 var(--font-display);color:var(--tl)}
+.spy-score small{font-size:.62rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+.spy-score.on{border-color:var(--tc);box-shadow:0 0 0 1px var(--tc),0 0 24px -4px var(--tc)}
+.spy-score.win{border-color:var(--gold);background:linear-gradient(180deg,rgba(255,207,92,.22),rgba(5,9,28,.65));box-shadow:0 0 0 1px var(--gold),0 0 24px -4px var(--gold)}
+/* A team found one of its agents: its counter flashes and the number pops. */
+.spy-score.spy-scored b{animation:spy-pop .7s var(--spring) .15s}
+.spy-score.spy-scored::after{content:'';position:absolute;inset:-3px;border-radius:18px;pointer-events:none;box-shadow:0 0 0 2px var(--tc),0 0 28px 6px var(--tc);opacity:0;animation:spy-flash 1.3s ease-out .1s}
+@keyframes spy-pop{40%{transform:scale(1.45)}}
+@keyframes spy-flash{20%{opacity:.85}}
+.spy-bar{--tc:#8a93b5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-width:0;padding:9px 12px;border-radius:16px;text-align:center;background:rgba(5,9,28,.6);border:1px solid rgba(255,255,255,.08);box-shadow:inset 0 3px 0 var(--tc)}
+.spy-bar.r{--tc:#ff5a6a}.spy-bar.b{--tc:#4d94ff}
+.spy-turn{display:inline-flex;align-items:center;gap:7px;font:700 .76rem/1 var(--font-display);letter-spacing:.12em;text-transform:uppercase;color:#cfd8ff}
+.spy-bar.r .spy-turn{color:#ff9ba5}.spy-bar.b .spy-turn{color:#9cc3ff}
+.spy-turn svg{width:13px;height:13px;flex:none}.spy-turn .ic{width:16px;height:16px;color:var(--gold)}
+.spy-status{display:flex;align-items:center;justify-content:center;gap:8px;font-size:.9rem;font-weight:700;color:#e3e9ff;min-width:0}
+.spy-status .spy-face{width:28px;height:28px}
+.spy-radar{position:relative;width:18px;height:18px;flex:none;border-radius:50%;overflow:hidden;border:1.5px solid rgba(140,230,255,.6);background:rgba(140,230,255,.08)}
+.spy-radar::before{content:'';position:absolute;inset:0;background:conic-gradient(from 0deg,rgba(140,230,255,.9),rgba(140,230,255,0) 30%);animation:spy-sweep 3s linear infinite}
+@keyframes spy-sweep{to{transform:rotate(1turn)}}
+.spy-slip{display:inline-flex;align-items:center;gap:10px;max-width:100%;padding:5px 6px 5px 14px;border-radius:12px;background:linear-gradient(180deg,#fffef8,#ece7d6);color:var(--ink);box-shadow:inset 0 1px 0 #fff,0 3px 0 rgba(0,0,0,.35),0 0 20px rgba(140,230,255,.15)}
+.spy-slip.new{animation:spy-slipin .5s var(--spring)}
+@keyframes spy-slipin{from{transform:translateY(-8px) rotate(-4deg) scale(.9);opacity:0}}
+.spy-slipword{font:700 1.2rem/1 var(--font-display);letter-spacing:.08em;overflow-wrap:anywhere}
+.spy-n{display:grid;place-items:center;flex:none;min-width:30px;height:30px;border-radius:9px;background:var(--tc);color:#fff;font:700 1.05rem/1 var(--font-display)}
+.spy-guesses{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:4px 8px;font-size:.74rem;font-weight:800;color:#aebbe6}
+.spy-pips{display:flex;flex-wrap:wrap;justify-content:center;gap:4px}
+.spy-pips i{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.16)}
+.spy-pips i.on{background:var(--tc);box-shadow:0 0 6px var(--tc)}
+.spy-rolebar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin:12px 2px}
+.spy-role{display:inline-flex;align-items:center;gap:6px;padding:4px 12px 4px 9px;border-radius:999px;font-size:.78rem;font-weight:800;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);color:#dfe6ff}
+.spy-role.r{border-color:rgba(255,90,106,.55);color:#ffc2c8}.spy-role.b{border-color:rgba(77,148,255,.6);color:#c2d9ff}
+.spy-role .ic{width:16px;height:16px}
+.spy-hint{font-size:.86rem;color:#aebbe6}
+
+/* the board: a light table with corner brackets */
+.spy-board{position:relative;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;padding:14px;border-radius:20px;background:linear-gradient(180deg,rgba(16,30,72,.9),rgba(7,14,40,.92));border:1px solid rgba(120,200,255,.28);box-shadow:inset 0 0 40px rgba(60,160,255,.14),inset 0 1px 0 rgba(255,255,255,.06),0 18px 36px rgba(2,4,16,.55)}
+.spy-board::before{content:'';position:absolute;inset:5px;border-radius:15px;pointer-events:none;opacity:.6;
+  background:linear-gradient(#8be6ff,#8be6ff) 0 0/16px 2px no-repeat,linear-gradient(#8be6ff,#8be6ff) 0 0/2px 16px no-repeat,
+    linear-gradient(#8be6ff,#8be6ff) 100% 0/16px 2px no-repeat,linear-gradient(#8be6ff,#8be6ff) 100% 0/2px 16px no-repeat,
+    linear-gradient(#8be6ff,#8be6ff) 0 100%/16px 2px no-repeat,linear-gradient(#8be6ff,#8be6ff) 0 100%/2px 16px no-repeat,
+    linear-gradient(#8be6ff,#8be6ff) 100% 100%/16px 2px no-repeat,linear-gradient(#8be6ff,#8be6ff) 100% 100%/2px 16px no-repeat}
+.spy-card{position:relative;container-type:inline-size;display:grid;place-items:center;min-width:0;width:100%;aspect-ratio:2/1.1;min-height:0;padding:0 3px;border:0;border-radius:11px;color:var(--ink);text-shadow:none;
+  background:linear-gradient(180deg,#ffffff 0%,#edf1fc 60%,#dfe5f7 100%);
+  box-shadow:inset 0 1px 0 #fff,inset 0 -2px 0 rgba(27,35,71,.08),0 3px 0 #7f8cc4,0 7px 14px rgba(2,4,16,.45);
+  transition:transform .2s var(--ease),box-shadow .2s;-webkit-user-select:none;user-select:none}
+.spy-card:hover:not(:disabled){background-color:transparent}
+.spy-card span{position:relative;z-index:1;max-width:100%;font:600 clamp(.56rem,14.5cqw,1.02rem)/1.05 var(--font-display);letter-spacing:.04em;text-transform:uppercase;overflow-wrap:anywhere}
+.spy-card.long span{font-size:clamp(.5rem,12cqw,.92rem);letter-spacing:.01em}
+.spy-card i{position:absolute;top:5px;right:6px;z-index:1;display:block;width:13px;height:13px}
+@media(hover:hover){.spy-card.can:hover{transform:translateY(-3px)}}
+/* Words you may reveal: a soft scanner rim that breathes in a slow wave across the grid. */
+.spy-card.can::after{content:'';position:absolute;inset:-2px;border-radius:13px;pointer-events:none;box-shadow:0 0 0 1.5px rgba(140,225,255,.75),0 0 14px 2px rgba(100,200,255,.4);animation:spy-breathe 2.8s ease-in-out infinite;animation-delay:calc(var(--i,0) * -.11s)}
+@keyframes spy-breathe{50%{opacity:.2}}
+.spy-card.can:active:not(:disabled){transform:scale(.97)}
+/* The word you picked lifts off the table; a second tap reveals it. */
+.spy-card.pick{transform:translateY(-7px) scale(1.05);z-index:2;box-shadow:inset 0 1px 0 #fff,0 0 0 3px var(--gold),0 9px 0 -3px #7f8cc4,0 16px 26px rgba(2,4,16,.55)}
+.spy-card.pick::after{animation:none;opacity:1;box-shadow:0 0 0 2px rgba(255,207,92,.9),0 0 22px 6px rgba(255,207,92,.45)}
+.spy-card.pick:active:not(:disabled){transform:translateY(-4px) scale(1.01)}
+/* The spymaster's key */
+.spy-card.known.r{background:repeating-linear-gradient(45deg,rgba(255,90,106,.14) 0 6px,transparent 6px 12px),linear-gradient(180deg,#fff1f2,#ffdadd);box-shadow:inset 0 0 0 3px #ff5a6a,0 3px 0 #c6475a,0 7px 14px rgba(2,4,16,.45)}
+.spy-card.known.b{background:radial-gradient(circle,rgba(77,148,255,.24) 1.4px,transparent 1.9px) 0 0/9px 9px,linear-gradient(180deg,#eef5ff,#d6e6ff);box-shadow:inset 0 0 0 3px #4d94ff,0 3px 0 #3a6fc4,0 7px 14px rgba(2,4,16,.45)}
+.spy-card.known.n{background:linear-gradient(180deg,#f6f5f0,#e3e1d8)}
+.spy-card.known.x{background:linear-gradient(180deg,#2a2d3a,#15171f);color:#fff;box-shadow:inset 0 0 0 3px #ff6b81,0 3px 0 #000,0 7px 14px rgba(2,4,16,.5)}
+.spy-card.known.r i{color:#e5384a}.spy-card.known.b i{color:#2f7cf0}.spy-card.known.n i{color:#9aa0b8}.spy-card.known.x i{color:#ff6b81}
+/* Revealed: who was behind the card, with the team's pattern */
+.spy-card.open{color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.5);transform:none;box-shadow:inset 0 2px 10px rgba(0,0,0,.35),0 1px 0 rgba(255,255,255,.08)}
+.spy-card.open span{align-self:end;margin-bottom:6%;opacity:.92;font-size:clamp(.5rem,11cqw,.82rem)}
+.spy-card.open.r{background:repeating-linear-gradient(45deg,#e84855 0 9px,#d13a48 9px 18px)}
+.spy-card.open.b{background:radial-gradient(circle,rgba(255,255,255,.28) 1.6px,transparent 2.2px) 0 0/10px 10px,linear-gradient(180deg,#3d8bff,#2867d6)}
+.spy-card.open.n{background:linear-gradient(180deg,#d9d6cb,#bdb9ab);color:#2a2f45;text-shadow:none}
+.spy-card.open.x{background:radial-gradient(circle at 50% 45%,#3a1d26,#0d0e14 70%);color:#ffd0d8}
+.spy-card.open i{color:#fff;width:14px;height:14px}
+.spy-card.open.n i{color:#5b6078}.spy-card.open.x i{color:#ff6b81}
+.spy-sil{position:absolute;left:0;top:7%;width:100%;height:58%;fill:currentColor;opacity:.32;pointer-events:none}
+.spy-card.open.x .spy-sil{opacity:.9;color:#ff6b81}
+/* A fresh reveal: the paper face folds away and the agent appears. */
+.spy-card.spy-flip::before{content:'';position:absolute;inset:0;z-index:3;border-radius:inherit;pointer-events:none;background:linear-gradient(180deg,#ffffff,#dfe5f7);animation:spy-flip .45s cubic-bezier(.5,0,.75,.4) forwards}
+@keyframes spy-flip{to{transform:perspective(500px) rotateY(90deg)}}
+.spy-card.spy-flip > *{animation:spy-flipin .4s var(--spring) .38s backwards}
+@keyframes spy-flipin{from{transform:scale(.5);opacity:0}}
+
+/* the clue transmitter */
+.spy-clue{position:relative;display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-top:14px;padding:14px;background:linear-gradient(180deg,rgba(20,34,80,.94),rgba(12,22,58,.94));border-color:rgba(120,200,255,.3)}
+.spy-clue::after{content:'';position:absolute;inset:-3px;border-radius:21px;pointer-events:none;box-shadow:0 0 0 2px rgba(255,207,92,.6),0 0 22px 2px rgba(255,207,92,.3);animation:spy-breathe 2.8s ease-in-out infinite}
+.spy-clue:focus-within::after{animation:none;opacity:.45}
+.spy-clue label{display:flex;flex-direction:column;gap:4px}
+.spy-clue label.grow{flex:1 1 190px}
+.spy-clue button{flex:1 0 auto}
+.spy-clue small{color:var(--muted);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;font-weight:800}
+.spy-clue input{min-width:0;width:100%;font-family:var(--font-display);letter-spacing:.05em}
+.spy-note{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin:10px 2px 0;font-size:.86rem;color:var(--muted)}
+.spy-note i{display:inline-block;width:13px;height:13px}
+.spy-note i.r{color:#ff5a6a}.spy-note i.b{color:#4d94ff}.spy-note i.x{color:#ff6b81}
+.spy-actions{margin-top:14px}
+#spyGo.spy-ready{box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 0 0 2px var(--gold),var(--glow-brand)}
+
+/* side: rosters and the mission log */
+.spy-side .drawer-body{gap:10px}
+.spy-team{--tc:#ff5a6a;--tl:#ffb3ba;padding:10px 12px;border-radius:14px;background:rgba(6,10,30,.35);border:1px solid rgba(255,255,255,.06);box-shadow:inset 3px 0 0 var(--tc)}
+.spy-team.b{--tc:#4d94ff;--tl:#b8d4ff}
+.spy-team h3{display:flex;align-items:center;gap:7px;margin:0 0 6px;font-size:.98rem;color:var(--tl)}
+.spy-team h3 svg{width:13px;height:13px;flex:none;color:var(--tc)}
+.spy-teamleft{margin-left:auto;font-family:var(--font-body);font-size:.75rem;font-weight:800;color:var(--muted)}
+.spy-member{display:flex;align-items:center;gap:8px;min-height:38px;padding:3px 0;font-size:.9rem}
+.spy-member.me .spy-mname{font-weight:800}
+.spy-mname{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.spy-face{display:block;width:30px;height:30px;flex:none;border-radius:50%;box-shadow:0 0 0 2px var(--tc),0 2px 6px rgba(0,0,0,.4)}
+.spy-face .portrait{width:100%;height:100%;display:block;border-radius:50%}
+.spy-tag{background:rgba(255,255,255,.08);color:#e3e9ff;border-color:rgba(255,255,255,.18)}
+.spy-clues{display:flex;flex-wrap:wrap;gap:6px}
+.spy-clueline{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:10px;font-size:.85rem;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08)}
+.spy-clueline svg{width:11px;height:11px;flex:none}
+.spy-clueline.r{color:#ffb3ba}.spy-clueline.r svg{color:#ff5a6a}.spy-clueline.b{color:#b8d4ff}.spy-clueline.b svg{color:#4d94ff}
+.spy-clueline b{font-family:var(--font-display);font-weight:600;letter-spacing:.05em}
+.spy-clueline em{font-style:normal;font-weight:800;color:#fff}
+
+@media(max-width:900px){.spy-felt{padding:10px}}
+@media(max-width:640px){
+  .spy-hud{gap:6px}
+  .spy-score{min-width:56px;padding:6px;border-radius:13px}
+  .spy-score b{font-size:1.45rem}
+  .spy-score small{font-size:.58rem;letter-spacing:.06em}.spy-score small span{display:none}
+  .spy-bar{padding:7px 8px;gap:5px}
+  .spy-status{font-size:.8rem;gap:6px}
+  .spy-status .spy-face{width:24px;height:24px}
+  .spy-slip{gap:8px;padding:4px 5px 4px 10px}.spy-slipword{font-size:1rem}.spy-n{min-width:26px;height:26px;font-size:.95rem}
+  .spy-rolebar{margin:10px 0}
+  .spy-board{gap:5px;padding:7px;border-radius:14px}
+  .spy-board::before{inset:2px;border-radius:12px}
+  .spy-card{border-radius:8px;aspect-ratio:auto;height:50px;padding:0 2px}
+  .spy-card.can::after{border-radius:10px}
+  .spy-card i{top:3px;right:3px;width:9px;height:9px}
+  .spy-card.open i{width:10px;height:10px}
+}
 `;
 
 export default {
   id: 'spies', name: 'Word Spies',
   description: 'Two teams, 25 words, one secret key. Spymasters give one-word clues and teammates hunt for their agents. Avoid the assassin! For 4–8.',
   minPlayers: 4, maxPlayers: 8,
-  cover: `<svg viewBox="0 0 320 200" role="img" aria-label="A grid of word cards with red and blue agent markers"><defs><linearGradient id="spy-cv" x2="0" y2="1"><stop stop-color="#2c4a3a"/><stop offset="1" stop-color="#0f1c15"/></linearGradient></defs>
-    <rect width="320" height="200" fill="url(#spy-cv)"/>${Array.from({ length: 15 }, (_, i) => { const x = 28 + (i % 5) * 54, y = 30 + Math.floor(i / 5) * 50, k = 'rbnrbnxrbnbrnrb'[i];
-      return `<rect x="${x}" y="${y}" width="48" height="40" rx="6" fill="${k === 'r' ? '#d0503c' : k === 'b' ? '#3d7fd9' : k === 'x' ? '#1d1714' : '#eadcb4'}" stroke="#6b4a24" stroke-width="1.5"/>${k === 'n' ? `<rect x="${x + 8}" y="${y + 17}" width="32" height="5" rx="2" fill="#8a6a3a"/>` : `<text x="${x + 24}" y="${y + 27}" text-anchor="middle" font-size="16" fill="#fff">${{ r: '◆', b: '●', x: '✖' }[k]}</text>`}`; }).join('')}
-    <g transform="translate(250 150)"><circle r="26" fill="#1d1714" stroke="#f2c14e" stroke-width="3"/><path d="M-16-4h32l-4-10h-24z" fill="#f2c14e"/><rect x="-20" y="-6" width="40" height="5" fill="#f2c14e"/><circle cx="-8" cy="8" r="5" fill="none" stroke="#f2c14e" stroke-width="2.5"/><circle cx="8" cy="8" r="5" fill="none" stroke="#f2c14e" stroke-width="2.5"/></g></svg>`,
+  cover: coverSVG(),
   howTo: {
     goal: 'Be the first team to find all of your agents on the board, without ever touching the assassin.',
     turn: [

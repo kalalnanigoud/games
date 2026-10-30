@@ -180,6 +180,99 @@ const items = {
     icon: `<circle cx="10" cy="20" r="8" fill="none" stroke="#f2d27a" stroke-width="4"/><circle cx="10" cy="20" r="2.5" fill="#f2d27a"/><path d="M18 20h19M31 20v8M36 20v6M26 20v5" stroke="#f2d27a" stroke-width="4" stroke-linecap="round"/>` },
 };
 
+/* ---------------- cover and atmosphere ---------------- */
+
+// A faint brass gear watermark for the felt around the scene (a data URI, so no ids to clash).
+const FELT_GEARS = (() => {
+  const ring = (cx, cy, r, n) => {
+    const pts = Array.from({ length: n * 4 }, (_, i) => { const a = (i / (n * 4)) * Math.PI * 2, rr = i % 4 < 2 ? r : r * 0.84; return `${(cx + rr * Math.cos(a)).toFixed(1)},${(cy + rr * Math.sin(a)).toFixed(1)}`; });
+    return `<polygon points="${pts.join(' ')}"/><circle cx="${cx}" cy="${cy}" r="${r * 0.58}"/><circle cx="${cx}" cy="${cy}" r="${r * 0.14}"/>`;
+  };
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" fill="none" stroke="#f2c879" stroke-opacity=".09" stroke-width="2.4" stroke-linejoin="round">${ring(140, 96, 80, 16)}${ring(42, 200, 40, 10)}</svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+})();
+
+// Cover: two friends climb into the clock room with a lantern and find the great clock stopped,
+// moonlight glowing through its face. Self-contained "kpc-" ids: covers appear several times on a page.
+function coverArt() {
+  const stop = (o, c, a = 1) => `<stop offset="${o}" stop-color="${c}"${a < 1 ? ` stop-opacity="${a}"` : ''}/>`;
+  const at = (r, a) => [(214 + r * Math.cos(a)).toFixed(1), (82 + r * Math.sin(a)).toFixed(1)];
+  const line = (r1, r2, a) => { const [x1, y1] = at(r1, a), [x2, y2] = at(r2, a); return `M${x1} ${y1}L${x2} ${y2}`; };
+  const spokes = Array.from({ length: 12 }, (_, i) => line(10, 58, (i / 12) * Math.PI * 2 + Math.PI / 12)).join('');
+  const ticks = Array.from({ length: 12 }, (_, i) => `<path d="${line(i % 3 ? 49 : 44, 55, (i / 12) * Math.PI * 2)}" stroke-width="${i % 3 ? 2.2 : 3.6}"/>`).join('');
+  const bolts = Array.from({ length: 16 }, (_, i) => { const [x, y] = at(62, (i / 16) * Math.PI * 2); return `<circle cx="${x}" cy="${y}" r="1.5"/>`; }).join('');
+  const glint = (x, y, r, o = 1) => `<path d="M${x} ${y - r}Q${x} ${y} ${x + r} ${y}Q${x} ${y} ${x} ${y + r}Q${x} ${y} ${x - r} ${y}Q${x} ${y} ${x} ${y - r}Z" fill="#fff6d8" opacity="${o}"/>`;
+  const dots = (list, fill, o) => list.map(([x, y, r]) => `<circle cx="${x}" cy="${y}" r="${r}" fill="${fill}" opacity="${o}"/>`).join('');
+  const planks = [-80, -10, 60, 130, 200, 270, 340, 410].map((x) => `M${x} 200L${(x + (160 - x) * 0.35).toFixed(1)} 172`).join('');
+  return `<svg viewBox="0 0 320 200" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Two friends with a lantern find the great clock stopped in the moonlit tower"><defs>
+    <linearGradient id="kpc-wall" x1="0" y1="0" x2="0" y2="1">${stop(0, '#151a44')}${stop(0.6, '#1d1b4a')}${stop(1, '#2a1f42')}</linearGradient>
+    <radialGradient id="kpc-glass" cx=".62" cy=".28" r=".8">${stop(0, '#fbfcff')}${stop(0.22, '#d9e2ff')}${stop(0.6, '#7d8fd8')}${stop(1, '#3d4a9a')}</radialGradient>
+    <radialGradient id="kpc-lamp">${stop(0, '#ffd27a', 0.85)}${stop(0.35, '#ffa64a', 0.32)}${stop(1, '#ff8a3a', 0)}</radialGradient>
+    <linearGradient id="kpc-brass" x1="0" y1="0" x2="1" y2="1">${stop(0, '#fff0b0')}${stop(0.35, '#e0b04c')}${stop(1, '#7a5212')}</linearGradient>
+    <linearGradient id="kpc-floor" x1="0" y1="0" x2="0" y2="1">${stop(0, '#3a2830')}${stop(1, '#1a1424')}</linearGradient>
+    <linearGradient id="kpc-beam" x1="0" y1="0" x2="0" y2="1">${stop(0, '#dfe6ff', 0.2)}${stop(1, '#dfe6ff', 0)}</linearGradient>
+    <linearGradient id="kpc-coatA" x1="0" y1="0" x2="1" y2="1">${stop(0, '#3fd0c0')}${stop(1, '#16707c')}</linearGradient>
+    <linearGradient id="kpc-coatB" x1="0" y1="0" x2="1" y2="1">${stop(0, '#ffe07a')}${stop(1, '#f09a24')}</linearGradient>
+    <filter id="kpc-blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="5"/></filter></defs>
+    <rect width="320" height="200" fill="url(#kpc-wall)"/>
+    <path d="M24 0V172M62 0V172M100 0V172M138 0V172M290 0V172" stroke="#0c0f2c" stroke-width="2" opacity=".5"/>
+    <circle cx="117" cy="126" r="122" fill="url(#kpc-lamp)"/>
+    ${gear(48, 40, 26, 12, 'url(#kpc-brass)')}${gear(86, 18, 15, 9, 'url(#kpc-brass)')}${gear(300, 46, 22, 10, 'url(#kpc-brass)')}
+    <circle cx="214" cy="82" r="72" fill="#0c0e2a"/><circle cx="214" cy="82" r="60" fill="url(#kpc-glass)"/>
+    <circle cx="238" cy="56" r="15" fill="#fff" opacity=".85" filter="url(#kpc-blur)"/><circle cx="238" cy="56" r="9" fill="#fffef6"/>
+    ${dots([[194, 44, 0.9], [186, 62, 0.8], [254, 98, 0.9], [232, 114, 0.8], [178, 92, 0.8], [206, 30, 0.7]], '#fff', 0.85)}
+    <path d="M226 42c-3-4-8-5-12-2 2 0 4 1.5 4 3.2 1.6-.8 3.2 0 4 1.6.8-1.6 2.4-2.6 4-2.8zm0 0c3-4 8-5 12-2-2 0-4 1.5-4 3.2-1.6-.8-3.2 0-4 1.6-.8-1.6-2.4-2.6-4-2.8z" fill="#141838"/>
+    <g stroke="#161a46" stroke-linecap="round" fill="none" opacity=".8"><path d="${spokes}" stroke-width="2"/><circle cx="214" cy="82" r="34" stroke-width="2"/>${ticks}</g>
+    <g stroke="#10132f" stroke-linecap="round" opacity=".78"><path d="M214 82L188 66" stroke-width="5.5"/><path d="M214 82L247 49" stroke-width="3.4"/></g>
+    <circle cx="214" cy="82" r="62" fill="none" stroke="url(#kpc-brass)" stroke-width="6"/><g fill="#fff3c0" opacity=".8">${bolts}</g>
+    <circle cx="214" cy="82" r="7" fill="url(#kpc-brass)" stroke="#3b2510" stroke-width="1.5"/>
+    <path d="M170 118L198 136L150 200H70Z" fill="url(#kpc-beam)"/>
+    <path d="M0 6H320" stroke="#120e26" stroke-width="12"/><path d="M0 52L62 0" stroke="#22183a" stroke-width="9"/>
+    <path d="M30 6V148" stroke="#c99a5a" stroke-width="2.4"/><path d="M26 146h8l-1.2 14h-5.6z" fill="#e2525c"/><path d="M27.5 160l-1 6M30 160v7M32.5 160l1 6" stroke="#e2525c" stroke-width="1.4"/>
+    <path d="M0 172H320V200H0Z" fill="url(#kpc-floor)"/><path d="M0 172H320" stroke="#4a3436" stroke-width="2"/>
+    <path d="${planks}M0 184H320" stroke="#120c1c" stroke-width="1.4" opacity=".7"/>
+    <ellipse cx="118" cy="190" rx="90" ry="12" fill="#ffb050" opacity=".16"/>
+    ${gear(298, 152, 30, 13, 'url(#kpc-brass)')}${gear(268, 186, 14, 9, 'url(#kpc-brass)')}
+    <ellipse cx="152" cy="199" rx="30" ry="5" fill="#05060f" opacity=".45"/>
+    <path d="M134 134q18-18 36 0l-3 16h-30z" fill="#e8a21e"/>
+    <path d="M126 200C126 174 134 154 152 150C170 154 178 174 178 200Z" fill="url(#kpc-coatB)"/>
+    <path d="M152 156V200" stroke="#c98a14" stroke-width="1.5" opacity=".7"/><path d="M134 184h11M160 184h11" stroke="#c98a14" stroke-width="1.6"/>
+    <rect x="147.5" y="163" width="9" height="3.4" rx="1.7" fill="#9a5a10"/><rect x="147.5" y="175" width="9" height="3.4" rx="1.7" fill="#9a5a10"/><rect x="147.5" y="187" width="9" height="3.4" rx="1.7" fill="#9a5a10"/>
+    <rect x="146" y="136" width="11" height="13" rx="4" fill="#a86a40"/><circle cx="139" cy="128" r="3.2" fill="#b07040"/>
+    <circle cx="152" cy="126" r="14.5" fill="#c3814f"/>
+    ${dots([[140, 119, 6.5], [145, 112.5, 7], [153, 110, 7], [161, 112.5, 6.2], [166.5, 116.5, 4.2], [137.5, 127, 4.5]], '#2b1d16', 1)}
+    <ellipse cx="156" cy="124.5" rx="1.8" ry="2.2" fill="#1a1010"/><ellipse cx="163.5" cy="123.5" rx="1.8" ry="2.2" fill="#1a1010"/>
+    <circle cx="156.6" cy="123.7" r=".65" fill="#fff"/><circle cx="164.1" cy="122.7" r=".65" fill="#fff"/>
+    <circle cx="165.5" cy="129" r="2.6" fill="#ff7f8f" opacity=".35"/><circle cx="148" cy="131" r="2.6" fill="#ff7f8f" opacity=".25"/>
+    <path d="M155 131.5q4.2 4.6 8.6 0z" fill="#5a1e24"/>
+    <path d="M164 160C172 146 180 134 188 124L195 129C189 140 180 154 171 166Z" fill="url(#kpc-coatB)"/><path d="M187.6 124.4l7.6 4.7-1.9 3-7.6-4.7z" fill="#c98a14"/>
+    <circle cx="193" cy="122" r="4.8" fill="#c3814f"/><path d="M195 119.6l6.8-7.4" stroke="#c3814f" stroke-width="3.4" stroke-linecap="round"/>
+    <ellipse cx="86" cy="199" rx="34" ry="5" fill="#05060f" opacity=".45"/>
+    <path d="M54 200C54 170 64 146 86 141C108 146 116 170 116 200Z" fill="url(#kpc-coatA)"/>
+    <path d="M86 152V200" stroke="#0f4a52" stroke-width="1.5" opacity=".6"/><path d="M62 160C60 172 60 186 61 200" stroke="#fff" stroke-opacity=".18" stroke-width="3" fill="none"/>
+    <circle cx="81" cy="163" r="1.8" fill="#0f4a52"/><circle cx="81" cy="176" r="1.8" fill="#0f4a52"/><circle cx="81" cy="189" r="1.8" fill="#0f4a52"/>
+    <rect x="81" y="128" width="11" height="13" rx="4" fill="#d89a72"/>
+    <path d="M71 140q15 9 30 0l-1 7q-14 8-28 0z" fill="#ffcf5c"/><path d="M76 145l-5 19 6 1.5 4-18z" fill="#f0b440"/>
+    <circle cx="73" cy="120" r="3.6" fill="#e6ae86"/><circle cx="87" cy="118" r="15.5" fill="#f2c29c"/>
+    <path d="M72 108q-4 10 0 20q2-7 4-9z" fill="#5a3420"/>
+    <path d="M71 110C70 94 80 86 89 86C99 86 106 94 105 106C95 99 81 101 71 110Z" fill="#e2525c"/><path d="M70 108q18-11 36-4l1 6q-18-8-37 4z" fill="#c23a48"/>
+    <path d="M80 97q2 5 1 10M88 94v10M96 95q-1 5-1 9" stroke="#c23a48" stroke-width="1.2" opacity=".6" fill="none"/><circle cx="90" cy="85" r="5.5" fill="#ffd3d8"/>
+    <path d="M89 111.5q3-2 6 0M97 110.5q3-2 6 0" stroke="#5a3420" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+    <ellipse cx="92" cy="116" rx="1.8" ry="2.2" fill="#2a1c1a"/><ellipse cx="100" cy="115" rx="1.8" ry="2.2" fill="#2a1c1a"/>
+    <circle cx="92.6" cy="115.2" r=".65" fill="#fff"/><circle cx="100.6" cy="114.2" r=".65" fill="#fff"/>
+    <circle cx="102" cy="121.5" r="3" fill="#ff7f8f" opacity=".4"/><circle cx="83" cy="123" r="3" fill="#ff7f8f" opacity=".3"/>
+    <ellipse cx="97.5" cy="125" rx="2.2" ry="2.7" fill="#7a2e35"/>
+    <path d="M100 150C106 136 110 124 113 114L121 116C119 128 114 142 108 154Z" fill="url(#kpc-coatA)"/><path d="M112.6 114.4l8.6 2.1-.9 3.4-8.6-2.1z" fill="#0f4a52"/>
+    <path d="M111.5 114a5.5 5.5 0 0 1 11 0" fill="none" stroke="#e0b04c" stroke-width="1.8"/><circle cx="117" cy="109.5" r="5" fill="#f2c29c"/>
+    <circle cx="117" cy="126" r="16" fill="#ffe3a0" opacity=".5" filter="url(#kpc-blur)"/>
+    <path d="M110 118h14l-3-4h-8z" fill="url(#kpc-brass)"/><rect x="111" y="118" width="12" height="16" rx="2.5" fill="#fff1c4"/>
+    <path d="M117 121q4.2 5 0 10q-4.2-5 0-10z" fill="#ff9f3a"/><path d="M117 124q1.8 2.5 0 5q-1.8-2.5 0-5z" fill="#fff6d0"/>
+    <path d="M111 118v16M123 118v16" stroke="#c99a45" stroke-width="1.6"/><rect x="109" y="134" width="16" height="4" rx="2" fill="url(#kpc-brass)"/>
+    ${dots([[132, 96, 1.1], [101, 86, 0.8], [140, 112, 1.3], [128, 80, 0.7], [97, 140, 0.9], [146, 98, 0.8], [112, 70, 1]], '#ffe9b0', 0.75)}
+    ${glint(155, 66, 5, 0.9)}${glint(196, 24, 3.5, 0.8)}${glint(262, 150, 4, 0.7)}${glint(132, 104, 3, 0.8)}
+  </svg>`;
+}
+
 /* ---------------- the tower ---------------- */
 
 const seenAll = (v, ...ids) => ids.every((id) => v.seen.includes(id));
@@ -197,13 +290,23 @@ export default escapeRoom({
   theme: { accent: '#f2c879', glow: '#ffe3a3', deep: '#140b05' },
   css: `.kp-opt{display:flex;flex-direction:column;align-items:center;gap:1px}.kp-opt svg{width:30px!important;height:30px!important}
     .kp-opt small{font:600 .56rem var(--font-body);color:var(--muted);letter-spacing:.04em}
-    .kp-spin{animation:kpSpin 14s linear infinite}.kp-spin-r{animation:kpSpin 10s linear infinite reverse}@keyframes kpSpin{to{transform:rotate(360deg)}}`,
+    .kp-spin{animation:kpSpin 14s linear infinite}.kp-spin-r{animation:kpSpin 10s linear infinite reverse}@keyframes kpSpin{to{transform:rotate(360deg)}}
+    /* Halloway Tower at night: candlelight from below, brass clockwork and a starry sky around the scene. */
+    .esc-keeper{--accent-2:#ff9f5a;--win:#ffd36b;--ink-on:#3b2400;--acc-soft:rgba(242,200,121,.12);--acc-line:rgba(242,200,121,.42);--acc-line-2:rgba(242,200,121,.2);
+      --acc-glow:rgba(255,190,90,.55);--glass-1:rgba(38,38,92,.82);--glass-2:rgba(22,22,60,.9);--item-1:#3a3474;--item-2:#16163e}
+    .esc-keeper .esc-felt{border-color:rgba(242,200,121,.24);background:${FELT_GEARS} right -90px top -80px / 300px 300px no-repeat,
+      radial-gradient(1.5px 1.5px at 7% 9%,rgba(255,244,214,.75),transparent 60%),radial-gradient(1.2px 1.2px at 19% 4%,rgba(255,244,214,.5),transparent 60%),
+      radial-gradient(1.6px 1.6px at 36% 7%,rgba(255,244,214,.55),transparent 60%),radial-gradient(1.2px 1.2px at 58% 3%,rgba(220,230,255,.6),transparent 60%),
+      radial-gradient(1.4px 1.4px at 74% 11%,rgba(255,244,214,.5),transparent 60%),radial-gradient(1.2px 1.2px at 93% 6%,rgba(220,230,255,.55),transparent 60%),
+      radial-gradient(1.3px 1.3px at 3% 44%,rgba(255,244,214,.4),transparent 60%),radial-gradient(1.3px 1.3px at 98% 36%,rgba(255,244,214,.4),transparent 60%),
+      radial-gradient(75% 45% at 50% 106%,rgba(255,166,64,.3),transparent 70%),radial-gradient(45% 30% at 10% 0%,rgba(170,190,255,.16),transparent 70%),
+      linear-gradient(180deg,#131a46 0%,#191c4c 45%,#231a3e 100%)}
+    .esc-keeper .esc-scene{border-color:rgba(224,176,76,.6);box-shadow:0 14px 30px rgba(2,4,16,.55),0 0 0 4px rgba(16,14,40,.6),0 0 38px rgba(255,180,80,.16)}
+    .esc-keeper .esc-val{color:#ffd98a;border-color:rgba(224,176,76,.75);background:radial-gradient(circle at 50% 30%,#2a2a62,#0d0f2e);
+      box-shadow:inset 0 3px 8px rgba(0,0,0,.75),0 0 0 3px rgba(224,176,76,.12),0 0 14px rgba(255,190,90,.12)}
+    .esc-keeper .esc-goal-ic{background:radial-gradient(circle at 40% 30%,#fff4cc,#ffc65c 55%,#e08a2a)}`,
   doneLabel: 'You escaped Halloway Tower',
-  cover: `<svg viewBox="0 0 320 200" role="img" aria-label="A clocktower at night with a glowing clock face">${DEFS}<rect width="320" height="200" fill="url(#kp-night)"/>${Array.from({ length: 26 }, (_, i) => `<circle cx="${(i * 71) % 320}" cy="${(i * 37) % 120}" r="${i % 3 ? 0.8 : 1.5}" fill="#fff" opacity=".8"/>`).join('')}
-    <circle cx="262" cy="40" r="16" fill="#f6efc8"/><circle cx="268" cy="36" r="14" fill="#0d1430"/><path d="M0 182Q80 160 160 178T320 170V200H0Z" fill="#141a2c"/>
-    <path d="M118 200V70l42-44 42 44v130z" fill="#3b2a20" stroke="#1d140c" stroke-width="2"/><path d="M110 74h100" stroke="#1d140c" stroke-width="6"/><path d="M160 26l-10-12h20z" fill="#2a1d14"/>
-    ${glow(160, 98, 70)}<circle cx="160" cy="98" r="24" fill="url(#kp-face)" stroke="url(#kp-brass)" stroke-width="3"/><path d="M160 98l-9-9M160 98v-17" stroke="#2a1806" stroke-width="2.5" stroke-linecap="round"/>
-    <rect x="148" y="146" width="24" height="54" rx="12" fill="#f1c36a" opacity=".85"/><rect x="134" y="128" width="10" height="14" fill="#f1c36a" opacity=".5"/><rect x="176" y="128" width="10" height="14" fill="#f1c36a" opacity=".5"/></svg>`,
+  cover: coverArt(),
   intro: {
     title: 'The Missing Keeper',
     text: [
@@ -216,8 +319,8 @@ export default escapeRoom({
   howTo: {
     goal: 'Work together to find out what happened to the clockmaker Elias Thorne, and escape Halloway Tower. Everyone wins together. There is no time limit, and the clock records how long you took.',
     turn: [
-      ['🔎', 'Explore at the same time', 'There are no turns. Tap anything in a room (or its button below the picture) to see a close-up. Twinkling marks show what nobody has examined yet.'],
-      ['🚪', 'Split up', 'Use the room tabs to move between rooms. Teammates can search different floors at once. The coloured markers show where everyone is.'],
+      ['🔎', 'Explore at the same time', 'There are no turns. Tap anything in a room (or its button below the picture) to see a close-up. Glowing corners and twinkles show what nobody has examined yet.'],
+      ['🚪', 'Split up', 'Use the room tabs to move between rooms. Teammates can search different floors at once. Everyone’s portrait on the room tabs shows where they are.'],
       ['🎒', 'Share everything', 'Items anyone picks up go into the shared inventory. To use one, open the object and choose the item. Clues anyone examines are copied into the team journal.'],
       ['🔐', 'Crack the mechanisms', 'Locks use dials: set each one with ▲ ▼ and press Try it. Wrong guesses cost nothing except pride.'],
     ],

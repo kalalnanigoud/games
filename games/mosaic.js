@@ -1,4 +1,4 @@
-﻿// Mosaic Palace — draft glazed tiles from wooden coasters and set them into
+﻿// Mosaic Palace — draft glazed tiles from porcelain coasters and set them into
 // your palace wall. 2–4 players.
 //
 // Rules (setup / act / endRound) run on the host only. The render side is a
@@ -9,9 +9,11 @@
 // then the refill from the bag. Views that arrive while a sequence plays are
 // queued and shown in order, so sounds and floats always match the board.
 
-import { esc, rand, shuffle, log, uid } from '../js/util.js';
+import { esc, rand, shuffle, log, uid, PLAYER_COLORS } from '../js/util.js';
 import { injectCSS, snapshot, flip, fly, floatText, pulse, shake } from '../js/fx.js';
 import { sound } from '../js/sound.js';
+import { icon } from '../js/icons.js';
+import { portrait } from '../js/avatar.js';
 
 /* =====================================================================
    Rules
@@ -344,12 +346,25 @@ const GLAZES = [
   'radial-gradient(circle at 30% 22%, #d4fff9 0%, #55dccc 34%, #1ba99c 68%, #0a6a63 100%)',
 ];
 
-const MEDALLION = svgURL(`<svg ${SV}><g fill='none' stroke='#f2c14e' stroke-width='.7'><circle cx='50' cy='50' r='49'/><circle cx='50' cy='50' r='46.5'/>
+// Courtyard inlay under the coasters (moon-silver lines).
+const MEDALLION = svgURL(`<svg ${SV}><g fill='none' stroke='#d6e2ff' stroke-width='.7'><circle cx='50' cy='50' r='49'/><circle cx='50' cy='50' r='46.5'/>
   <path d='${starPath(50, 50, 45, 34.4, 8, -90)}'/><path d='${starPath(50, 50, 45, 34.4, 8, -67.5)}'/><circle cx='50' cy='50' r='22'/></g></svg>`);
-const ENGRAVE = svgURL(`<svg ${SV}><g fill='none' stroke='#2a1a06' stroke-opacity='.55' stroke-width='1.1'>
+// Ripples and a star carved into the fountain basin (the centre pool).
+const ENGRAVE = svgURL(`<svg ${SV}><g fill='none' stroke='#c6d6ff' stroke-opacity='.24' stroke-width='1.1'>
   <path d='${starPath(50, 50, 48, 36.7, 8, -90)}'/><path d='${starPath(50, 50, 48, 36.7, 8, -67.5)}'/><circle cx='50' cy='50' r='20'/></g>
-  <g fill='none' stroke='#ffe3a0' stroke-opacity='.25' stroke-width='.8' transform='translate(.7 .9)'><path d='${starPath(50, 50, 48, 36.7, 8, -90)}'/><path d='${starPath(50, 50, 48, 36.7, 8, -67.5)}'/></g></svg>`);
-const FRIEZE = svgURL(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 12'><path d='M0 6 L6 1 L12 6 L18 1 L24 6 M0 11 L6 6 L12 11 L18 6 L24 11' fill='none' stroke='#9a7444' stroke-opacity='.45' stroke-width='1'/><circle cx='12' cy='3.5' r='1' fill='#b8935a' fill-opacity='.6'/></svg>`);
+  <g fill='none' stroke='#ffffff' stroke-opacity='.12' stroke-width='.8' transform='translate(.7 .9)'><path d='${starPath(50, 50, 48, 36.7, 8, -90)}'/><path d='${starPath(50, 50, 48, 36.7, 8, -67.5)}'/></g></svg>`);
+const FRIEZE = svgURL(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 12'><path d='M0 6 L6 1 L12 6 L18 1 L24 6 M0 11 L6 6 L12 11 L18 6 L24 11' fill='none' stroke='#4f63a8' stroke-opacity='.4' stroke-width='1'/><circle cx='12' cy='3.5' r='1' fill='#d4a24a' fill-opacity='.75'/></svg>`);
+// Factory coasters are glazed porcelain plates: cobalt brushwork on the rim, a faint rosette in the well.
+const PLATE = svgURL(`<svg ${SV}><circle cx='50' cy='50' r='48.6' fill='none' stroke='#2747a8' stroke-width='1.4'/>
+  <circle cx='50' cy='50' r='46.6' fill='none' stroke='#2747a8' stroke-opacity='.45' stroke-width='.5'/>
+  ${rotG("<path d='M50 4.4 C52.3 7 52.3 9.4 50 11.8 C47.7 9.4 47.7 7 50 4.4Z' fill='#2f56c4' fill-opacity='.82'/>", 16, 22.5)}
+  ${rotG("<circle cx='50' cy='7.6' r='1.15' fill='#2f56c4' fill-opacity='.55'/>", 16, 22.5, 11.25)}
+  <circle cx='50' cy='50' r='37.4' fill='none' stroke='#2747a8' stroke-opacity='.65' stroke-width='.8'/></svg>`);
+const ROSETTE = svgURL(`<svg ${SV}><g fill='none' stroke='#2f56c4' stroke-opacity='.3' stroke-width='2.2'>${rotG("<path d='M50 50 C44 40 44 26 50 18 C56 26 56 40 50 50Z'/>", 8, 45)}<circle cx='50' cy='50' r='7'/></g></svg>`);
+// A faint star-lattice inlay for the courtyard floor (the felt).
+const LATTICE = svgURL(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><g fill='none' stroke='#c8d6ff' stroke-opacity='.075' stroke-width='1'>
+  <path d='${starPath(32, 32, 14, 10.7, 8, -90)}'/><path d='M0 0 L19 19 M64 0 L45 19 M0 64 L19 45 M64 64 L45 45 M32 0 V12 M32 64 V52 M0 32 H12 M64 32 H52'/></g>
+  <g fill='#dfe7ff' fill-opacity='.09'><circle cx='0' cy='0' r='2.2'/><circle cx='64' cy='0' r='2.2'/><circle cx='0' cy='64' r='2.2'/><circle cx='64' cy='64' r='2.2'/><circle cx='32' cy='32' r='2'/></g></svg>`);
 
 const LAUREL = `<svg viewBox="0 0 24 24" aria-hidden="true"><g fill="#f2c14e" stroke="#7a5010" stroke-width=".35">
   <ellipse cx="6.4" cy="17.4" rx="1.5" ry="2.9" transform="rotate(-42 6.4 17.4)"/><ellipse cx="4.6" cy="12.8" rx="1.45" ry="2.8" transform="rotate(-12 4.6 12.8)"/>
@@ -357,7 +372,7 @@ const LAUREL = `<svg viewBox="0 0 24 24" aria-hidden="true"><g fill="#f2c14e" st
   <ellipse cx="17.6" cy="17.4" rx="1.5" ry="2.9" transform="rotate(42 17.6 17.4)"/><ellipse cx="19.4" cy="12.8" rx="1.45" ry="2.8" transform="rotate(12 19.4 12.8)"/>
   <ellipse cx="18.8" cy="8" rx="1.35" ry="2.6" transform="rotate(-20 18.8 8)"/><ellipse cx="16.3" cy="4.3" rx="1.15" ry="2.2" transform="rotate(-48 16.3 4.3)"/></g>
   <path d="M7.5 20.6 Q12 22.4 16.5 20.6" stroke="#f2c14e" stroke-width="1.3" fill="none" stroke-linecap="round"/><circle cx="12" cy="12" r="2.3" fill="#f2c14e"/></svg>`;
-const CHEV = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M3.2 1.6 L7 5 L3.2 8.4" fill="none" stroke="#7a5a30" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const CHEV = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M3.2 1.6 L7 5 L3.2 8.4" fill="none" stroke="#5d6a99" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const BAG = `<svg viewBox="0 0 60 60" aria-hidden="true"><defs><radialGradient id="mosaic-bagg" cx=".36" cy=".38" r=".75"><stop offset="0" stop-color="#c2564a"/><stop offset=".6" stop-color="#8a2b22"/><stop offset="1" stop-color="#4e130e"/></radialGradient></defs>
   <path d="M19 23 C9 30 7 49 15 54.5 C23 59 37 59 45 54.5 C53 49 51 30 41 23 Z" fill="url(#mosaic-bagg)"/>
   <path d="M16 40 C20 46 40 46 44 40" fill="none" stroke="#e8c46a" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 2"/>
@@ -367,6 +382,9 @@ const BAG = `<svg viewBox="0 0 60 60" aria-hidden="true"><defs><radialGradient i
   <path d="M40 24 L45 34 M40 24 L42 35" stroke="#e8c46a" stroke-width="1.4" stroke-linecap="round"/><circle cx="45" cy="34.5" r="1.8" fill="#f2c14e"/><circle cx="42" cy="35.5" r="1.8" fill="#f2c14e"/>
   <ellipse cx="24" cy="33" rx="5" ry="8" fill="#fff" fill-opacity=".1" transform="rotate(20 24 33)"/></svg>`;
 
+/* Cover art: a moonlit palace courtyard. A master tiler on a stool presses a glowing tile into an
+   unfinished mosaic arch while an apprentice holds up a porcelain plate of fresh tiles
+   (self-contained "mzc-" ids). */
 function buildCover() {
   const g = (id, a, b, c) => `<linearGradient id="mzc-${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset=".55" stop-color="${b}"/><stop offset="1" stop-color="${c}"/></linearGradient>`;
   const hl = '<path d="M3 4.4 Q4.6 2.3 9.5 2.5" stroke="#fff" stroke-opacity=".7" stroke-width="1" fill="none" stroke-linecap="round"/>';
@@ -381,55 +399,103 @@ function buildCover() {
   let pat = '';
   for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) pat += `<use href="#mzc-t${(c - r + 5) % 5}" x="${c * 20}" y="${r * 20}" width="20" height="20"/>`;
   let frieze = '';
-  for (let i = 0; i < 27; i++) frieze += `<use href="#mzc-t${(i * 2) % 5}" x="${1 + i * 12}" y="8.5" width="11" height="11"/>`;
-  const inner = 'M100 170 L100 97 C100 62 128 45 160 31 C192 45 220 62 220 97 L220 170 Z';
-  const column = (x) => `<g><rect x="${x}" y="98" width="11" height="72" fill="url(#mzc-col)"/><rect x="${x + 2}" y="98" width="1.6" height="72" fill="#fff" opacity=".35"/>
-    <path d="M${x - 3} 98 L${x + 14} 98 L${x + 12} 92 L${x - 1} 92 Z" fill="url(#mzc-gold)" stroke="#6a4210" stroke-width=".6"/>
-    <rect x="${x - 4}" y="89" width="19" height="3.5" rx="1" fill="url(#mzc-gold)"/><rect x="${x - 2}" y="166" width="15" height="4" fill="url(#mzc-gold)"/></g>`;
-  const tileAt = (k, x, y, rot, s = 15) => `<g transform="translate(${x} ${y}) rotate(${rot}) scale(1 .5)"><rect x="1" y="3" width="${s}" height="${s}" rx="3" fill="#000" opacity=".35"/><use href="#mzc-t${k}" width="${s}" height="${s}"/></g>`;
-  return `<svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="An ornate tiled palace arch in warm lamplight">
+  for (let i = 0; i < 41; i++) frieze += `<use href="#mzc-t${(i * 2) % 5}" x="${i * 8}" y="92.6" width="7" height="7"/>`;
+  // Unfinished cells of the arch mosaic (on the 20px grid that starts at 110, 30); the first is the one being set.
+  const holes = [[170, 110], [190, 110], [190, 90], [190, 130], [190, 70]]
+    .map(([x, y], i) => `<rect x="${x}" y="${y}" width="20" height="20" fill="#141b46"/><rect x="${x + 1.2}" y="${y + 1.2}" width="17.6" height="17.6" rx="2.6" fill="none" stroke="${i ? '#000' : '#ffd76a'}" stroke-opacity="${i ? 0.45 : 0.9}" stroke-width="${i ? 1 : 1.2}"/>`).join('');
+  const stars = [[16, 14, 0.9], [44, 30, 0.6], [78, 10, 0.8], [112, 24, 0.55], [138, 8, 0.75], [196, 14, 0.7], [214, 36, 0.5], [300, 12, 0.85], [306, 56, 0.5], [8, 50, 0.6], [176, 26, 0.45], [236, 10, 0.6], [292, 74, 0.4]]
+    .map(([x, y, o]) => `<circle cx="${x}" cy="${y}" r="1" fill="#fff" opacity="${o}"/>`).join('');
+  const spark = (x, y, r, o = 0.95) => `<path d="M${x} ${y - r} L${+(x + r * 0.22).toFixed(1)} ${+(y - r * 0.22).toFixed(1)} L${x + r} ${y} L${+(x + r * 0.22).toFixed(1)} ${+(y + r * 0.22).toFixed(1)} L${x} ${y + r} L${+(x - r * 0.22).toFixed(1)} ${+(y + r * 0.22).toFixed(1)} L${x - r} ${y} L${+(x - r * 0.22).toFixed(1)} ${+(y - r * 0.22).toFixed(1)}Z" fill="#fff" opacity="${o}"/>`;
+  const floorLines = [-100, -40, 20, 80, 140, 200, 260, 320, 380, 440].map((X) => `<path d="M${(160 + (X - 160) * 0.54).toFixed(1)} 168 L${X} 200"/>`).join('');
+  const sideArch = (x) => `<path d="M${x} 170 L${x} 128 C${x} 113 ${x + 11} 105 ${x + 22} 100 C${x + 33} 105 ${x + 44} 113 ${x + 44} 128 L${x + 44} 170Z" fill="#0f1640" stroke="#dfe6f8" stroke-width="2.2"/>` +
+    `<path d="M${x + 3.5} 170 L${x + 3.5} 129 C${x + 3.5} 116 ${x + 13} 109 ${x + 22} 104.6" fill="none" stroke="#d4a24a" stroke-width=".8" opacity=".8"/>` +
+    `<circle cx="${x + 22}" cy="128" r="13" fill="url(#mzc-lamp)" opacity=".7"/><path d="M${x + 22} 104 v14" stroke="#8a6a2a" stroke-width=".7"/><path d="M${x + 19} 118 h6 l1.4 4 l-1.4 5 h-6 l-1.4 -5z" fill="url(#mzc-gold)"/><rect x="${x + 20.2}" y="121" width="3.6" height="4.4" fill="#fff4c2"/>`;
+  const column = (x) => `<rect x="${x}" y="104" width="8" height="66" fill="url(#mzc-col)"/><rect x="${x + 1.6}" y="104" width="1.4" height="66" fill="#fff" opacity=".4"/>` +
+    `<rect x="${x - 2}" y="100" width="12" height="4.5" rx="1" fill="#dfe6f8"/><rect x="${x - 1.5}" y="166" width="11" height="4" fill="#dfe6f8"/>`;
+  return `<svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A master tiler sets a glowing tile into a palace mosaic by moonlight while an apprentice holds up a plate of tiles">
   <defs>
-    <linearGradient id="mzc-wall" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f7d9a4"/><stop offset=".55" stop-color="#dda062"/><stop offset="1" stop-color="#94532a"/></linearGradient>
-    <radialGradient id="mzc-light" cx=".24" cy=".06" r=".95"><stop offset="0" stop-color="#fff6dc" stop-opacity=".9"/><stop offset=".38" stop-color="#ffd08a" stop-opacity=".28"/><stop offset="1" stop-color="#5a2a0e" stop-opacity="0"/></radialGradient>
-    <radialGradient id="mzc-vig" cx=".5" cy=".45" r=".78"><stop offset=".58" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#1a0a02" stop-opacity=".62"/></radialGradient>
+    <linearGradient id="mzc-sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b1238"/><stop offset=".45" stop-color="#1d2672"/><stop offset="1" stop-color="#3b3f96"/></linearGradient>
+    <radialGradient id="mzc-moonglow" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#eef2ff" stop-opacity=".55"/><stop offset=".35" stop-color="#b9c8ff" stop-opacity=".2"/><stop offset="1" stop-color="#b9c8ff" stop-opacity="0"/></radialGradient>
+    <mask id="mzc-moonm"><rect width="320" height="200" fill="#000"/><circle cx="262" cy="34" r="14" fill="#fff"/><circle cx="268.5" cy="29.5" r="12" fill="#000"/></mask>
+    <linearGradient id="mzc-wall" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b9c4e6"/><stop offset=".6" stop-color="#8c99c8"/><stop offset="1" stop-color="#5d6aa2"/></linearGradient>
+    <linearGradient id="mzc-marble" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6f8ff"/><stop offset=".6" stop-color="#d9e0f4"/><stop offset="1" stop-color="#a9b5da"/></linearGradient>
     <radialGradient id="mzc-lamp" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fff3c4" stop-opacity=".95"/><stop offset=".3" stop-color="#ffc861" stop-opacity=".5"/><stop offset="1" stop-color="#ff9a2a" stop-opacity="0"/></radialGradient>
     <linearGradient id="mzc-gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff1b0"/><stop offset=".5" stop-color="#e0aa3e"/><stop offset="1" stop-color="#8a5a10"/></linearGradient>
-    <linearGradient id="mzc-col" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f6ead2"/><stop offset=".45" stop-color="#e2cfa8"/><stop offset="1" stop-color="#a88a5e"/></linearGradient>
-    <linearGradient id="mzc-shade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1a0c04" stop-opacity=".6"/><stop offset=".4" stop-color="#1a0c04" stop-opacity=".08"/><stop offset="1" stop-color="#1a0c04" stop-opacity=".4"/></linearGradient>
-    <linearGradient id="mzc-wood" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8f5a33"/><stop offset=".18" stop-color="#6a3e1f"/><stop offset="1" stop-color="#341b0b"/></linearGradient>
-    <radialGradient id="mzc-coaster" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#b88050"/><stop offset="1" stop-color="#5e371a"/></radialGradient>
+    <linearGradient id="mzc-col" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#eef2ff"/><stop offset=".45" stop-color="#cdd6ef"/><stop offset="1" stop-color="#8f9cc8"/></linearGradient>
+    <linearGradient id="mzc-shade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b1238" stop-opacity=".45"/><stop offset=".45" stop-color="#0b1238" stop-opacity=".05"/><stop offset="1" stop-color="#0b1238" stop-opacity=".45"/></linearGradient>
+    <linearGradient id="mzc-floor" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7180bd"/><stop offset="1" stop-color="#2a3471"/></linearGradient>
+    <linearGradient id="mzc-robe" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffbd5a"/><stop offset="1" stop-color="#d4681c"/></linearGradient>
+    <linearGradient id="mzc-tunic" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3cc4b0"/><stop offset="1" stop-color="#17786e"/></linearGradient>
+    <radialGradient id="mzc-plate" cx=".38" cy=".32" r=".75"><stop offset="0" stop-color="#ffffff"/><stop offset=".6" stop-color="#e9eefb"/><stop offset="1" stop-color="#b9c4e0"/></radialGradient>
+    <radialGradient id="mzc-tileglow" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#ffffff" stop-opacity=".95"/><stop offset=".35" stop-color="#bcd2ff" stop-opacity=".55"/><stop offset="1" stop-color="#7aa2ff" stop-opacity="0"/></radialGradient>
+    <radialGradient id="mzc-vig" cx=".5" cy=".45" r=".78"><stop offset=".6" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#050a24" stop-opacity=".6"/></radialGradient>
     ${g('g0', '#7ea6ff', '#2a55c8', '#0f276a')}${g('g1', '#fff2a8', '#f4b62c', '#a9640a')}${g('g2', '#ffaa86', '#d6582f', '#7e2812')}${g('g3', '#62626e', '#24242c', '#060608')}${g('g4', '#c2fff6', '#33c6b7', '#0a716a')}
     ${sym}
     <pattern id="mzc-tiles" width="100" height="100" patternUnits="userSpaceOnUse" x="110" y="30">${pat}</pattern>
-    <pattern id="mzc-lattice" width="22" height="22" patternUnits="userSpaceOnUse"><path d="${starPath(11, 11, 9, 6.9, 8, -90)}" fill="none" stroke="#a5652e" stroke-opacity=".3" stroke-width=".9"/><circle cx="0" cy="0" r="1.6" fill="#a5652e" fill-opacity=".3"/><circle cx="22" cy="22" r="1.6" fill="#a5652e" fill-opacity=".3"/></pattern>
-    <clipPath id="mzc-arch"><path d="${inner}"/></clipPath>
+    <clipPath id="mzc-arch"><path d="M110 170 L110 98 C110 66 135 50 160 38 C185 50 210 66 210 98 L210 170 Z"/></clipPath>
   </defs>
-  <rect width="320" height="200" fill="url(#mzc-wall)"/>
-  <rect width="320" height="200" fill="url(#mzc-lattice)"/>
-  <rect x="0" y="6" width="320" height="16" fill="#4a240c" opacity=".55"/>${frieze}
-  <rect x="0" y="5" width="320" height="1.8" fill="url(#mzc-gold)"/><rect x="0" y="21.6" width="320" height="1.8" fill="url(#mzc-gold)"/>
-  <path d="M84 170 L84 95 C84 52 121 32 160 15 C199 32 236 52 236 95 L236 170 Z" fill="#f1d29b" stroke="#8f562a" stroke-width="1.2"/>
-  <path d="M91 170 L91 96 C91 56 124 38 160 22.5 C196 38 229 56 229 96 L229 170 Z" fill="none" stroke="url(#mzc-gold)" stroke-width="3.2"/>
-  <path d="M86.5 170 L86.5 95 C86.5 54 122 34 160 17.5 C198 34 233.5 54 233.5 95 L233.5 170" fill="none" stroke="#b2733a" stroke-width=".8" stroke-dasharray="1.5 2.5"/>
-  <g clip-path="url(#mzc-arch)"><rect x="100" y="28" width="120" height="145" fill="#2a1406"/><rect x="100" y="30" width="120" height="145" fill="url(#mzc-tiles)"/><rect x="100" y="28" width="120" height="145" fill="url(#mzc-shade)"/></g>
-  <path d="${inner}" fill="none" stroke="#fff3cf" stroke-width="2.8" stroke-dasharray="0 5.4" stroke-linecap="round"/>
-  ${column(70)}${column(239)}
-  <circle cx="160" cy="60" r="34" fill="url(#mzc-lamp)"/>
-  <line x1="160" y1="31" x2="160" y2="42" stroke="#5a360c" stroke-width="1"/>
-  <path d="M155 42 L160 36.5 L165 42 Z" fill="url(#mzc-gold)"/>
-  <path d="M153 42.5 L167 42.5 L171.5 51 L168 65 L152 65 L148.5 51 Z" fill="url(#mzc-gold)" stroke="#5a360c" stroke-width=".8"/>
-  <path d="M154.5 51 L165.5 51 L164 63 L156 63 Z" fill="#fff4c2"/><path d="M160 51 L160 63 M154.8 57 L165.2 57" stroke="#c48a2a" stroke-width=".7"/>
-  <path d="M156 65 L164 65 L160 70 Z" fill="url(#mzc-gold)"/>
-  <path d="M28 0 L112 0 L262 200 L160 200 Z" fill="#fff4d0" opacity=".09"/>
-  <path d="M124 0 L150 0 L304 200 L268 200 Z" fill="#fff4d0" opacity=".06"/>
-  <rect x="0" y="168" width="320" height="32" fill="url(#mzc-wood)"/>
-  <rect x="0" y="168" width="320" height="2.4" fill="#c99466" opacity=".85"/>
-  <ellipse cx="160" cy="188" rx="40" ry="9" fill="#000" opacity=".35"/>
-  <ellipse cx="160" cy="183" rx="37" ry="10.5" fill="url(#mzc-coaster)" stroke="#3a200c" stroke-width=".8"/>
-  <ellipse cx="160" cy="182.2" rx="29" ry="7.6" fill="#5e3519" stroke="#c48a55" stroke-opacity=".35" stroke-width=".6"/>
-  ${tileAt(3, 143, 175, 0)}${tileAt(0, 160, 174.5, 0)}${tileAt(0, 144.5, 181, 0)}${tileAt(2, 161, 181, 0)}
-  ${tileAt(1, 52, 176, -14, 16)}${tileAt(4, 76, 181, 10, 16)}${tileAt(2, 236, 179, 12, 16)}${tileAt(4, 258, 175, -8, 16)}
-  <rect width="320" height="200" fill="url(#mzc-light)"/>
+  <rect width="320" height="200" fill="url(#mzc-sky)"/>${stars}
+  <circle cx="262" cy="34" r="56" fill="url(#mzc-moonglow)"/><rect width="320" height="200" fill="#fff8e2" mask="url(#mzc-moonm)"/>
+  <g fill="#2a3486"><path d="M14 92 V80 C14 64 36 54 44 50 C52 54 74 64 74 80 V92Z"/><path d="M44 50 V40"/><rect x="80" y="46" width="7" height="46"/><path d="M78.5 52 L83.5 36 L88.5 52Z"/><rect x="77.5" y="58" width="12" height="3" rx="1"/>
+    <path d="M236 92 V82 C236 68 254 60 264 56 C274 60 292 68 292 82 V92Z"/><rect x="298" y="52" width="7" height="40"/><path d="M296.5 58 L301.5 42 L306.5 58Z"/></g>
+  <path d="M44 50 V41" stroke="#3a4390" stroke-width="1.4"/><circle cx="44" cy="39.5" r="1.8" fill="#d4a24a"/><circle cx="264" cy="54" r="1.6" fill="#d4a24a"/>
+  <rect y="90" width="320" height="80" fill="url(#mzc-wall)"/><rect y="87.6" width="320" height="3.6" fill="#e6ecfb"/><rect y="91" width="320" height="10" fill="#1b2560"/>${frieze}<rect y="100.6" width="320" height="1.4" fill="url(#mzc-gold)"/>
+  ${sideArch(20)}${sideArch(256)}${column(80)}${column(232)}
+  <path d="M98 170 L98 96 C98 60 128 42 160 27 C192 42 222 60 222 96 L222 170 Z" fill="url(#mzc-marble)" stroke="#5d6aa2" stroke-width="1"/>
+  <path d="M104 170 L104 97 C104 63 131 46 160 32.6 C189 46 216 63 216 97 L216 170" fill="none" stroke="#2f56c4" stroke-width="2.4" stroke-dasharray="0 4.6" stroke-linecap="round"/>
+  <g clip-path="url(#mzc-arch)"><rect x="100" y="28" width="120" height="145" fill="#141b46"/><rect x="110" y="30" width="100" height="145" fill="url(#mzc-tiles)"/>${holes}<rect x="100" y="28" width="120" height="145" fill="url(#mzc-shade)"/>
+    <circle cx="160" cy="62" r="46" fill="url(#mzc-lamp)" opacity=".55"/></g>
+  <path d="M110 170 L110 98 C110 66 135 50 160 38 C185 50 210 66 210 98 L210 170" fill="none" stroke="url(#mzc-gold)" stroke-width="2.4"/>
+  <circle cx="160" cy="62" r="30" fill="url(#mzc-lamp)"/>
+  <line x1="160" y1="38" x2="160" y2="50" stroke="#8a6a2a" stroke-width="1"/><path d="M155 50 L160 45 L165 50Z" fill="url(#mzc-gold)"/>
+  <path d="M153 50.5 L167 50.5 L171 58 L168 70 L152 70 L149 58Z" fill="url(#mzc-gold)" stroke="#5a360c" stroke-width=".8"/>
+  <path d="M154.5 58 L165.5 58 L164 68 L156 68Z" fill="#fff4c2"/><path d="M160 58 V68 M155 63 H165" stroke="#c48a2a" stroke-width=".7"/><path d="M156 70 L164 70 L160 74.5Z" fill="url(#mzc-gold)"/>
+  <path d="M232 0 L320 0 L320 40 L150 200 L60 200Z" fill="#e8eeff" opacity=".05"/>
+  <rect y="168" width="320" height="32" fill="url(#mzc-floor)"/><rect y="168" width="320" height="1.6" fill="#e6ecfb" opacity=".8"/>
+  <g stroke="#e6ecff" stroke-opacity=".2" stroke-width=".8" fill="none">${floorLines}<path d="M0 175 H320 M0 184 H320 M0 195 H320"/></g>
+  <ellipse cx="160" cy="182" rx="70" ry="8" fill="#ffc861" opacity=".14"/>
+  <g>
+    <rect x="212" y="170.5" width="31" height="4.4" rx="1.2" fill="#b07a46" stroke="#5a3416" stroke-width=".6"/><rect x="214.5" y="174.6" width="4" height="15" fill="#7a4a24"/><rect x="236.5" y="174.6" width="4" height="15" fill="#7a4a24"/><rect x="214.5" y="182" width="26" height="2.4" fill="#8a5a2e"/>
+    <ellipse cx="228" cy="190.5" rx="17" ry="2.6" fill="#000" opacity=".3"/>
+    <ellipse cx="222" cy="170.4" rx="4.4" ry="1.9" fill="#3a2412"/><ellipse cx="234" cy="170.4" rx="4.4" ry="1.9" fill="#3a2412"/>
+    <path d="M214 170 C214 145 218 128 228 128 C238 128 242 145 242 170Z" fill="url(#mzc-robe)"/><path d="M228 129 V170" stroke="#fff1b0" stroke-width="1.2" opacity=".75"/>
+    <path d="M215.6 150 Q228 154 240.4 150 L240.8 155 Q228 159 215.2 155Z" fill="#2a3f9e"/>
+    <path d="M236.5 134 C242.5 141 243.5 149 240.5 155.5" stroke="#e98a2c" stroke-width="5.6" fill="none" stroke-linecap="round"/><circle cx="240.4" cy="157" r="3.1" fill="#b97a4c"/>
+    <path d="M241 159 l2.6 6.2" stroke="#6b4424" stroke-width="1.6" stroke-linecap="round"/><path d="M242.4 164.6 l5.2 1.8 l-3 4.2z" fill="#cdd6ef" stroke="#6b7aa8" stroke-width=".5"/>
+    <circle cx="181" cy="120" r="17" fill="url(#mzc-tileglow)"/>
+    <path d="M220 134 C211 130.5 199 126.5 190 122" stroke="#f29a3a" stroke-width="5.8" fill="none" stroke-linecap="round"/>
+    <use href="#mzc-t0" x="175" y="114" width="12" height="12" transform="rotate(-8 181 120)"/><circle cx="189" cy="121.5" r="3.4" fill="#b97a4c"/>
+    ${spark(170, 108, 4.4)}${spark(193, 106, 3)}${spark(172, 133, 2.6, 0.8)}
+    <rect x="224.5" y="122.5" width="7" height="6.5" fill="#a86a40"/><circle cx="228" cy="117.5" r="9.4" fill="#b97a4c"/>
+    <path d="M220 121 C221 129 235 129 236 121 C233.5 125.6 222.5 125.6 220 121Z" fill="#2b1d16"/>
+    <circle cx="222.6" cy="120.6" r="1.8" fill="#ff7f8f" opacity=".35"/>
+    <path d="M221.6 116.6 q1.8 -1.8 3.6 0 M228 116.6 q1.8 -1.8 3.6 0" fill="none" stroke="#2a1c1a" stroke-width="1.3" stroke-linecap="round"/>
+    <path d="M224.6 121.4 q2.4 1.6 4.8 0" stroke="#f3d2b8" stroke-width="1" fill="none" stroke-linecap="round"/>
+    <ellipse cx="228" cy="109.6" rx="11.2" ry="6.6" fill="#eef3ff"/><path d="M217.6 111 Q228 104 238.4 111 M218.6 107.6 Q228 101.4 237.4 107.6" fill="none" stroke="#b8c4e4" stroke-width="1"/>
+    <path d="M226 103.6 l2 -3.6 l2 3.6z" fill="#d23b4b"/><circle cx="228" cy="106.4" r="1.6" fill="#3ee0a1"/>
+  </g>
+  <g>
+    <ellipse cx="88" cy="186.5" rx="16" ry="2.6" fill="#000" opacity=".3"/>
+    <ellipse cx="82" cy="185" rx="4.2" ry="1.9" fill="#3a2412"/><ellipse cx="94" cy="185" rx="4.2" ry="1.9" fill="#3a2412"/>
+    <path d="M74.5 184.5 C74.5 160 79 146 88 146 C97 146 101.5 160 101.5 184.5Z" fill="url(#mzc-tunic)"/><path d="M76 164 Q88 167 100 164 L100.3 168 Q88 171 75.7 168Z" fill="#f2c14e"/>
+    <path d="M96 152 C102 145.5 105.5 138.5 106.6 131" stroke="#2fb3a0" stroke-width="5" fill="none" stroke-linecap="round"/>
+    <path d="M80.5 152 C84 141 91.5 132.5 99.5 128.5" stroke="#2fb3a0" stroke-width="5" fill="none" stroke-linecap="round"/>
+    <rect x="85" y="141.5" width="6" height="5.5" fill="#d9a27a"/><circle cx="88" cy="136" r="8.8" fill="#f5c39e"/>
+    <path d="M79.6 134.5 C79 126 85 123.5 88 123.5 C92.5 123.5 97 126.5 96.4 134 C95 130 92 128.6 88 128.6 C84 128.6 81 130.5 79.6 134.5Z" fill="#3b2418"/>
+    <path d="M82.4 127.6 l1.4 -6.4 h8.4 l1.4 6.4z" fill="#d23b4b"/><path d="M92.2 121.6 q3.6 1.2 3.8 5.6" stroke="#f2c14e" stroke-width="1" fill="none"/><circle cx="96" cy="127.4" r="1.3" fill="#f2c14e"/>
+    <circle cx="83.2" cy="139.2" r="1.9" fill="#ff7f8f" opacity=".4"/><circle cx="93.6" cy="139.2" r="1.9" fill="#ff7f8f" opacity=".4"/>
+    <circle cx="85.4" cy="135.4" r="1.25" fill="#2a1c1a"/><circle cx="91.4" cy="135.4" r="1.25" fill="#2a1c1a"/><circle cx="85.8" cy="134.9" r=".4" fill="#fff"/><circle cx="91.8" cy="134.9" r=".4" fill="#fff"/>
+    <path d="M85.4 139.4 q3 3.4 6 0z" fill="#7a2e35"/>
+    <g transform="rotate(-14 113 121)">
+      <ellipse cx="113" cy="124" rx="17" ry="12.5" fill="#000" opacity=".25"/>
+      <ellipse cx="113" cy="121" rx="17" ry="12.5" fill="url(#mzc-plate)" stroke="#2747a8" stroke-width="1.3"/>
+      <ellipse cx="113" cy="121" rx="12.6" ry="9" fill="none" stroke="#2747a8" stroke-opacity=".55" stroke-width=".7"/>
+      ${[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((i) => { const a = (i * Math.PI) / 6; return `<circle cx="${(113 + 14.8 * Math.cos(a)).toFixed(1)}" cy="${(121 + 10.8 * Math.sin(a)).toFixed(1)}" r=".9" fill="#2f56c4"/>`; }).join('')}
+      <use href="#mzc-t1" x="105.4" y="113.6" width="7.4" height="7.4"/><use href="#mzc-t1" x="113.2" y="113.2" width="7.4" height="7.4"/><use href="#mzc-t4" x="105.8" y="121" width="7.4" height="7.4"/><use href="#mzc-t2" x="113.4" y="120.8" width="7.4" height="7.4"/>
+    </g>
+    <circle cx="106.8" cy="131.4" r="3" fill="#f5c39e"/><circle cx="100" cy="128.4" r="3" fill="#f5c39e"/>
+  </g>
+  ${spark(134, 84, 3, 0.8)}${spark(286, 112, 2.6, 0.7)}${spark(42, 70, 2.4, 0.7)}
   <rect width="320" height="200" fill="url(#mzc-vig)"/>
 </svg>`;
 }
@@ -440,7 +506,14 @@ function buildCover() {
 
 const STYLE = `
 .mosaic-root { --mz-cell: 8.1cqw; --mz-gap: .8cqw; }
-.mosaic-felt.felt { padding: 10px; }
+/* Moonlit palace courtyard: deep indigo night, a silver moon glow and a faint star-lattice inlay. */
+.mosaic-felt.felt { padding: 12px;
+  background:
+    radial-gradient(48% 38% at 88% -6%, rgba(228, 236, 255, .34), rgba(170, 190, 255, .1) 45%, transparent 70%),
+    radial-gradient(90% 55% at 50% 112%, rgba(90, 120, 220, .26), transparent 65%),
+    ${LATTICE} center top / 64px 64px repeat,
+    radial-gradient(120% 100% at 50% 0%, #2c3d86 0%, #1d2a66 42%, #141e4c 72%, #0c1434 100%);
+  border-color: rgba(180, 200, 255, .22); }
 .mosaic-stage { container-type: inline-size; position: relative; }
 .mosaic-stage-in { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; justify-items: center; align-items: center; }
 .mosaic-tablewrap { width: 100%; max-width: 480px; }
@@ -452,55 +525,68 @@ const STYLE = `
 .mosaic-raise { z-index: 5; }
 
 /* status bar */
-.mosaic-bar { display: flex; flex-direction: column; gap: 7px; margin-bottom: 12px; padding: 9px 12px; border-radius: 12px;
-  background: linear-gradient(180deg, rgba(6, 26, 17, .66), rgba(6, 26, 17, .4));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), inset 0 0 0 1px rgba(0,0,0,.3), 0 2px 8px rgba(0,0,0,.25); }
+.mosaic-bar { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; padding: 10px 12px; border-radius: 16px;
+  background: linear-gradient(180deg, rgba(8, 12, 38, .62), rgba(8, 12, 38, .44)); border: 1px solid rgba(190, 205, 255, .14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 6px 18px rgba(0, 0, 0, .2); }
 .mosaic-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.mosaic-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 11px 3px 3px; border-radius: 999px; background: rgba(0,0,0,.34);
-  font-size: .84rem; font-weight: 700; max-width: 100%; box-shadow: inset 0 1px 0 rgba(255,255,255,.07); transition: box-shadow .3s; }
-.mosaic-ava { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; flex: none; font-family: var(--font-display); font-size: .74rem; font-weight: 800;
-  color: #3a2405; background: radial-gradient(circle at 35% 30%, #fff0b8, #dba339 60%, #9a6a14); box-shadow: 0 1px 2px rgba(0,0,0,.5), inset 0 -1px 2px rgba(90,50,0,.4); }
+.mosaic-chip { position: relative; display: inline-flex; align-items: center; gap: 7px; padding: 3px 12px 3px 3px; border-radius: 999px; max-width: 100%;
+  background: rgba(255, 255, 255, .06); border: 1px solid var(--line); font-size: .84rem; font-weight: 700; transition: box-shadow .3s; }
+.mosaic-ava { width: 28px; height: 28px; border-radius: 50%; flex: none; box-shadow: 0 0 0 2px var(--pc, #fff), 0 1px 4px rgba(0, 0, 0, .45); }
+.mosaic-ava .portrait { width: 100%; height: 100%; display: block; border-radius: 50%; }
 .mosaic-cn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 8.5em; }
-.mosaic-chip b { font-family: var(--font-display); color: var(--gold); font-size: .95rem; }
-.mosaic-chip.mosaic-on { box-shadow: 0 0 0 2px var(--gold), 0 0 14px rgba(242,193,78,.5); }
-.mosaic-chip .mosaic-fp { width: 15px; height: 15px; border-radius: 4px; display: grid; place-items: center; font-family: var(--font-display); font-size: .62rem; font-weight: 800;
-  color: #8a5a10; background: linear-gradient(145deg, #fffbea, #e8d6a8); box-shadow: 0 1px 2px rgba(0,0,0,.5); }
-.mosaic-line2 { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; min-height: 34px; }
-.mosaic-line2 .status { margin: 0; white-space: nowrap; }
-.mosaic-hintx { font-size: .9rem; color: #e2f2e7; flex: 1; min-width: 12em; line-height: 1.3; }
+.mosaic-chip b { font-family: var(--font-display); font-weight: 700; color: var(--gold); font-size: 1rem; }
+.mosaic-chip.mosaic-me { background: rgba(76, 184, 255, .1); border-color: rgba(76, 184, 255, .32); }
+.mosaic-chip.mosaic-on { box-shadow: 0 0 0 2px var(--gold), 0 0 14px rgba(255, 207, 92, .45); }
+/* A short flash when this player's score goes up. */
+.mosaic-chip.mosaic-scored { animation: mosaicScored 1.2s ease-out .45s; }
+@keyframes mosaicScored { 20% { box-shadow: 0 0 0 2px #fff3b0, 0 0 24px 5px rgba(255, 214, 90, .55); } }
+.mosaic-chip .mosaic-fp { width: 16px; height: 16px; border-radius: 4px; display: grid; place-items: center; font-family: var(--font-display); font-size: .62rem; font-weight: 700;
+  color: #7a5410; background: linear-gradient(145deg, #fffdf2, #e9dcb4); box-shadow: 0 1px 2px rgba(0, 0, 0, .5); }
+.mosaic-line2 { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; min-height: 36px; }
+.mosaic-line2 .status { margin: 0; white-space: nowrap; display: inline-flex; align-items: center; gap: 7px; }
+.mosaic-hintx { font-size: .9rem; color: #dfe5ff; flex: 1; min-width: 12em; line-height: 1.3; }
 .mosaic-hintx b { color: #ffe39a; }
 .mosaic-line2 button.small { min-height: 36px; }
 .mosaic-bar .winner-banner { padding: 4px 0; font-size: 1.35rem; }
-.mosaic-spark { display: inline-block; animation: mosaicSpin 2.4s linear infinite; }
+.mosaic-bar .winner-banner .ic { width: 1em; height: 1em; vertical-align: -.12em; }
+.mosaic-spark { display: inline-grid; place-items: center; color: #cfe0ff; animation: mosaicSpin 2.4s linear infinite; }
 @keyframes mosaicSpin { to { transform: rotate(360deg); } }
 
 /* table */
 .mosaic-table { position: relative; width: 100%; aspect-ratio: 1; container-type: inline-size; }
-.mosaic-medal { position: absolute; left: 50%; top: 50%; width: 92cqw; height: 92cqw; transform: translate(-50%, -50%); background: ${MEDALLION} center / contain no-repeat; opacity: .1; pointer-events: none; }
+.mosaic-medal { position: absolute; left: 50%; top: 50%; width: 92cqw; height: 92cqw; transform: translate(-50%, -50%); background: ${MEDALLION} center / contain no-repeat; opacity: .13; pointer-events: none; }
 .mosaic-ring { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); border-radius: 50%; pointer-events: none;
-  border: .3cqw dashed rgba(242,193,78,.28); box-shadow: 0 0 0 1.4cqw rgba(0,0,0,.07), inset 0 0 0 1.4cqw rgba(0,0,0,.07); }
+  border: .3cqw dashed rgba(200, 215, 255, .26); box-shadow: 0 0 0 1.4cqw rgba(140, 160, 255, .05), inset 0 0 0 1.4cqw rgba(140, 160, 255, .05); }
 .mosaic-fac { position: absolute; transform: translate(-50%, -50%); border-radius: 50%; }
+/* Factory coasters: glazed porcelain plates with cobalt brushwork, a sunken well and a glossy highlight. */
 .mosaic-coaster { position: absolute; inset: 0; border-radius: 50%;
-  background:
-    radial-gradient(circle at 50% 50%, rgba(0,0,0,0) 0 61%, rgba(40,20,8,.4) 62.5%, rgba(255,220,170,.2) 64.5%, rgba(0,0,0,0) 66.5%),
-    repeating-radial-gradient(circle at 47% 45%, rgba(255,226,180,.07) 0 .5cqw, rgba(60,30,10,.09) .5cqw 1cqw),
-    radial-gradient(circle at 32% 26%, #c99058 0%, #915c30 45%, #643a1a 85%, #4a2a12 100%);
-  box-shadow: 0 1.3cqw 1.9cqw rgba(0,0,0,.55), 0 .5cqw 0 #3a210e, inset 0 .35cqw .25cqw rgba(255,224,180,.45), inset 0 -.6cqw 1cqw rgba(0,0,0,.45); }
-.mosaic-coaster::before { content: ''; position: absolute; inset: 12%; border-radius: 50%;
-  background: repeating-radial-gradient(circle at 50% 50%, rgba(255,226,180,.05) 0 .42cqw, rgba(0,0,0,.07) .42cqw .84cqw), radial-gradient(circle at 50% 36%, #9a6639, #6e4425 70%, #5b361b);
-  box-shadow: inset 0 .7cqw 1.3cqw rgba(0,0,0,.62), inset 0 -.25cqw .35cqw rgba(255,220,170,.22), 0 .2cqw .1cqw rgba(255,224,180,.3); }
-.mosaic-coaster::after { content: ''; position: absolute; inset: 2% 20% 58% 18%; border-radius: 50%; background: radial-gradient(ellipse at 50% 30%, rgba(255,236,200,.3), rgba(255,236,200,0) 70%); }
-.mosaic-fac.mosaic-empty .mosaic-coaster { filter: brightness(.8) saturate(.85); }
-.mosaic-fac.mosaic-can .mosaic-coaster { animation: mosaicRim 2.4s ease-in-out infinite; }
-.mosaic-fac.mosaic-selsrc .mosaic-coaster { animation: none; box-shadow: 0 1.3cqw 1.9cqw rgba(0,0,0,.55), 0 .5cqw 0 #3a210e, 0 0 0 .55cqw #ffd76a, 0 0 3.2cqw rgba(255,215,106,.85), inset 0 .35cqw .25cqw rgba(255,224,180,.45), inset 0 -.6cqw 1cqw rgba(0,0,0,.45); }
-@keyframes mosaicRim { 50% { box-shadow: 0 1.3cqw 1.9cqw rgba(0,0,0,.55), 0 .5cqw 0 #3a210e, 0 0 0 .4cqw rgba(242,193,78,.5), 0 0 2.6cqw rgba(242,193,78,.4), inset 0 .35cqw .25cqw rgba(255,224,180,.45), inset 0 -.6cqw 1cqw rgba(0,0,0,.45); } }
-.mosaic-num { position: absolute; left: 50%; bottom: -2.3cqw; transform: translateX(-50%); font-family: var(--font-display); font-weight: 800; font-size: 2.1cqw; line-height: 1;
-  color: rgba(255,230,170,.55); text-shadow: 0 1px 0 rgba(0,0,0,.6); pointer-events: none; }
+  background: ${PLATE} center / 100% 100% no-repeat, radial-gradient(circle at 34% 28%, #ffffff 0%, #f1f4fc 38%, #d9e0f0 78%, #b9c4de 100%);
+  box-shadow: 0 1.3cqw 2cqw rgba(0, 4, 24, .55), 0 .5cqw 0 #7f8db4, inset 0 .35cqw .3cqw rgba(255, 255, 255, .95), inset 0 -.6cqw 1cqw rgba(40, 60, 130, .35); }
+.mosaic-coaster::before { content: ''; position: absolute; inset: 14%; border-radius: 50%;
+  background: ${ROSETTE} center / 62% 62% no-repeat, radial-gradient(circle at 50% 36%, #fbfcff, #e8edf8 62%, #d2daee);
+  box-shadow: inset 0 .7cqw 1.3cqw rgba(40, 60, 130, .38), inset 0 -.25cqw .35cqw rgba(255, 255, 255, .8), 0 .2cqw .1cqw rgba(255, 255, 255, .7); }
+.mosaic-coaster::after { content: ''; position: absolute; inset: 3% 22% 60% 14%; border-radius: 50%; pointer-events: none; transform: rotate(-18deg);
+  background: radial-gradient(ellipse at 50% 35%, rgba(255, 255, 255, .85), rgba(255, 255, 255, 0) 70%); }
+.mosaic-fac.mosaic-empty .mosaic-coaster { filter: brightness(.68) saturate(.8); }
+/* Plates you can take from: a warm rim plus a slow breathing glow behind (opacity only). */
+.mosaic-fac::before { content: ''; position: absolute; inset: -1.2cqw; border-radius: 50%; pointer-events: none; opacity: 0; }
+.mosaic-fac.mosaic-can .mosaic-coaster { box-shadow: 0 0 0 .45cqw rgba(255, 215, 106, .9), 0 1.3cqw 2cqw rgba(0, 4, 24, .55), 0 .5cqw 0 #7f8db4,
+  inset 0 .35cqw .3cqw rgba(255, 255, 255, .95), inset 0 -.6cqw 1cqw rgba(40, 60, 130, .35); }
+.mosaic-fac.mosaic-can::before { opacity: 1; box-shadow: 0 0 3.4cqw 1.2cqw rgba(255, 206, 84, .5); animation: mosaicBreathe 2.6s ease-in-out infinite; }
+@keyframes mosaicBreathe { 50% { opacity: .3; } }
+/* The plate you picked from lifts off the table; pressing a plate dips it. */
+.mosaic-fac.mosaic-selsrc { z-index: 3; animation: mosaicPlateUp .3s cubic-bezier(.3,1.4,.5,1) forwards; }
+@keyframes mosaicPlateUp { to { transform: translate(-50%, -50%) translateY(-1.1cqw) scale(1.04); } }
+.mosaic-fac.mosaic-selsrc .mosaic-coaster { box-shadow: 0 0 0 .55cqw #ffd76a, 0 0 3.2cqw rgba(255, 215, 106, .8), 0 2.6cqw 3cqw rgba(0, 4, 24, .55), 0 .5cqw 0 #7f8db4,
+  inset 0 .35cqw .3cqw rgba(255, 255, 255, .95), inset 0 -.6cqw 1cqw rgba(40, 60, 130, .35); }
+.mosaic-fac:has(> button.mosaic-hit:active) { transform: translate(-50%, -50%) scale(.97); }
+.mosaic-num { position: absolute; left: 50%; bottom: -2.3cqw; transform: translateX(-50%); font-family: var(--font-display); font-weight: 700; font-size: 2.1cqw; line-height: 1;
+  color: rgba(215, 225, 255, .6); text-shadow: 0 1px 0 rgba(0, 0, 0, .6); pointer-events: none; }
 
 button.mosaic-hit { position: absolute; width: 50%; height: 50%; min-height: 0; min-width: 0; padding: 0; margin: 0; border: 0; border-radius: 28%;
   background: transparent; box-shadow: none; cursor: pointer; z-index: 8; transition: background .15s; }
-button.mosaic-hit:hover:not(:disabled) { filter: none; background: rgba(255,232,160,.1); }
-button.mosaic-hit:active:not(:disabled) { transform: none; box-shadow: none; background: rgba(255,232,160,.18); }
+button.mosaic-hit:hover:not(:disabled) { filter: none; background: rgba(255, 232, 160, .12); }
+button.mosaic-hit:active:not(:disabled) { transform: none; box-shadow: none; background: rgba(255, 232, 160, .2); }
 button.mosaic-hit:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 
 /* tiles */
@@ -526,124 +612,148 @@ ${GLAZES.map((gz, k) => `.mosaic-c${k} { --glaze: ${gz}; --motif: ${svgURL(MOTIF
   box-shadow: inset calc(var(--u) * .22) calc(var(--u) * .3) calc(var(--u) * .16) rgba(255,255,255,.8), inset calc(var(--u) * -.28) calc(var(--u) * -.42) calc(var(--u) * .5) rgba(110,80,30,.45),
     0 calc(var(--u) * .22) 0 rgba(0,0,0,.3), 0 calc(var(--u) * .55) calc(var(--u) * .9) rgba(0,0,0,.45); }
 .mosaic-marker::before { content: ''; position: absolute; inset: 13%; border-radius: 50%; border: calc(var(--u) * .3) solid #c99a3a; box-shadow: inset 0 0 0 calc(var(--u) * .18) rgba(255,255,255,.7); }
-.mosaic-marker span { position: relative; font-family: var(--font-display); font-weight: 800; font-size: calc(var(--u) * 4.4); line-height: 1; color: #9a6a14; text-shadow: 0 1px 0 #fff6d8, 0 -1px 0 rgba(90,55,10,.45); }
+.mosaic-marker span { position: relative; font-family: var(--font-display); font-weight: 700; font-size: calc(var(--u) * 4.4); line-height: 1; color: #9a6a14; text-shadow: 0 1px 0 #fff6d8, 0 -1px 0 rgba(90,55,10,.45); }
 
-/* centre pool */
+/* centre pool: a moonlit fountain basin with a marble rim */
 .mosaic-pool { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); border-radius: 50%;
-  background: radial-gradient(circle at 50% 50%, rgba(0,0,0,0) 0 66%, rgba(255,236,170,.22) 67%, rgba(0,0,0,0) 69%),
-    radial-gradient(circle at 38% 30%, #a47a3c 0%, #7a5422 42%, #573915 80%, #452c0f 100%);
-  box-shadow: 0 1.2cqw 2.2cqw rgba(0,0,0,.55), 0 0 0 .7cqw #c9963c, 0 0 0 1cqw #6e4912, 0 0 0 1.25cqw rgba(255,230,160,.45),
-    inset 0 1cqw 2.4cqw rgba(0,0,0,.55), inset 0 -.3cqw .6cqw rgba(255,220,150,.25); }
+  background:
+    radial-gradient(22% 12% at 64% 28%, rgba(230, 238, 255, .3), transparent 100%),
+    radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0) 0 64%, rgba(200, 220, 255, .3) 65.5%, rgba(0, 0, 0, 0) 67.5%),
+    radial-gradient(circle at 40% 32%, #3f5cab 0%, #2b418c 40%, #1e2f6d 78%, #16245a 100%);
+  box-shadow: 0 1.2cqw 2.2cqw rgba(0, 4, 24, .55), 0 0 0 .8cqw #e2e8f6, 0 0 0 1.15cqw #95a3c9, 0 0 0 1.4cqw rgba(255, 255, 255, .3),
+    inset 0 1cqw 2.4cqw rgba(0, 0, 20, .55), inset 0 -.3cqw .6cqw rgba(180, 200, 255, .25); }
 .mosaic-pool::before { content: ''; position: absolute; inset: 9%; background: ${ENGRAVE} center / contain no-repeat; pointer-events: none; }
-.mosaic-pool.mosaic-can { animation: mosaicPool 2.4s ease-in-out infinite; }
-@keyframes mosaicPool { 50% { box-shadow: 0 1.2cqw 2.2cqw rgba(0,0,0,.55), 0 0 0 .7cqw #e8b64e, 0 0 0 1cqw #6e4912, 0 0 0 1.25cqw rgba(255,230,160,.6), 0 0 3cqw rgba(242,193,78,.45),
-  inset 0 1cqw 2.4cqw rgba(0,0,0,.55), inset 0 -.3cqw .6cqw rgba(255,220,150,.25); } }
-.mosaic-cnt { position: absolute; z-index: 9; font-family: var(--font-display); font-weight: 800; font-size: 2.5cqw; line-height: 1; padding: .45cqw .9cqw; border-radius: 99px;
-  color: #ffe39a; background: linear-gradient(180deg, #3a2412, #1e1208); border: .25cqw solid #c9963c; box-shadow: 0 .3cqw .6cqw rgba(0,0,0,.5); pointer-events: none; }
+.mosaic-pool::after { content: ''; position: absolute; inset: -2.2cqw; border-radius: 50%; pointer-events: none; opacity: 0; }
+.mosaic-pool.mosaic-can { box-shadow: 0 1.2cqw 2.2cqw rgba(0, 4, 24, .55), 0 0 0 .8cqw #e2e8f6, 0 0 0 1.15cqw #95a3c9, 0 0 0 1.7cqw rgba(255, 215, 106, .85),
+    inset 0 1cqw 2.4cqw rgba(0, 0, 20, .55), inset 0 -.3cqw .6cqw rgba(180, 200, 255, .25); }
+.mosaic-pool.mosaic-can::after { opacity: 1; box-shadow: 0 0 3.4cqw 1cqw rgba(255, 206, 84, .45); animation: mosaicBreathe 2.6s ease-in-out infinite; }
+.mosaic-pool:has(> button.mosaic-hit:active) { transform: translate(-50%, -50%) scale(.985); }
+.mosaic-cnt { position: absolute; z-index: 9; font-family: var(--font-display); font-weight: 700; font-size: 2.5cqw; line-height: 1; padding: .45cqw .9cqw; border-radius: 99px;
+  color: #fff; background: linear-gradient(180deg, #2c3c7c, #141d45); border: .25cqw solid rgba(255, 215, 106, .8); box-shadow: 0 .3cqw .6cqw rgba(0, 0, 0, .5); pointer-events: none; }
 .mosaic-poolcap { position: absolute; left: 50%; bottom: 13%; transform: translateX(-50%); font-family: var(--font-display); font-size: 2.2cqw; letter-spacing: .14em;
-  color: rgba(255,232,170,.5); text-transform: uppercase; pointer-events: none; white-space: nowrap; }
+  color: rgba(210, 225, 255, .55); text-transform: uppercase; pointer-events: none; white-space: nowrap; }
 
 /* corners: round, bag, lid */
 .mosaic-corner { position: absolute; width: 12cqw; height: 12cqw; }
 .mosaic-roundb { left: 1.5%; top: 1.5%; border-radius: 50%; display: grid; place-content: center; text-align: center; color: #4a2c06;
-  background: radial-gradient(circle at 35% 30%, #fff0b8, #e0ac44 45%, #a8741e 80%, #7a5010);
-  box-shadow: 0 .8cqw 1.4cqw rgba(0,0,0,.5), inset 0 .3cqw .2cqw rgba(255,255,255,.6), inset 0 -.4cqw .6cqw rgba(90,50,0,.45), 0 0 0 .3cqw #6e4912; }
+  background: radial-gradient(circle at 35% 30%, #fff3c4, #e8b74e 45%, #b07a1e 80%, #7a5010);
+  box-shadow: 0 .8cqw 1.4cqw rgba(0, 0, 0, .5), inset 0 .3cqw .2cqw rgba(255, 255, 255, .6), inset 0 -.4cqw .6cqw rgba(90, 50, 0, .45), 0 0 0 .3cqw #1c2853, 0 0 0 .6cqw rgba(255, 215, 106, .45); }
 .mosaic-roundb small { display: block; font-size: 1.7cqw; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; line-height: 1; }
-.mosaic-roundb b { display: block; font-family: var(--font-display); font-size: 5cqw; line-height: 1; }
+.mosaic-roundb b { display: block; font-family: var(--font-display); font-weight: 700; font-size: 5cqw; line-height: 1; }
 .mosaic-bag { right: 1.5%; top: 1.5%; }
-.mosaic-bag svg { width: 100%; height: 100%; filter: drop-shadow(0 .8cqw .7cqw rgba(0,0,0,.5)); }
-.mosaic-lid { right: 1.5%; bottom: 1.5%; border-radius: 1.8cqw; background: linear-gradient(160deg, #94623a, #5e391d 70%, #4a2c15);
-  box-shadow: 0 .8cqw 1.4cqw rgba(0,0,0,.55), inset 0 .25cqw 0 rgba(255,220,170,.35), inset 0 -.3cqw .4cqw rgba(0,0,0,.35); }
-.mosaic-lidin { position: absolute; inset: 1.1cqw; border-radius: 1.1cqw; background: radial-gradient(circle at 50% 40%, #3d2412, #26160a); box-shadow: inset 0 .6cqw 1cqw rgba(0,0,0,.75); }
+.mosaic-bag svg { width: 100%; height: 100%; filter: drop-shadow(0 .8cqw .7cqw rgba(0, 0, 0, .5)); }
+.mosaic-lid { right: 1.5%; bottom: 1.5%; border-radius: 1.8cqw; background: linear-gradient(160deg, #3c4f94, #25336e 70%, #1b2656);
+  box-shadow: 0 .8cqw 1.4cqw rgba(0, 0, 0, .55), 0 0 0 .25cqw rgba(255, 207, 92, .6), inset 0 .25cqw 0 rgba(200, 215, 255, .35), inset 0 -.3cqw .4cqw rgba(0, 0, 0, .35); }
+.mosaic-lidin { position: absolute; inset: 1.1cqw; border-radius: 1.1cqw; background: radial-gradient(circle at 50% 40%, #1a2452, #0e1533); box-shadow: inset 0 .6cqw 1cqw rgba(0, 0, 0, .75); }
 .mosaic-lid .mosaic-tile { --u: .42cqw; }
-.mosaic-cornum { position: absolute; left: 50%; bottom: -1.6cqw; transform: translateX(-50%); z-index: 2; font-family: var(--font-display); font-weight: 800; font-size: 2.4cqw; line-height: 1;
-  padding: .5cqw 1cqw; border-radius: 99px; color: #ffe39a; background: linear-gradient(180deg, #3a2412, #1e1208); border: .22cqw solid #c9963c; white-space: nowrap; }
+.mosaic-cornum { position: absolute; left: 50%; bottom: -1.6cqw; transform: translateX(-50%); z-index: 2; font-family: var(--font-display); font-weight: 700; font-size: 2.4cqw; line-height: 1;
+  padding: .5cqw 1cqw; border-radius: 99px; color: #fff; background: linear-gradient(180deg, #2c3c7c, #141d45); border: .22cqw solid rgba(255, 215, 106, .8); white-space: nowrap; }
 .mosaic-cornum i { font-style: normal; font-family: var(--font-body); font-size: 1.8cqw; letter-spacing: .06em; text-transform: uppercase; opacity: .75; margin-right: .5cqw; }
 
-/* player boards */
+/* player boards: moonlit marble with cobalt inlay */
 .mosaic-bwrap { container-type: inline-size; width: 100%; position: relative; }
-.mosaic-board { --sh: inset 0 .35cqw .25cqw rgba(255,252,240,.8), inset 0 -.7cqw 1.2cqw rgba(110,75,35,.35), inset 0 0 0 .5cqw #b8935a, inset 0 0 0 .78cqw #f4e6c4,
-    inset 0 0 0 1.05cqw rgba(120,85,40,.45), 0 1.4cqw 2.4cqw rgba(0,0,0,.5), 0 .45cqw 0 #6e5030;
-  position: relative; padding: 2.4cqw 2.9cqw 3cqw; border-radius: 3.4cqw; color: #4a3216; background-color: #e8d6b0;
-  background-image: var(--grain), radial-gradient(ellipse at 28% 0%, #fcf3de 0%, #ecdab4 40%, #d8bf91 80%, #c4a676 100%);
+.mosaic-board { --sh: inset 0 .35cqw .25cqw rgba(255,255,255,.9), inset 0 -.7cqw 1.2cqw rgba(60,80,140,.28), inset 0 0 0 .5cqw #8f9cc6, inset 0 0 0 .78cqw #f5f7fd,
+    inset 0 0 0 1.05cqw rgba(60,80,150,.35), 0 1.4cqw 2.4cqw rgba(0,4,24,.5), 0 .45cqw 0 #56638f;
+  position: relative; padding: 2.4cqw 2.9cqw 3cqw; border-radius: 3.4cqw; color: #26346a; background-color: #e6eaf4;
+  background-image: var(--grain), radial-gradient(ellipse at 28% 0%, #ffffff 0%, #eef1f9 40%, #dbe1ef 80%, #c8d0e4 100%);
   background-blend-mode: multiply, normal; box-shadow: var(--sh); transition: box-shadow .4s; }
-.mosaic-board::before { content: ''; position: absolute; inset: 1.7cqw; border-radius: 2.3cqw; border: .22cqw solid rgba(140,100,50,.3); pointer-events: none; }
-.mosaic-board.mosaic-turn { box-shadow: var(--sh), 0 0 0 .55cqw rgba(242,193,78,.95), 0 0 3.6cqw rgba(242,193,78,.6); }
-.mosaic-bhead { display: flex; align-items: center; justify-content: space-between; gap: 2cqw; min-height: 9cqw; margin: 0 .3cqw 1.8cqw; position: relative; padding-bottom: 1.4cqw;
+.mosaic-board::before { content: ''; position: absolute; inset: 1.7cqw; border-radius: 2.3cqw; border: .22cqw solid rgba(60, 85, 160, .22); pointer-events: none; }
+.mosaic-board.mosaic-turn { box-shadow: var(--sh), 0 0 0 .55cqw rgba(255, 207, 92, .95), 0 0 3.6cqw rgba(255, 207, 92, .55); }
+.mosaic-bhead { display: flex; align-items: center; gap: 2.2cqw; min-height: 9cqw; margin: 0 .3cqw 1.8cqw; position: relative; padding-bottom: 1.4cqw;
   background: ${FRIEZE} left bottom / 4.8cqw 2.4cqw repeat-x; }
-.mosaic-bname { font-family: var(--font-display); font-weight: 800; font-size: 4.4cqw; line-height: 1.1; color: #5b3a14; min-width: 0;
-  text-shadow: 0 .2cqw 0 rgba(255,250,235,.85), 0 -.1cqw 0 rgba(80,50,15,.35); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.mosaic-bname small { display: block; font-family: var(--font-body); font-size: 2.5cqw; font-weight: 800; color: #8a6a3a; letter-spacing: .12em; text-transform: uppercase; line-height: 1.2; }
+.mosaic-face { width: 8.6cqw; height: 8.6cqw; flex: none; border-radius: 50%; box-shadow: 0 0 0 .5cqw var(--pc, #fff), 0 .4cqw 1cqw rgba(20, 30, 70, .35); }
+.mosaic-face .portrait { width: 100%; height: 100%; display: block; border-radius: 50%; }
+.mosaic-mini .mosaic-face { width: 10.5cqw; height: 10.5cqw; box-shadow: 0 0 0 .7cqw var(--pc, #fff), 0 .4cqw 1cqw rgba(20, 30, 70, .35); }
+.mosaic-bname { flex: 1; font-family: var(--font-display); font-weight: 700; font-size: 4.4cqw; line-height: 1.1; color: #22306a; min-width: 0;
+  text-shadow: 0 .2cqw 0 rgba(255, 255, 255, .85); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mosaic-bname small { display: block; font-family: var(--font-body); font-size: 2.5cqw; font-weight: 800; color: #6774a3; letter-spacing: .12em; text-transform: uppercase; line-height: 1.2; }
 .mosaic-score { display: inline-flex; align-items: center; gap: .8cqw; padding: .9cqw 2.6cqw .9cqw 1.5cqw; border-radius: 99px; flex: none;
-  background: linear-gradient(180deg, #5d3c20, #3a2412); box-shadow: inset 0 .3cqw 0 rgba(255,220,170,.28), inset 0 -.3cqw .5cqw rgba(0,0,0,.4), 0 .4cqw .8cqw rgba(0,0,0,.35), 0 0 0 .3cqw #b8935a; }
+  background: linear-gradient(180deg, #2f4082, #19234f); box-shadow: inset 0 .3cqw 0 rgba(200, 215, 255, .28), inset 0 -.3cqw .5cqw rgba(0, 0, 0, .4), 0 .4cqw .8cqw rgba(20, 30, 70, .35), 0 0 0 .3cqw #c9a24a; }
+.mosaic-score.mosaic-scored { animation: mosaicScoredPill 1.2s ease-out .45s; }
+@keyframes mosaicScoredPill { 20% { box-shadow: inset 0 .3cqw 0 rgba(200, 215, 255, .28), 0 0 0 .3cqw #ffe9a0, 0 0 4cqw 1.2cqw rgba(255, 214, 90, .7); } }
 .mosaic-score svg { width: 5.6cqw; height: 5.6cqw; display: block; }
-.mosaic-score b { display: inline-block; font-family: var(--font-display); font-weight: 800; font-size: 5.4cqw; line-height: 1; color: #ffd76a; text-shadow: 0 .25cqw 0 #000; min-width: 2ch; text-align: center; }
+.mosaic-score b { display: inline-block; font-family: var(--font-display); font-weight: 700; font-size: 5.4cqw; line-height: 1; color: #ffd76a; text-shadow: 0 .25cqw 0 rgba(0, 0, 0, .6); min-width: 2ch; text-align: center; }
 .mosaic-bbody { display: grid; grid-template-columns: repeat(5, var(--mz-cell)) 5.2cqw repeat(5, var(--mz-cell)); grid-template-rows: repeat(5, var(--mz-cell)); gap: var(--mz-gap); position: relative; }
 .mosaic-line { grid-column: 1 / 6; display: flex; flex-direction: row-reverse; gap: var(--mz-gap); position: relative; border-radius: 1.4cqw; }
 .mosaic-slot, .mosaic-cell, .mosaic-fslot { position: relative; width: var(--mz-cell); height: var(--mz-cell); flex: none; border-radius: 1.5cqw; }
 .mosaic-slot > .mosaic-tk, .mosaic-cell > .mosaic-tk, .mosaic-fslot > .mosaic-tk { inset: 4%; }
 .mosaic-line[data-dest]::before { content: ''; position: absolute; top: -.45cqw; bottom: -.45cqw; left: 0; right: -.4cqw; }
-.mosaic-slot { background: linear-gradient(145deg, #a6865a, #c6aa7b); box-shadow: inset .35cqw .45cqw .7cqw rgba(60,38,15,.62), inset -.2cqw -.25cqw .3cqw rgba(255,246,222,.55); }
-.mosaic-line.mosaic-legal { cursor: pointer; }
+.mosaic-slot { background: linear-gradient(145deg, #a4afcc, #c5cde2); box-shadow: inset .35cqw .45cqw .7cqw rgba(30, 45, 100, .5), inset -.2cqw -.25cqw .3cqw rgba(255, 255, 255, .65); }
+/* Lines (and the floor) that can take the lifted tiles: a crisp gold rim, a soft breathing halo, a dip when pressed. */
+.mosaic-line.mosaic-legal, .mosaic-floor.mosaic-legal { cursor: pointer; transition: transform .12s var(--ease); }
+.mosaic-line.mosaic-legal:active, .mosaic-floor.mosaic-legal:active { transform: scale(.98); }
 .mosaic-line.mosaic-legal::after, .mosaic-floor.mosaic-legal::after { content: ''; position: absolute; pointer-events: none; border-radius: 1.9cqw;
-  background: rgba(255,214,102,.2); box-shadow: 0 0 0 .32cqw rgba(255,206,84,.95), 0 0 2.4cqw rgba(255,206,84,.65); animation: mosaicBreath 1.3s ease-in-out infinite; }
-.mosaic-line.mosaic-legal::after { top: -.5cqw; bottom: -.5cqw; right: -.5cqw; width: calc(var(--w) + 1cqw); }
-.mosaic-floor.mosaic-legal::after { inset: 0; }
-@keyframes mosaicBreath { 50% { box-shadow: 0 0 0 .32cqw rgba(255,232,150,1), 0 0 3.6cqw rgba(255,206,84,.95); background: rgba(255,214,102,.32); } }
-.mosaic-tile.mosaic-ghost { opacity: .34; box-shadow: none; filter: saturate(.8); outline: .28cqw dashed rgba(255,248,225,.95); outline-offset: -.28cqw; animation: mosaicGhostT 1.3s ease-in-out infinite; }
+  background: rgba(255, 214, 102, .2); box-shadow: 0 0 0 .32cqw rgba(255, 206, 84, .95); }
+.mosaic-line.mosaic-legal::after, .mosaic-line > .mosaic-halo { top: -.5cqw; bottom: -.5cqw; right: -.5cqw; width: calc(var(--w) + 1cqw); }
+.mosaic-floor.mosaic-legal::after, .mosaic-floor > .mosaic-halo { inset: 0; }
+.mosaic-halo { position: absolute; pointer-events: none; border-radius: 1.9cqw; box-shadow: 0 0 2.8cqw .6cqw rgba(255, 206, 84, .7); animation: mosaicBreathe 2.6s ease-in-out infinite; }
+.mosaic-tile.mosaic-ghost { opacity: .4; box-shadow: none; filter: saturate(.8); outline: .28cqw dashed rgba(30, 48, 120, .85); outline-offset: -.28cqw; animation: mosaicGhostT 2.2s ease-in-out infinite; }
 .mosaic-tile.mosaic-ghost::after { display: none; }
-@keyframes mosaicGhostT { 50% { opacity: .56; } }
+@keyframes mosaicGhostT { 50% { opacity: .58; } }
 @keyframes mosaicGhost { 50% { opacity: .78; } }
 .mosaic-over { position: absolute; right: calc(var(--w) + 1.4cqw); top: 50%; transform: translateY(-50%); white-space: nowrap; font-size: 2.5cqw; font-weight: 800; line-height: 1;
-  color: #fff; background: linear-gradient(180deg, #d0543c, #9a2e1c); border-radius: 99px; padding: .6cqw 1.1cqw; box-shadow: 0 .25cqw .5cqw rgba(0,0,0,.4); }
+  color: #fff; background: linear-gradient(180deg, #e0566c, #a82e44); border-radius: 99px; padding: .6cqw 1.1cqw; box-shadow: 0 .25cqw .5cqw rgba(0, 0, 0, .4); }
 .mosaic-arrow { grid-column: 6; display: grid; place-items: center; }
 .mosaic-arrow svg { width: 3.4cqw; height: 3.4cqw; opacity: .38; }
-.mosaic-arrow.mosaic-ready svg { opacity: 1; filter: drop-shadow(0 0 .7cqw rgba(255,190,60,.95)); }
-.mosaic-arrow.mosaic-ready path { stroke: #c27a10; }
+.mosaic-arrow.mosaic-ready svg { opacity: 1; filter: drop-shadow(0 0 .7cqw rgba(255, 190, 60, .95)); }
+.mosaic-arrow.mosaic-ready path { stroke: #d08a10; }
 .mosaic-wall { grid-column: 7 / 12; grid-row: 1 / 6; display: grid; grid-template-columns: repeat(5, var(--mz-cell)); grid-template-rows: repeat(5, var(--mz-cell)); gap: var(--mz-gap); position: relative; }
-.mosaic-wall::before { content: ''; position: absolute; inset: -1cqw; border-radius: 2cqw; background: linear-gradient(145deg, rgba(120,85,40,.3), rgba(255,250,235,.22));
-  box-shadow: inset .3cqw .4cqw .6cqw rgba(80,50,20,.4), 0 .2cqw 0 rgba(255,250,235,.65); }
-.mosaic-cell { background: linear-gradient(145deg, #c0a274, #dcc59b); box-shadow: inset .3cqw .4cqw .6cqw rgba(70,45,18,.52), inset -.2cqw -.2cqw .3cqw rgba(255,248,228,.6); }
+.mosaic-wall::before { content: ''; position: absolute; inset: -1cqw; border-radius: 2cqw; background: linear-gradient(145deg, rgba(60, 80, 150, .22), rgba(255, 255, 255, .3));
+  box-shadow: inset .3cqw .4cqw .6cqw rgba(40, 55, 110, .35), 0 .2cqw 0 rgba(255, 255, 255, .7); }
+.mosaic-cell { background: linear-gradient(145deg, #b7c1da, #d5dbeb); box-shadow: inset .3cqw .4cqw .6cqw rgba(35, 50, 100, .45), inset -.2cqw -.2cqw .3cqw rgba(255, 255, 255, .65); }
 .mosaic-hint { position: absolute; inset: 9%; border-radius: 1.2cqw; background: var(--motif) center / 100% 100% no-repeat, var(--glaze); opacity: .34; filter: saturate(.55) brightness(1.04); }
-.mosaic-cell.mosaic-target { box-shadow: inset .3cqw .4cqw .6cqw rgba(70,45,18,.52), 0 0 0 .3cqw rgba(255,206,84,.95), 0 0 2cqw rgba(255,206,84,.75); }
-.mosaic-cell.mosaic-target .mosaic-hint { opacity: .8; filter: none; animation: mosaicGhost 1.3s ease-in-out infinite; }
+.mosaic-cell.mosaic-target { box-shadow: inset .3cqw .4cqw .6cqw rgba(35, 50, 100, .45), 0 0 0 .3cqw rgba(255, 206, 84, .95), 0 0 2cqw rgba(255, 206, 84, .75); }
+.mosaic-cell.mosaic-target .mosaic-hint { opacity: .8; filter: none; animation: mosaicGhost 2.2s ease-in-out infinite; }
 .mosaic-floorrow { display: flex; align-items: center; justify-content: space-between; gap: 2cqw; margin-top: 2.8cqw; }
 .mosaic-floor { display: flex; gap: var(--mz-gap); padding: .9cqw; margin: -.9cqw; border-radius: 2cqw; position: relative;
-  background: rgba(120,55,25,.15); box-shadow: inset .25cqw .35cqw .6cqw rgba(80,40,15,.35), 0 .15cqw 0 rgba(255,250,235,.5); }
-.mosaic-floor.mosaic-legal { cursor: pointer; }
-.mosaic-fslot { background: linear-gradient(145deg, #a8795a, #c99f7c); box-shadow: inset .35cqw .45cqw .7cqw rgba(70,30,10,.55), inset -.2cqw -.25cqw .3cqw rgba(255,240,220,.5); display: grid; place-items: center; }
-.mosaic-fslot > span { font-family: var(--font-display); font-weight: 800; font-size: 2.9cqw; color: rgba(112,32,14,.72); text-shadow: 0 .15cqw 0 rgba(255,235,215,.55); }
-.mosaic-flabel { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.05; font-size: 2.5cqw; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: #7a5a30; }
-.mosaic-flabel b { font-family: var(--font-display); font-size: 5cqw; letter-spacing: 0; color: #a8321e; text-shadow: 0 .2cqw 0 rgba(255,245,225,.7); }
-.mosaic-flabel b.mosaic-zero { color: #8a7050; opacity: .7; }
+  background: rgba(170, 60, 90, .1); box-shadow: inset .25cqw .35cqw .6cqw rgba(90, 30, 60, .28), 0 .15cqw 0 rgba(255, 255, 255, .6); }
+.mosaic-fslot { background: linear-gradient(145deg, #b3a8c6, #d2c9de); box-shadow: inset .35cqw .45cqw .7cqw rgba(70, 30, 70, .45), inset -.2cqw -.25cqw .3cqw rgba(255, 255, 255, .55); display: grid; place-items: center; }
+.mosaic-fslot > span { font-family: var(--font-display); font-weight: 700; font-size: 2.9cqw; color: rgba(150, 30, 60, .7); text-shadow: 0 .15cqw 0 rgba(255, 255, 255, .55); }
+.mosaic-flabel { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.05; font-size: 2.5cqw; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: #5d6a99; }
+.mosaic-flabel b { font-family: var(--font-display); font-weight: 700; font-size: 5cqw; letter-spacing: 0; color: #c0392b; text-shadow: 0 .2cqw 0 rgba(255, 255, 255, .7); }
+.mosaic-flabel b.mosaic-zero { color: #8a93b4; opacity: .8; }
 .mosaic-drop { margin-bottom: .8cqw; padding: .5cqw 1.1cqw; border-radius: 99px; font-size: 2.3cqw; letter-spacing: .02em; text-transform: none; white-space: nowrap;
-  color: #fff; background: linear-gradient(180deg, #d0543c, #9a2e1c); box-shadow: 0 .25cqw .5cqw rgba(0,0,0,.35); }
+  color: #fff; background: linear-gradient(180deg, #e0566c, #a82e44); box-shadow: 0 .25cqw .5cqw rgba(0, 0, 0, .35); }
 .mosaic-mini .mosaic-bname { font-size: 5cqw; }
 .mosaic-mini .mosaic-bhead { cursor: pointer; }
 .mosaic-mini.mosaic-collapsed .mosaic-bhead { margin-bottom: 0; }
-.mosaic-chev { display: inline-block; margin-left: 1.4cqw; font-size: 3.2cqw; color: #8a6a3a; transition: transform .2s; }
+.mosaic-chev { display: inline-block; vertical-align: middle; width: 3.6cqw; height: 3.6cqw; margin-left: 1.2cqw; color: #6774a3; transition: transform .2s; }
+.mosaic-chev .ic { display: block; width: 100%; height: 100%; }
 .mosaic-collapsed .mosaic-chev { transform: rotate(-90deg); }
 
 /* side */
-.mosaic-opps h3, .mosaic-results h3 { margin: 0 0 10px; color: var(--gold); font-size: 1.02rem; display: flex; align-items: center; gap: 8px; }
+.mosaic-opps h3 { margin: 0 0 12px; display: flex; align-items: center; gap: 7px; font-family: var(--font-body); font-weight: 800; color: var(--muted); font-size: .74rem; letter-spacing: .12em; text-transform: uppercase; }
+.mosaic-opps h3 .ic { width: 16px; height: 16px; color: var(--brand-2); }
 .mosaic-opps .mosaic-list { display: flex; flex-direction: column; gap: 14px; align-items: center; }
 .mosaic-opps .mosaic-bwrap { max-width: 290px; }
-.mosaic-logt { font-family: var(--font-display); font-weight: 800; font-size: .95rem; color: #6b4a1e; margin-bottom: 4px; letter-spacing: .04em; }
+.mosaic-results h3 { margin: 0 0 10px; display: flex; align-items: center; gap: 8px; color: var(--gold); font-size: 1.05rem; }
+.mosaic-results h3 .ic { width: 20px; height: 20px; }
 .mosaic-results table { width: 100%; border-collapse: collapse; font-size: .86rem; }
 .mosaic-results th { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 800; padding: 4px; }
-.mosaic-results td { padding: 6px 4px; text-align: center; border-top: 1px solid rgba(242,193,78,.15); }
+.mosaic-results td { padding: 6px 4px; text-align: center; border-top: 1px solid var(--line); }
 .mosaic-results td:first-child, .mosaic-results th:first-child { text-align: left; }
 .mosaic-results tr.mosaic-win td { color: var(--gold); font-weight: 800; }
-.mosaic-results td b { font-family: var(--font-display); font-size: 1.05rem; }
-.mosaic-rules { font-size: .84rem; color: var(--muted); }
-.mosaic-rules summary { cursor: pointer; font-weight: 800; color: var(--text); min-height: 32px; display: flex; align-items: center; }
-.mosaic-rules ul { margin: 6px 0 0; padding-left: 18px; }
-.mosaic-rules li { margin: 3px 0; }
+.mosaic-results td b { font-family: var(--font-display); font-weight: 700; font-size: 1.05rem; }
+.mosaic-rp { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; }
+.mosaic-rp > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.mosaic-results .mosaic-face { width: 24px; height: 24px; box-shadow: 0 0 0 2px var(--pc, #fff); }
+.mosaic-rp .ic { width: 14px; height: 14px; flex: none; color: var(--gold); }
+/* drawers: chronicle and rules */
+.mosaic-chron > summary > span:not(.note), .mosaic-rules > summary > span { white-space: nowrap; }
+.mosaic-chron > summary .note { min-width: 0; max-width: 58%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mosaic-chron[open] > summary .note { visibility: hidden; }
+.mosaic-chron .log { max-height: 220px; color: var(--muted); }
+.mosaic-chron .log div { border-bottom-color: var(--line); }
+.mosaic-chron .log div:first-child { color: var(--text); }
+.mosaic-rules ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: .88rem; }
+.mosaic-rules li { margin: 4px 0; }
+.mosaic-rules b { color: var(--text); }
 
 @media (max-width: 480px) {
-  .mosaic-felt.felt { padding: 6px; border-width: 7px; }
-  .mosaic-bar { padding: 7px 8px; margin-bottom: 8px; }
-  .mosaic-chip { font-size: .78rem; padding-right: 9px; }
+  .mosaic-felt.felt { padding: 6px; }
+  .mosaic-bar { padding: 8px; margin-bottom: 8px; border-radius: 13px; }
+  .mosaic-chip { font-size: .78rem; padding-right: 9px; gap: 5px; }
+  .mosaic-ava { width: 24px; height: 24px; }
   .mosaic-cn { max-width: 6.5em; }
   .mosaic-stage-in { gap: 10px; }
 }
@@ -664,6 +774,18 @@ const UI = {
   frame: null, // what is on screen: { v, fx, raise, fresh }
   queue: [], busy: false, timers: [],
   tseq: 0, eseq: 0, keys: new Set(), sel: null, collapsed: {}, draws: 0,
+};
+// Side drawers: the chronicle folds away on phones so the table gets the screen; both stay as the player left them.
+let chronOpen = typeof matchMedia === 'function' ? matchMedia('(min-width: 901px)').matches : true;
+let rulesOpen = false;
+let prevScores = new Map(); // game id + player id -> score at the last draw, for the "scored" flash
+
+const isBotId = (id) => !!(UI.ctx && typeof UI.ctx.isBot === 'function' && UI.ctx.isBot(id));
+const seatColor = (seat) => PLAYER_COLORS[seat % PLAYER_COLORS.length];
+const faceHTML = (v, seat, cls = 'mosaic-face') => `<span class="${cls}" style="--pc:${seatColor(seat)}">${portrait({ id: v.players[seat].id, bot: isBotId(v.players[seat].id) })}</span>`;
+const scoredNow = (v, seat) => {
+  const had = prevScores.get(v.gid + '|' + v.players[seat].id);
+  return had != null && v.boards[seat].score > had;
 };
 
 const later = (ms, fn) => UI.timers.push(setTimeout(fn, ms));
@@ -743,16 +865,17 @@ function boardHTML(v, seat, o) {
   const b = v.boards[seat], p = v.players[seat], P = esc(p.id);
   const sel = o.sel;
   let h = `<div class="mosaic-bwrap${o.raise ? ' mosaic-raise' : ''}"><section class="mosaic-board${o.big ? '' : ' mosaic-mini'}${o.turn ? ' mosaic-turn' : ''}${o.collapsed ? ' mosaic-collapsed' : ''}">`;
-  h += `<header class="mosaic-bhead"${o.big ? '' : ` data-toggle="${P}" role="button" aria-label="Show or hide this board"`}>
-    <div class="mosaic-bname"><small>${o.self ? 'Your palace' : 'Palace of'}${o.big ? '' : '<span class="mosaic-chev">▾</span>'}</small>${esc(p.name)}</div>
-    <div class="mosaic-score" title="Score">${LAUREL}<b data-a="p-${P}-score">${b.score}</b></div></header>`;
+  h += `<header class="mosaic-bhead"${o.big ? '' : ` data-toggle="${P}" role="button" aria-label="Show or hide this board"`}>${faceHTML(v, seat)}
+    <div class="mosaic-bname"><small>${o.self ? 'Your palace' : 'Palace of'}${o.big ? '' : `<span class="mosaic-chev">${icon('chevron')}</span>`}</small>${esc(p.name)}</div>
+    <div class="mosaic-score${scoredNow(v, seat) ? ' mosaic-scored' : ''}" title="Score">${LAUREL}<b data-a="p-${P}-score">${b.score}</b></div></header>`;
   if (o.collapsed) return h + '</section></div>';
   h += '<div class="mosaic-bbody">';
   for (let r = 0; r < 5; r++) {
     const line = b.lines[r];
     const legal = sel && o.legal[r];
     const w = `calc(${r + 1} * var(--mz-cell) + ${r} * var(--mz-gap))`;
-    h += `<div class="mosaic-line${legal ? ' mosaic-legal pulse-glow' : ''}" style="grid-row:${r + 1};--w:${w}"${legal ? ` data-dest="${r}" role="button" aria-label="Place on pattern line ${r + 1}"` : ''}>`;
+    h += `<div class="mosaic-line${legal ? ' mosaic-legal' : ''}" style="grid-row:${r + 1};--w:${w}"${legal ? ` data-dest="${r}" role="button" aria-label="Place on pattern line ${r + 1}"` : ''}>`;
+    if (legal) h += '<i class="mosaic-halo" aria-hidden="true"></i>';
     let ghosts = legal ? Math.min(sel.n, r + 1 - line.length) : 0;
     for (let i = 0; i <= r; i++) {
       h += '<div class="mosaic-slot">';
@@ -777,7 +900,8 @@ function boardHTML(v, seat, o) {
   }
   h += '</div></div>';
   const pen = floorPenalty(b.floor.length);
-  h += `<div class="mosaic-floorrow"><div class="mosaic-floor${sel ? ' mosaic-legal pulse-glow' : ''}" data-a="mosaic-floor-${P}"${sel ? ' data-dest="-1" role="button" aria-label="Drop the tiles on the floor"' : ''}>`;
+  h += `<div class="mosaic-floorrow"><div class="mosaic-floor${sel ? ' mosaic-legal' : ''}" data-a="mosaic-floor-${P}"${sel ? ' data-dest="-1" role="button" aria-label="Drop the tiles on the floor"' : ''}>`;
+  if (sel) h += '<i class="mosaic-halo" aria-hidden="true"></i>';
   for (let i = 0; i < 7; i++) h += `<div class="mosaic-fslot"><span>−${PEN[i]}</span>${i < b.floor.length ? tk(b.floor[i]) : ''}</div>`;
   const dropAll = sel ? floorPenalty(b.floor.length + sel.n + (sel.marker ? 1 : 0)) - pen : 0;
   h += `</div><div class="mosaic-flabel">${sel ? `<span class="mosaic-drop">all here −${dropAll}</span>` : ''}Floor<b${pen ? '' : ' class="mosaic-zero"'}>${pen ? '−' + pen : '0'}</b></div></div>`;
@@ -789,14 +913,14 @@ function barHTML(v, me, o) {
   const chips = v.players.map((p, i) => {
     const on = !v.over && v.phase === 'draft' && v.cur === i;
     const holds = v.boards[i].floor.includes(MARKER);
-    return `<div class="mosaic-chip${on ? ' mosaic-on' : ''}"><span class="mosaic-ava">${esc([...p.name][0] || '?')}</span><span class="mosaic-cn">${esc(p.name)}${i === me ? ' (you)' : ''}</span>${holds ? '<span class="mosaic-fp" title="Has the first-player tile">1</span>' : ''}<b>${v.boards[i].score}</b></div>`;
+    return `<div class="mosaic-chip${on ? ' mosaic-on' : ''}${i === me ? ' mosaic-me' : ''}${scoredNow(v, i) ? ' mosaic-scored' : ''}">${faceHTML(v, i, 'mosaic-ava')}<span class="mosaic-cn">${esc(p.name)}${i === me ? ' (you)' : ''}</span>${holds ? '<span class="mosaic-fp" title="Has the first-player tile">1</span>' : ''}<b>${v.boards[i].score}</b></div>`;
   }).join('');
   let line;
   if (v.over) {
     const names = (v.winners || []).map((id) => v.players.find((p) => p.id === id)?.name || '?');
-    line = `<div class="winner-banner">🏆 ${esc(names.join(' & '))} ${names.length > 1 ? 'share the victory' : 'wins'}!</div>`;
+    line = `<div class="winner-banner">${icon('trophy')} ${esc(names.join(' & '))} ${names.length > 1 ? 'share the victory' : 'wins'}!</div>`;
   } else if (v.phase === 'tiling') {
-    line = `<span class="status"><span class="mosaic-spark">✦</span> Tiling the walls</span><span class="mosaic-hintx">Each full pattern line sends one tile to the wall and scores it; the rest go to the lid.</span>`;
+    line = `<span class="status"><span class="mosaic-spark">${icon('sparkle')}</span> Tiling the walls</span><span class="mosaic-hintx">Each full pattern line sends one tile to the wall and scores it; the rest go to the lid.</span>`;
   } else if (o.mineTurn) {
     let hint;
     if (!o.myTurn) hint = 'Get ready…';
@@ -804,7 +928,7 @@ function barHTML(v, me, o) {
       const extra = o.sel.marker ? ' + the first-player tile (−1)' : '';
       hint = `<b>${o.sel.n} ${NAMES[o.sel.color]}</b>${extra} selected — tap a glowing pattern line, or the floor.`;
     } else hint = 'Tap a colour on a coaster or in the centre. You take <b>every</b> tile of that colour.';
-    line = `<span class="status myturn">Your turn</span><span class="mosaic-hintx">${hint}</span>${o.sel ? '<button class="small" data-cancel>Cancel</button>' : ''}`;
+    line = `<span class="status myturn">Your turn</span><span class="mosaic-hintx">${hint}</span>${o.sel ? `<button class="small" data-cancel>${icon('close')}Cancel</button>` : ''}`;
   } else {
     const p = v.players[v.cur];
     const bot = UI.ctx?.isBot?.(p?.id);
@@ -815,22 +939,22 @@ function barHTML(v, me, o) {
 
 function resultsHTML(v) {
   const rows = v.final.slice().sort((a, b) => b.total - a.total || b.rows - a.rows);
-  return `<div class="panel mosaic-results"><h3>🏛️ Final scores</h3><table><thead><tr><th>Player</th><th>Wall</th><th title="+2 per complete row">Rows</th><th title="+7 per complete column">Cols</th><th title="+10 per complete colour">Sets</th><th>Total</th></tr></thead><tbody>${rows
+  return `<div class="panel mosaic-results"><h3>${icon('trophy')}Final scores</h3><table><thead><tr><th>Player</th><th>Wall</th><th title="+2 per complete row">Rows</th><th title="+7 per complete column">Cols</th><th title="+10 per complete colour">Sets</th><th>Total</th></tr></thead><tbody>${rows
     .map((f) => {
       const p = v.players[f.p];
       const win = (v.winners || []).includes(p.id);
       const cell = (n, pts) => (n ? `+${n * pts}` : '–');
-      return `<tr class="${win ? 'mosaic-win' : ''}"><td>${win ? '🏆 ' : ''}${esc(p.name)}</td><td>${f.base}</td><td>${cell(f.rows, 2)}</td><td>${cell(f.cols, 7)}</td><td>${cell(f.colours, 10)}</td><td><b>${f.total}</b></td></tr>`;
+      return `<tr class="${win ? 'mosaic-win' : ''}"><td><span class="mosaic-rp">${faceHTML(v, f.p)}${win ? icon('crown') : ''}<span>${esc(p.name)}</span></span></td><td>${f.base}</td><td>${cell(f.rows, 2)}</td><td>${cell(f.cols, 7)}</td><td>${cell(f.colours, 10)}</td><td><b>${f.total}</b></td></tr>`;
     }).join('')}</tbody></table></div>`;
 }
 
-const RULES = `<details class="mosaic-rules"><summary>How to play</summary><ul>
+const RULES_LIST = `<ul>
   <li>On your turn take <b>all</b> tiles of one colour from a coaster (the rest slide to the centre) or from the centre.</li>
   <li>The first to take from the centre also takes the first-player tile (−1 on the floor) and starts next round.</li>
   <li>Place them on one pattern line: empty or the same colour, and not a colour already in that wall row. Extra tiles fall to the floor.</li>
   <li>When the table is empty, every full line sends one tile to the wall: 1 point alone, or the length of the connected row plus column.</li>
   <li>Floor tiles cost −1 −1 −2 −2 −2 −3 −3. The game ends after a round in which someone completes a wall row.</li>
-  <li>Bonuses: +2 per row, +7 per column, +10 per colour with all 5 placed.</li></ul></details>`;
+  <li>Bonuses: +2 per row, +7 per column, +10 per colour with all 5 placed.</li></ul>`;
 
 /* ---------- drawing ---------- */
 function draw(before) {
@@ -873,12 +997,18 @@ function draw(before) {
     </div></div>
     <div class="side">
       ${v.over && v.final ? resultsHTML(v) : ''}
-      <div class="panel mosaic-opps"><h3>🏛️ Rival palaces</h3><div class="mosaic-list">${oppBoards}</div></div>
-      <div class="parchment"><div class="mosaic-logt">Chronicle</div><div class="log">${(v.log || []).map((m) => `<div>${esc(m)}</div>`).join('')}</div></div>
-      <div class="panel">${RULES}</div>
+      <div class="panel mosaic-opps"><h3>${icon('users')}Rival palaces</h3><div class="mosaic-list">${oppBoards}</div></div>
+      <details class="panel drawer mosaic-chron" ${chronOpen ? 'open' : ''}><summary>${icon('book')}<span>Chronicle</span><span class="note">${esc(v.log?.[0] || '')}</span>${icon('chevron', 'chev')}</summary>
+        <div class="drawer-body"><div class="log">${(v.log || []).map((m) => `<div>${esc(m)}</div>`).join('')}</div></div></details>
+      <details class="panel drawer mosaic-rules" ${rulesOpen ? 'open' : ''}><summary>${icon('help')}<span>How to play</span>${icon('chevron', 'chev')}</summary>
+        <div class="drawer-body">${RULES_LIST}</div></details>
     </div>
   </div></div>`;
   el.onclick = onClick;
+  // <details> toggle events don't bubble, so listen on each drawer after it is drawn.
+  el.querySelector('.mosaic-chron')?.addEventListener('toggle', (e) => { chronOpen = e.currentTarget.open; });
+  el.querySelector('.mosaic-rules')?.addEventListener('toggle', (e) => { rulesOpen = e.currentTarget.open; });
+  prevScores = new Map(v.players.map((p, i) => [v.gid + '|' + p.id, v.boards[i].score]));
 
   const now = new Set();
   el.querySelectorAll('[data-k]').forEach((e) => now.add(e.dataset.k));
@@ -1127,7 +1257,7 @@ function render(el, view, ctx) {
 export default {
   id: 'mosaic',
   name: 'Mosaic Palace',
-  description: 'Draft glazed tiles from wooden coasters and set them into your palace wall. Chain rows, columns and colour sets — but every tile that falls to the floor costs you.',
+  description: 'Draft glazed tiles from porcelain coasters and set them into your palace wall. Chain rows, columns and colour sets — but every tile that falls to the floor costs you.',
   minPlayers: 2,
   maxPlayers: 4,
   cover: buildCover(),

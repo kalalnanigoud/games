@@ -4,6 +4,8 @@
 import { esc, rand, shuffle, d6, log, addFx } from '../js/util.js';
 import { injectCSS, dieHTML, rollDice, changed } from '../js/fx.js';
 import { sound } from '../js/sound.js';
+import { icon } from '../js/icons.js';
+import { portrait } from '../js/avatar.js';
 
 const ID = 'hexisle';
 const RES = ['lumber', 'brick', 'wool', 'grain', 'ore'];
@@ -915,8 +917,21 @@ const SYM = [
 ];
 const seatSVG = (seat, size = 22) => {
   const P = PCOL[seat % 4];
-  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" class="hexisle-seat"><defs><radialGradient id="hx-sw${seat}" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="${P.hi}"/><stop offset=".55" stop-color="${P.c}"/><stop offset="1" stop-color="${P.lo}"/></radialGradient></defs><circle cx="12" cy="12" r="10.5" fill="url(#hx-sw${seat})" stroke="#1a0f07" stroke-width="1.2"/>${SYM[seat % 4](12, 12.3, 4.2, P.ink)}</svg>`;
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" class="hexisle-seat" aria-hidden="true"><defs><radialGradient id="hx-sw${seat}" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="${P.hi}"/><stop offset=".55" stop-color="${P.c}"/><stop offset="1" stop-color="${P.lo}"/></radialGradient></defs><circle cx="12" cy="12" r="10.5" fill="url(#hx-sw${seat})" stroke="#0e1530" stroke-width="1.4"/>${SYM[seat % 4](12, 12.3, 4.2, P.ink)}</svg>`;
 };
+// A player's face, ringed in their colour, with their seat emblem pinned on (colour is never the only cue).
+const botOf = (ctx, id) => !!(ctx && typeof ctx.isBot === 'function' && ctx.isBot(id));
+function faceHTML(v, pid, ctx, cls = '') {
+  const P = v.ps[pid];
+  if (!P) return '';
+  return `<span class="hexisle-face ${cls}" style="--pc:${PCOL[P.seat % 4].c}">${portrait({ id: pid, bot: botOf(ctx, pid) })}<span class="hexisle-emb">${seatSVG(P.seat, 14)}</span></span>`;
+}
+// Small control icons the shared set doesn't have.
+const SWAP_IC = '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8.5h15l-4-4M20 15.5H5l4 4"/></svg>';
+const svgURL = (s) => `url("data:image/svg+xml,${encodeURIComponent(s.replace(/\s+/g, ' '))}")`;
+const WAVES = svgURL(`<svg xmlns='http://www.w3.org/2000/svg' width='132' height='84' viewBox='0 0 132 84'><g fill='none' stroke='#ffffff' stroke-linecap='round' stroke-width='1.6'>
+  <path d='M8 18 q6 -5 12 0 t12 0' stroke-opacity='.22'/><path d='M74 44 q6 -5 12 0 t12 0' stroke-opacity='.18'/><path d='M30 70 q5 -4 10 0 t10 0' stroke-opacity='.15'/>
+  <path d='M104 12 q4 -3 8 0' stroke-opacity='.2'/></g><g fill='#ffffff'><circle cx='58' cy='22' r='1' fill-opacity='.35'/><circle cx='118' cy='64' r='1.2' fill-opacity='.3'/><circle cx='16' cy='50' r='.9' fill-opacity='.3'/></g></svg>`);
 
 const ICON = {
   lumber: `<path d="M6,30 L34,30" stroke="#3a2210" stroke-width="2" opacity=".4"/>
@@ -1015,6 +1030,8 @@ function boardDefs() {
     <radialGradient id="hx-sheen" cx=".35" cy=".2" r=".8"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset=".6" stop-color="#fff" stop-opacity="0"/></radialGradient>
     <radialGradient id="hx-tok" cx=".38" cy=".3" r=".8"><stop offset="0" stop-color="#fffaf0"/><stop offset=".6" stop-color="#f0dfb6"/><stop offset="1" stop-color="#cfb07a"/></radialGradient>
     <radialGradient id="hx-badge" cx=".4" cy=".3" r=".8"><stop offset="0" stop-color="#fff6dc"/><stop offset="1" stop-color="#e2c78d"/></radialGradient>
+    <radialGradient id="hx-halo" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fff8d2" stop-opacity=".95"/><stop offset=".45" stop-color="#ffd76a" stop-opacity=".55"/><stop offset="1" stop-color="#ffc93c" stop-opacity="0"/></radialGradient>
+    <radialGradient id="hx-halor" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#ffe2d6" stop-opacity=".95"/><stop offset=".45" stop-color="#ff8a6a" stop-opacity=".55"/><stop offset="1" stop-color="#ff6b4a" stop-opacity="0"/></radialGradient>
     <linearGradient id="hx-pineg" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3d8f3c"/><stop offset=".5" stop-color="#2a6e2d"/><stop offset="1" stop-color="#174a1d"/></linearGradient>
     <linearGradient id="hx-clay" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e58a55"/><stop offset="1" stop-color="#93421c"/></linearGradient>
     <linearGradient id="hx-robg" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#5a5466"/><stop offset=".45" stop-color="#2a2633"/><stop offset="1" stop-color="#0d0b12"/></linearGradient>
@@ -1089,48 +1106,159 @@ function tokenSVG(n) {
     <g fill="${red ? '#b8231a' : '#3b2a17'}">${dots}</g></g>`;
 }
 
-const COVER = `<svg viewBox="0 0 320 200" xmlns="http://www.w3.org/2000/svg">
+/* Cover art: a sunny hex island at sea. A settler hammers the roof onto a new cottage while a
+   friend rows in with lumber and a sheep, waving hello (self-contained "hxc-" ids). */
+function islandCover() {
+  const f1 = (n) => +n.toFixed(1);
+  // Squashed hex for the 3/4 view: r across, r * .56 deep, dy pushes it down (tile thickness).
+  const hp = (cx, cy, r, dy = 0) => Array.from({ length: 6 }, (_, i) => {
+    const a = (Math.PI / 180) * (60 * i - 90);
+    return `${f1(cx + r * Math.cos(a))},${f1(cy + dy + r * Math.sin(a) * 0.56)}`;
+  }).join(' ');
+  const HX = [[133.2, 80, 'mountains'], [186.8, 80, 'fields'], [106.3, 106, 'forest'], [160, 106, 'pasture'], [213.7, 106, 'hills'], [133.2, 132, 'fields'], [186.8, 132, 'forest']];
+  const tiles = HX.map(([x, y, t]) => {
+    const [a, b, c] = TCOL[t];
+    return `<polygon points="${hp(x, y, 31, 6.5)}" fill="${c}"/><polygon points="${hp(x, y, 30.2)}" fill="${a}"/>` +
+      `<polygon points="${hp(x, y, 25, 2.5)}" fill="${b}" opacity=".3"/><polygon points="${hp(x, y, 28.8)}" fill="none" stroke="url(#hxc-bev)" stroke-width="2"/>`;
+  }).join('');
+  const pine = (x, y, s = 1) => `<g transform="translate(${x} ${y}) scale(${s})"><ellipse cx="1.5" cy="0" rx="6.5" ry="2" fill="#0d2a12" opacity=".3"/><rect x="-1.1" y="-4" width="2.2" height="4.5" fill="#5b3a1e"/>` +
+    `<path d="M0 -21 L6.5 -12 L3.6 -12 L8.5 -4 L-8.5 -4 L-3.6 -12 L-6.5 -12Z" fill="#2f7d35" stroke="#174a1d" stroke-width=".7" stroke-linejoin="round"/><path d="M0 -21 L-6.5 -12 L-3.6 -12 L-8.5 -4 L-2.5 -4 L-1.2 -16Z" fill="#c4f59a" opacity=".25"/></g>`;
+  const peak = (x, y, s = 1) => `<g transform="translate(${x} ${y}) scale(${s})"><path d="M-17 0 L-2 -25 L4 0Z" fill="#cdd2da"/><path d="M-2 -25 L17 0 L4 0Z" fill="#717985"/>` +
+    `<path d="M-2 -25 L-7.5 -15.5 L-4.5 -17 L-2.2 -14 L.2 -17 L4.4 -14.6Z" fill="#fff"/></g>`;
+  const mound = (x, y, s = 1) => `<g transform="translate(${x} ${y}) scale(${s})"><path d="M-11 0 C-9 -7.5 -3.5 -10 0 -10 C4.5 -10 9 -6.5 11 0Z" fill="#c95f30"/>` +
+    `<path d="M-11 0 C-9 -7.5 -3.5 -10 0 -10 C-4 -7.5 -6 -4 -6.5 0Z" fill="#fff" opacity=".22"/><path d="M-5 -4 h4 M2 -6 h4 M-1 -2 h5" stroke="#7a2e12" stroke-width=".9" opacity=".6"/></g>`;
+  const tuft = (x, y) => `<path d="M${x} ${y} V${y - 9} M${x} ${y} L${x - 3.5} ${y - 7} M${x} ${y} L${x + 3.5} ${y - 7}" stroke="#a8740f" stroke-width="1" fill="none" stroke-linecap="round"/>` +
+    `<g fill="#ffe27a" stroke="#b8861a" stroke-width=".4"><ellipse cx="${x}" cy="${y - 10}" rx="1.4" ry="2.6"/><ellipse cx="${x - 3.8}" cy="${y - 8}" rx="1.2" ry="2.2" transform="rotate(-25 ${x - 3.8} ${y - 8})"/><ellipse cx="${x + 3.8}" cy="${y - 8}" rx="1.2" ry="2.2" transform="rotate(25 ${x + 3.8} ${y - 8})"/></g>`;
+  const rows = (x, y) => `<path d="M${x - 18} ${y + 2} L${x + 12} ${y - 7} M${x - 14} ${y + 8} L${x + 18} ${y - 1} M${x - 6} ${y + 12} L${x + 18} ${y + 5}" stroke="#c99224" stroke-width="2.4" stroke-linecap="round" opacity=".55"/>`;
+  const token = (x, y, n) => `<g transform="translate(${x} ${y}) scale(1 .62)"><circle cy="2.5" r="8.4" fill="#000" opacity=".3"/><circle r="8.4" fill="#f6e8c6" stroke="#6e4f24" stroke-width="1"/>` +
+    `<text y="3.6" text-anchor="middle" font-family="Georgia, serif" font-weight="800" font-size="10.5" fill="${n === 6 || n === 8 ? '#b8231a' : '#3b2a17'}">${n}</text></g>`;
+  const sheep = (x, y, s = 1) => `<g transform="translate(${x} ${y}) scale(${s})"><path d="M-4 2 v4 M3 2 v4" stroke="#3a332c" stroke-width="1.6" stroke-linecap="round"/>` +
+    `<g fill="#fffdf4" stroke="#9a9284" stroke-width=".6"><circle cx="-4" cy="-1" r="4.2"/><circle cx="1" cy="-3.5" r="4.6"/><circle cx="5" cy="-.5" r="4"/><circle cx="0" cy="1.5" r="4"/></g>` +
+    `<ellipse cx="9.5" cy="-3" rx="3.3" ry="2.6" fill="#3a332c"/><circle cx="10.4" cy="-3.6" r=".7" fill="#fff"/><path d="M7.6 -5.2 l-2 -1.6" stroke="#3a332c" stroke-width="1.4" stroke-linecap="round"/></g>`;
+  const spark = (x, y, r, o = 0.95) => `<path d="M${x} ${y - r} L${f1(x + r * 0.22)} ${f1(y - r * 0.22)} L${x + r} ${y} L${f1(x + r * 0.22)} ${f1(y + r * 0.22)} L${x} ${y + r} L${f1(x - r * 0.22)} ${f1(y + r * 0.22)} L${x - r} ${y} L${f1(x - r * 0.22)} ${f1(y - r * 0.22)}Z" fill="#fff" opacity="${o}"/>`;
+  // A cottage: walls up, half the roof tiled, the rest still bare rafters.
+  const house = (x, y, s, c, hi, lo, done = true) => `<g transform="translate(${x} ${y}) scale(${s})"><ellipse cx="3" cy="9" rx="15" ry="4.5" fill="#000" opacity=".28"/>` +
+    `<path d="M9 8 L15 4 L15 -6 L9 -2Z" fill="${lo}" stroke="#2a0d05" stroke-width=".7" stroke-linejoin="round"/>` +
+    `<path d="M-9 8 L9 8 L9 -2 L0 -11 L-9 -2Z" fill="${c}" stroke="#2a0d05" stroke-width=".8" stroke-linejoin="round"/>` +
+    `<path d="M-3 8 v-5 a2 2 0 0 1 4 0 v5Z" fill="#3a1608"/><rect x="3" y="0" width="3.6" height="3.4" rx=".6" fill="#ffe7a0"/><path d="M-8 -2 L0 -10" stroke="#fff" stroke-width=".8" opacity=".5"/>` +
+    (done ? `<path d="M0 -11 L6 -15 L15 -6 L9 -2Z" fill="${c}" stroke="#2a0d05" stroke-width=".7" stroke-linejoin="round"/><path d="M1 -11.3 L6 -14.4 L13 -7" stroke="${hi}" stroke-width=".9" fill="none"/>`
+      : `<path d="M6 -15 L15 -6 M3.4 -13.3 L6 -15 M7.9 -8.8 L10.5 -10.5 M12.4 -4.3 L15 -6" stroke="#c9944e" stroke-width="1.1" stroke-linecap="round"/>` +
+        `<path d="M0 -11 L3.4 -13.3 L12.4 -4.3 L9 -2Z" fill="${c}" stroke="#2a0d05" stroke-width=".7" stroke-linejoin="round"/><path d="M1 -11.3 L3.4 -12.8 L11.5 -4.6" stroke="${hi}" stroke-width=".9" fill="none"/>`) + '</g>';
+  const waves = [[24, 78], [52, 96], [262, 120], [286, 98], [38, 132], [252, 150], [62, 150], [292, 138], [226, 186], [176, 190]]
+    .map(([x, y], i) => `<path d="M${x} ${y} q5 -3.5 10 0 t10 0" stroke="#fff" stroke-width="1.4" fill="none" stroke-linecap="round" opacity="${i % 2 ? 0.35 : 0.55}"/>`).join('');
+  return `<svg viewBox="0 0 320 200" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Settlers building a cottage on a sunny hex island while a friend rows in with lumber">
   <defs>
-    <radialGradient id="hxc-sea" cx=".5" cy=".5" r=".75"><stop offset="0" stop-color="#46acd9"/><stop offset=".6" stop-color="#1c6ca5"/><stop offset="1" stop-color="#0b3561"/></radialGradient>
-    <radialGradient id="hxc-sun" cx=".85" cy=".1" r=".5"><stop offset="0" stop-color="#fff3c4" stop-opacity=".75"/><stop offset="1" stop-color="#fff3c4" stop-opacity="0"/></radialGradient>
-    <linearGradient id="hxc-bev" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".7"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".5"/></linearGradient>
-    <filter id="hxc-b"><feGaussianBlur stdDeviation="5"/></filter>
+    <linearGradient id="hxc-sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#36aef0"/><stop offset=".22" stop-color="#7fd3fb"/><stop offset=".3" stop-color="#d4f3ff"/><stop offset="1" stop-color="#d4f3ff"/></linearGradient>
+    <linearGradient id="hxc-sea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4fcde4"/><stop offset=".3" stop-color="#22a2cf"/><stop offset=".7" stop-color="#12719f"/><stop offset="1" stop-color="#0b4b80"/></linearGradient>
+    <radialGradient id="hxc-sun" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fff7cc" stop-opacity=".95"/><stop offset=".4" stop-color="#ffe9a0" stop-opacity=".45"/><stop offset="1" stop-color="#ffe9a0" stop-opacity="0"/></radialGradient>
+    <linearGradient id="hxc-bev" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".75"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".45"/></linearGradient>
+    <linearGradient id="hxc-hull" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c88448"/><stop offset=".55" stop-color="#9a5a2a"/><stop offset="1" stop-color="#5e3216"/></linearGradient>
+    <linearGradient id="hxc-blue" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5b9bf0"/><stop offset="1" stop-color="#2a5fb8"/></linearGradient>
+    <linearGradient id="hxc-coral" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff9a6a"/><stop offset="1" stop-color="#e0583a"/></linearGradient>
+    <filter id="hxc-b" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="5"/></filter>
+    <filter id="hxc-b2" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="2.2"/></filter>
   </defs>
-  <rect width="320" height="200" fill="url(#hxc-sea)"/>
-  <rect width="320" height="200" fill="url(#hxc-sun)"/>
-  <g stroke="#fff" stroke-width="1.6" fill="none" opacity=".45" stroke-linecap="round">
-    <path d="M22,40 q8,-6 16,0 t16,0"/><path d="M262,160 q8,-6 16,0 t16,0"/><path d="M30,168 q7,-5 14,0 t14,0"/><path d="M268,44 q7,-5 14,0 t14,0"/><path d="M246,110 q6,-4 12,0"/><path d="M56,100 q6,-4 12,0"/>
+  <rect width="320" height="200" fill="url(#hxc-sky)"/>
+  <circle cx="262" cy="28" r="50" fill="url(#hxc-sun)"/><circle cx="262" cy="28" r="17.5" fill="none" stroke="#fff3c0" stroke-width="1.4" opacity=".6"/><circle cx="262" cy="28" r="13.5" fill="#fff6c8"/>
+  <g fill="#fff"><ellipse cx="62" cy="30" rx="22" ry="6.5"/><circle cx="52" cy="26" r="8"/><circle cx="65" cy="22" r="10"/><circle cx="77" cy="27" r="7"/></g><ellipse cx="64" cy="34" rx="20" ry="2.6" fill="#bfe8fb"/>
+  <g fill="#fff" opacity=".9"><ellipse cx="190" cy="18" rx="16" ry="4.6"/><circle cx="184" cy="15" r="6"/><circle cx="194" cy="12.5" r="7"/></g>
+  <path d="M100 42 q4 -4 8 0 q4 -4 8 0 M120 33 q3 -3 6 0 q3 -3 6 0 M212 44 q3.5 -3.5 7 0 q3.5 -3.5 7 0" stroke="#24496b" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M10 59 C20 50 36 50 48 59Z M280 59 c6 -5.5 18 -5.5 26 0Z" fill="#4f9fa8" opacity=".55"/>
+  <path d="M232 57 h12 l-2 2.6 h-8z" fill="#6b4424"/><path d="M238 56.5 V44 L245 55Z" fill="#fff"/><path d="M237.5 56.5 V46 L232 55Z" fill="#f0f4fa"/>
+  <rect y="58" width="320" height="142" fill="url(#hxc-sea)"/><rect y="58" width="320" height="1.6" fill="#effcff" opacity=".8"/>
+  <g fill="#fff6d0"><ellipse cx="262" cy="64" rx="18" ry="1.2" opacity=".65"/><ellipse cx="262" cy="70" rx="12" ry="1.1" opacity=".5"/><ellipse cx="264" cy="77" rx="20" ry="1.3" opacity=".35"/><ellipse cx="260" cy="86" rx="10" ry="1" opacity=".3"/></g>
+  ${waves}
+  <g filter="url(#hxc-b)" opacity=".85">${HX.map(([x, y]) => `<polygon points="${hp(x, y, 50, 6)}" fill="#86eaf2"/>`).join('')}</g>
+  <g filter="url(#hxc-b2)">${HX.map(([x, y]) => `<polygon points="${hp(x, y, 38, 6)}" fill="#f4e0a6"/>`).join('')}</g>
+  ${tiles}
+  ${peak(124, 88, 0.95)}${peak(143, 86, 0.8)}
+  ${rows(187, 80)}${tuft(177, 86)}${tuft(198, 82)}${token(203, 89, 6)}
+  ${pine(110, 100, 1)}${pine(96, 105, 0.95)}${pine(118, 112, 0.9)}${pine(100, 117, 0.85)}
+  <ellipse cx="168" cy="118" rx="14" ry="3.5" fill="#c4ec86" opacity=".5"/>
+  ${house(216, 98, 1.05, 'url(#hxc-blue)', '#9cc2ff', '#133170')}${mound(206, 115, 1)}${mound(226, 110, 0.85)}
+  <path d="M134 117 L157 124.5" stroke="#2a0d05" stroke-width="6" stroke-linecap="round"/><path d="M134 117 L157 124.5" stroke="#d23b26" stroke-width="3.8" stroke-linecap="round"/><path d="M134.5 116 L156.5 123.2" stroke="#ff9a82" stroke-width="1" stroke-linecap="round"/>
+  ${house(142, 108, 1.8, '#d23b26', '#ff9a82', '#7c1a0d', false)}
+  ${spark(162, 92, 4.5)}
+  ${rows(133, 132)}${tuft(124, 140)}${tuft(150, 145)}${token(138, 136, 8)}
+  ${pine(192, 139, 0.9)}${pine(178, 143, 0.85)}${pine(203, 146, 0.8)}${pine(188, 149, 0.75)}
+  <g>
+    <ellipse cx="185" cy="117" rx="9" ry="2.4" fill="#000" opacity=".25"/>
+    <rect x="179" y="104" width="5" height="12" rx="2" fill="#2b3566"/><rect x="186" y="104" width="5" height="12" rx="2" fill="#2b3566"/>
+    <ellipse cx="181" cy="116.4" rx="3.8" ry="1.8" fill="#3a2412"/><ellipse cx="189" cy="116.4" rx="3.8" ry="1.8" fill="#3a2412"/>
+    <path d="M177 106 C177 96 180 90.5 185 90.5 C190 90.5 193 96 193 106Z" fill="url(#hxc-blue)"/><path d="M185 91 V106" stroke="#1e4a94" stroke-width=".8" opacity=".6"/>
+    <path d="M190 94 C195 97 196 101 192 104" stroke="#3d7fd9" stroke-width="4.4" fill="none" stroke-linecap="round"/>
+    <path d="M180 93.5 C175 90.5 172 85.5 172.5 78.5" stroke="#4a8be6" stroke-width="4.6" fill="none" stroke-linecap="round"/><circle cx="172.6" cy="77" r="2.7" fill="#f1c49a"/>
+    <path d="M173 77.5 L164 68.5" stroke="#9b6a3c" stroke-width="2.1" stroke-linecap="round"/><rect x="159.5" y="66.3" width="9" height="4.4" rx="1" fill="#8a929e" stroke="#4a5058" stroke-width=".5" transform="rotate(-45 164 68.5)"/>
+    <path d="M155 72 q-3 7 1 13 M150.5 70 q-4 9 1 17" stroke="#fff" stroke-width="1.4" fill="none" stroke-linecap="round" opacity=".9"/>
+    <rect x="182.5" y="87.5" width="5" height="4" fill="#d9a77c"/><circle cx="185" cy="83" r="7.2" fill="#f1c49a"/>
+    <path d="M178.6 81 q6.4 -2.6 12.8 0 v-2.4 h-12.8z" fill="#7a4a26"/>
+    <circle cx="181.6" cy="85.6" r="1.5" fill="#ff7f8f" opacity=".45"/><circle cx="189.2" cy="85.6" r="1.5" fill="#ff7f8f" opacity=".45"/>
+    <circle cx="182" cy="83.2" r="1.05" fill="#2a1c1a"/><circle cx="187" cy="83.2" r="1.05" fill="#2a1c1a"/>
+    <path d="M181.8 86.4 q2.6 2.4 5.2 0" stroke="#7a2e35" stroke-width="1.1" fill="none" stroke-linecap="round"/>
+    <ellipse cx="185" cy="78.2" rx="10.5" ry="2.8" fill="#f2c94c" stroke="#b8862a" stroke-width=".6"/><path d="M179.5 78.2 C179.5 71.5 190.5 71.5 190.5 78.2Z" fill="#f6d667" stroke="#b8862a" stroke-width=".6"/><path d="M179.7 76.5 h10.6" stroke="#e0523f" stroke-width="1.4"/>
   </g>
-  <g filter="url(#hxc-b)" opacity=".9">${[[0, 0], [-58, 0], [58, 0], [-29, -50], [29, -50], [-29, 50], [29, 50]].map(([x, y]) => `<polygon points="${hexPts(40, 160 + x, 104 + y)}" fill="#e9d59c"/>`).join('')}</g>
-  ${[[0, 0, 'mountains'], [-58, 0, 'forest'], [58, 0, 'fields'], [-29, -50, 'pasture'], [29, -50, 'forest'], [-29, 50, 'hills'], [29, 50, 'pasture']].map(([x, y, t]) => {
-    const cx = 160 + x, cy = 100 + y, [a, , c] = TCOL[t];
-    return `<polygon points="${hexPts(33, cx, cy + 4)}" fill="${c}"/><polygon points="${hexPts(32, cx, cy)}" fill="${a}"/><polygon points="${hexPts(30.5, cx, cy)}" fill="none" stroke="url(#hxc-bev)" stroke-width="2.4"/>`
-      + (t === 'forest' ? [[-12, -6], [8, -10], [-4, 10], [14, 8]].map(([dx, dy]) => `<path d="M${cx + dx},${cy + dy - 16} l7,13 h-14z" fill="#2a6a2c" stroke="#174a1d" stroke-width=".6"/><path d="M${cx + dx},${cy + dy - 22} l5,9 h-10z" fill="#3c8a3a"/>`).join('') : '')
-      + (t === 'mountains' ? `<path d="M${cx - 22},${cy + 14} L${cx - 6},${cy - 16} L${cx + 6},${cy + 14}Z" fill="#c3c8cf"/><path d="M${cx - 6},${cy - 16} L${cx + 22},${cy + 14} L${cx + 6},${cy + 14}Z" fill="#6c737d"/><path d="M${cx - 6},${cy - 16} l-6,11 4,-2 2,3 3,-4 4,2z" fill="#fff"/><path d="M${cx + 6},${cy + 14} L${cx + 14},${cy - 4} L${cx + 26},${cy + 14}Z" fill="#8a9099"/>` : '')
-      + (t === 'fields' ? [-12, -4, 4, 12].map((dx) => `<path d="M${cx + dx - 6},${cy + 22} C${cx + dx - 2},${cy + 6} ${cx + dx + 2},${cy - 10} ${cx + dx + 6},${cy - 24}" stroke="#c99224" stroke-width="3" fill="none" opacity=".6"/>`).join('') : '')
-      + (t === 'pasture' ? [[-10, -4], [8, 6]].map(([dx, dy]) => `<g fill="#fffdf4"><circle cx="${cx + dx}" cy="${cy + dy}" r="4"/><circle cx="${cx + dx + 4}" cy="${cy + dy - 1}" r="4"/></g><circle cx="${cx + dx + 9}" cy="${cy + dy - 2}" r="2.4" fill="#3a332c"/>`).join('') : '')
-      + (t === 'hills' ? `<path d="M${cx - 18},${cy + 12} c4,-14 14,-16 20,0z M${cx},${cy + 2} c4,-14 14,-16 20,0z" fill="#93421c" opacity=".7"/>` : '');
-  }).join('')}
-  <g><circle cx="160" cy="100" r="11" fill="#000" opacity=".3" transform="translate(0,2)"/><circle cx="160" cy="100" r="11" fill="#f6e8c6" stroke="#6e4f24" stroke-width="1.2"/><text x="160" y="104.5" text-anchor="middle" font-family="Georgia,serif" font-weight="800" font-size="12" fill="#b8231a">8</text></g>
-  <g transform="translate(196,152)"><path d="M-12,8 L-9,-8 L6,-8 L9,8Z" fill="#c23a26" stroke="#5a1408"/><path d="M-9,-8 L-2,-14 L13,-14 L6,-8Z" fill="#e05a3a" stroke="#5a1408"/><path d="M6,-8 L13,-14 L15,2 L9,8Z" fill="#7c1a0d" stroke="#5a1408"/></g>
-  <g transform="translate(64,150)"><path d="M-16,0 H16 L11,8 H-11Z" fill="#7a4a24" stroke="#3a2210"/><path d="M0,-2 V-30" stroke="#3a2210" stroke-width="1.6"/><path d="M1,-29 L16,-6 H1Z" fill="#fbf1da" stroke="#8a7a5a" stroke-width=".8"/><path d="M-1,-25 L-12,-6 H-1Z" fill="#efe2c2" stroke="#8a7a5a" stroke-width=".8"/>
-    <path d="M-20,11 q6,-4 12,0 t12,0 t12,0" stroke="#fff" stroke-width="1.4" fill="none" opacity=".6"/></g>
-  <g transform="translate(258,78)"><ellipse cx="0" cy="0" rx="7" ry="2.5" fill="#000" opacity=".3"/><path d="M-6,0 C-7,-6 -5,-11 -3,-14 C-6,-17 -5,-22 0,-23 C5,-22 6,-17 3,-14 C5,-11 7,-6 6,0Z" fill="#2a2633" stroke="#000"/></g>
+  <g>
+    <path d="M232 168 L304 160 L304 168 L234 177Z" fill="#b07a46"/><path d="M232 168 L304 160" stroke="#e0b07a" stroke-width="1"/><path d="M250 166 l1 9 M268 164 l1 9 M286 162 l1 8" stroke="#6e4422" stroke-width=".8" opacity=".7"/>
+    <rect x="236" y="175" width="4" height="16" fill="#6b4424"/><rect x="262" y="172" width="4" height="17" fill="#6b4424"/><rect x="288" y="168" width="4" height="18" fill="#6b4424"/>
+    <path d="M232 191 q4 -2.5 8 0 M258 189 q4 -2.5 8 0 M284 186 q4 -2.5 8 0" stroke="#fff" stroke-width="1.2" fill="none" opacity=".6"/>
+    <path d="M248 166 C247 158 247 154 248 150 L260 150 C261 154 261 158 260 166Z" fill="#a8683a" stroke="#4a2c14" stroke-width=".7"/><path d="M247.6 154 h12.8 M247.6 162 h12.8" stroke="#3a2412" stroke-width="1.2"/>
+    <rect x="270" y="150" width="15" height="13" rx="1.2" fill="#d9a35a" stroke="#6e4422" stroke-width=".7"/><path d="M270 156.5 h15 M277.5 150 v13" stroke="#8a5a2e" stroke-width=".8"/>
+    <rect x="291" y="128" width="2.6" height="34" fill="#6b4424"/><circle cx="292.3" cy="128" r="8.5" fill="#6b4424"/><circle cx="292.3" cy="128" r="7" fill="#f6e8c6"/>
+    <text x="292.3" y="131" text-anchor="middle" font-family="Georgia, serif" font-weight="800" font-size="7.5" fill="#3b2a17">2:1</text>
+  </g>
+  <g transform="translate(-6 4)">
+    <path d="M42 186 q6 -3 12 0 t12 0 M30 192 q6 -3 12 0 t12 0" stroke="#fff" stroke-width="1.5" fill="none" stroke-linecap="round" opacity=".75"/>
+    <ellipse cx="106" cy="191" rx="52" ry="5" fill="#0b3f6e" opacity=".45"/>
+    <ellipse cx="106" cy="163.5" rx="46" ry="5.5" fill="#5a3416"/>
+    <path d="M70 196 L93 155" stroke="#c58a4a" stroke-width="2.6" stroke-linecap="round"/><ellipse cx="69" cy="195" rx="3.4" ry="7" fill="#c58a4a" transform="rotate(30 69 195)"/>
+    <path d="M60 192 q4 -3 8 0 M70 194 q3 -2 6 0" stroke="#fff" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+    <g transform="translate(72 151)"><rect x="4" y="-6" width="24" height="7" rx="3.5" fill="#a8743f" stroke="#4a2c14" stroke-width=".8"/><circle cx="7.5" cy="-2.5" r="3.4" fill="#ecc993" stroke="#4a2c14" stroke-width=".7"/>
+      <rect x="0" y="0" width="24" height="7" rx="3.5" fill="#9b6a3c" stroke="#4a2c14" stroke-width=".8"/><circle cx="3.5" cy="3.5" r="3.4" fill="#e8c48e" stroke="#4a2c14" stroke-width=".7"/><circle cx="3.5" cy="3.5" r="1.6" fill="none" stroke="#a77443" stroke-width=".6"/></g>
+    ${sheep(134, 155, 1.25)}
+    <path d="M93 167 C93 151 98 145 105 145 C112 145 117 151 117 167Z" fill="url(#hxc-coral)"/><path d="M99 147 L105 154 L111 147" fill="none" stroke="#fff3d6" stroke-width="1.4" stroke-linejoin="round"/>
+    <path d="M97 151 C93 155 90 158 88.5 161" stroke="#f07a52" stroke-width="5" fill="none" stroke-linecap="round"/><circle cx="88.5" cy="161.5" r="3" fill="#e0a57a"/>
+    <path d="M113 150 C119 145 123 137 125.5 127" stroke="#f07a52" stroke-width="5" fill="none" stroke-linecap="round"/><circle cx="126" cy="124.5" r="3.6" fill="#e0a57a"/>
+    <path d="M131.5 117.5 q4.5 4 2.5 9.5 M135.5 113 q6.5 6 3.5 14.5" stroke="#fff" stroke-width="1.5" fill="none" stroke-linecap="round" opacity=".9"/>
+    <rect x="102" y="140" width="6" height="6" fill="#c98a5e"/><circle cx="105" cy="134" r="9.5" fill="#e0a57a"/>
+    <path d="M95.6 132.5 C95.6 122.5 114.4 122.5 114.4 132.5 C110.5 129.2 99.5 129.2 95.6 132.5Z" fill="#20b0a0"/><path d="M113.6 129 l5.5 -2.6 l-1.6 5.4z" fill="#1a8f82"/>
+    <circle cx="100" cy="137.6" r="2" fill="#ff7f8f" opacity=".4"/><circle cx="110.4" cy="137.6" r="2" fill="#ff7f8f" opacity=".4"/>
+    <path d="M99.6 134.2 q1.8 -2 3.6 0 M106.8 134.2 q1.8 -2 3.6 0" fill="none" stroke="#2a1c1a" stroke-width="1.3" stroke-linecap="round"/>
+    <path d="M101.6 138.6 q3.4 3.6 6.8 0z" fill="#7a2e35"/>
+    <path d="M58 162 L154 162 L152 167.5 L60 167.5Z" fill="#f4e3c0" stroke="#6e4422" stroke-width=".6"/>
+    <path d="M60 167.5 L152 167.5 C148 181 132 189.5 106 189.5 C80 189.5 64 181 60 167.5Z" fill="url(#hxc-hull)"/>
+    <path d="M63 173 Q106 177.5 149 173 L147.6 177 Q106 181.5 64.6 177Z" fill="#e0523f"/><path d="M68 182 Q106 186 144 182" stroke="#3a1c08" stroke-width=".8" fill="none" opacity=".5"/>
+    <path d="M150 182 q6 -3 12 0 t12 0" stroke="#fff" stroke-width="1.4" fill="none" stroke-linecap="round" opacity=".7"/>
+  </g>
+  ${spark(222, 66, 4)}${spark(46, 118, 3, 0.8)}${spark(276, 104, 3.2, 0.8)}
 </svg>`;
+}
+const COVER = islandCover();
 
 const CSS = `
 .hexisle { --hx-gap: 12px; }
 .hexisle-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.hexisle-felt { padding: 10px; }
-.hexisle-bar { display: flex; align-items: center; gap: 12px; margin: 0 4px 8px; min-height: 54px; }
+/* Sunny island at sea: turquoise shallows under a warm sun, with drifting wave glints. */
+.hexisle-felt { padding: 12px;
+  background:
+    radial-gradient(55% 42% at 94% -6%, rgba(255, 242, 190, .62), rgba(255, 214, 120, .22) 42%, transparent 72%),
+    radial-gradient(70% 50% at -4% 108%, rgba(120, 245, 225, .28), transparent 62%),
+    ${WAVES} 0 0 / 132px 84px repeat,
+    linear-gradient(180deg, #33b9d2 0%, #1c93c0 32%, #116da3 66%, #0b4b82 100%);
+  border-color: rgba(170, 240, 255, .32);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28), inset 0 0 60px rgba(0, 30, 70, .32), var(--shadow-lg); }
+.hexisle-bar { display: flex; align-items: center; gap: 12px; margin: 0 0 10px; min-height: 58px; padding: 7px 8px 7px 12px; border-radius: 16px;
+  background: linear-gradient(180deg, rgba(5, 26, 60, .66), rgba(5, 26, 60, .5)); border: 1px solid rgba(255, 255, 255, .13);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 6px 18px rgba(0, 25, 60, .22); }
 .hexisle-bar .hexisle-says { flex: 1; min-width: 0; }
-.hexisle-bar .status { line-height: 1.25; }
-.hexisle-bar .status .hexisle-seat { vertical-align: -4px; margin-right: 6px; }
-.hexisle-hint { font-size: .86rem; color: #e3f3e8; opacity: .88; margin-top: 2px; }
-.hexisle-dice { flex: none; gap: 10px; padding: 4px 8px; }
-.hexisle-dice.idle { opacity: .45; }
-.hexisle-sum { font-family: var(--font-display); font-weight: 800; font-size: 1.3rem; color: var(--gold); text-shadow: 0 2px 0 #000; min-width: 1.4em; text-align: center; }
+.hexisle-bar .status { line-height: 1.25; display: flex; align-items: center; gap: 9px; }
+.hexisle-hint { font-size: .86rem; color: #d3f1ff; margin-top: 3px; }
+.hexisle-dice { flex: none; gap: 10px; padding: 6px 10px; border-radius: 13px; background: rgba(0, 10, 32, .42); box-shadow: inset 0 2px 8px rgba(0, 0, 0, .35), 0 1px 0 rgba(255, 255, 255, .08); }
+.hexisle-dice.idle { opacity: .5; }
+.hexisle-sum { font-family: var(--font-display); font-weight: 700; font-size: 1.35rem; color: var(--gold); text-shadow: 0 2px 6px rgba(0, 0, 0, .5); min-width: 1.4em; text-align: center; }
 .hexisle-sum.seven { color: #ff8a7a; }
+.hexisle-felt .winner-banner.hexisle-win { display: flex; align-items: center; gap: 12px; margin: 0; padding: 2px 0; text-align: left; font-size: 1.45rem; line-height: 1.2; }
+.hexisle-win .ic { width: 1em; height: 1em; vertical-align: -.12em; }
+.hexisle-win .hexisle-face { width: 40px; height: 40px; }
 .hexisle-board svg { width: 100%; height: auto; max-height: max(440px, calc(100vh - 250px)); display: block; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
 .hexisle-wave { animation: hexisle-wave 5.5s ease-in-out infinite; }
 @keyframes hexisle-wave { 0%, 100% { transform: translateX(-5px); opacity: .18; } 50% { transform: translateX(6px); opacity: .6; } }
@@ -1142,20 +1270,27 @@ const CSS = `
 @keyframes hexisle-flash { 0% { opacity: 0; } 12% { opacity: .8; } 30% { opacity: .15; } 48% { opacity: .65; } 100% { opacity: 0; } }
 .hexisle-tokpop { animation: hexisle-tokpop .9s cubic-bezier(.3,1.6,.5,1) both; transform-box: fill-box; transform-origin: center; }
 @keyframes hexisle-tokpop { 0% { transform: scale(1); } 30% { transform: scale(1.35); } 100% { transform: scale(1); } }
-.hexisle-spot { pointer-events: none; animation: hexisle-spot 1.4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
-@keyframes hexisle-spot { 50% { transform: scale(1.25); opacity: .75; } }
+/* Legal targets: a crisp rim per spot, one soft halo layer breathing behind them (opacity only). */
+.hexisle-halos { pointer-events: none; animation: hexisle-breathe 2.6s ease-in-out infinite; }
+@keyframes hexisle-breathe { 50% { opacity: .3; } }
+.hexisle-mark { pointer-events: none; transform-box: fill-box; transform-origin: center; transition: transform .12s var(--ease); }
 .hexisle-hit { cursor: pointer; fill: transparent; }
-.hexisle-hexhit { cursor: pointer; fill: rgba(255, 240, 170, .08); stroke: rgba(255, 236, 160, .9); stroke-width: 3; stroke-dasharray: 8 6; }
+.hexisle-hit:active + .hexisle-mark { transform: scale(.82); }
+.hexisle-hexhit { cursor: pointer; fill: rgba(255, 244, 190, .05); stroke: rgba(255, 242, 180, .95); stroke-width: 3; stroke-dasharray: 8 6;
+  transform-box: fill-box; transform-origin: center; transition: transform .12s var(--ease), fill .15s; }
+.hexisle-hexhit:active { transform: scale(.96); fill: rgba(255, 244, 190, .24); }
 .hexisle-robbed { opacity: .82; }
 .hexisle-robber { pointer-events: none; }
 
-.hexisle-bankrow { display: flex; align-items: flex-end; justify-content: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-.hexisle-bankrow .hexisle-lbl { font-family: var(--font-display); font-size: .72rem; color: #cfe9d9; letter-spacing: .08em; text-transform: uppercase; align-self: center; margin-right: 2px; }
+.hexisle-bankrow { display: flex; align-items: flex-end; justify-content: center; gap: 10px; flex-wrap: wrap; width: fit-content; max-width: 100%; margin: 10px auto 0; padding: 8px 14px 13px; border-radius: 16px;
+  background: rgba(5, 26, 60, .46); border: 1px solid rgba(255, 255, 255, .12); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06); }
+.hexisle-bankrow .hexisle-lbl { font-family: var(--font-display); font-weight: 600; font-size: .74rem; color: #bfe9ff; letter-spacing: .12em; text-transform: uppercase; align-self: center; margin-right: 2px; }
 .hexisle-stack { position: relative; width: 34px; height: 46px; }
 .hexisle-stack > div { position: absolute; inset: 0; }
 .hexisle-stack > div:nth-child(1) { transform: translate(3px, -3px) rotate(4deg); }
 .hexisle-stack > div:nth-child(2) { transform: translate(1.5px, -1.5px) rotate(2deg); }
-.hexisle-stack .hexisle-cnt { position: absolute; left: 50%; bottom: -9px; transform: translateX(-50%); z-index: 2; background: rgba(15, 10, 5, .85); color: #f6ead2; border-radius: 8px; padding: 0 5px; font-size: .7rem; font-weight: 800; line-height: 1.35; border: 1px solid rgba(242, 193, 78, .4); }
+.hexisle-stack .hexisle-cnt { position: absolute; left: 50%; bottom: -9px; transform: translateX(-50%); z-index: 2; background: #121a40; color: #fff; border-radius: 8px; padding: 0 6px;
+  font-family: var(--font-display); font-size: .72rem; font-weight: 600; line-height: 1.4; border: 1px solid rgba(255, 255, 255, .35); box-shadow: 0 2px 4px rgba(0, 0, 0, .35); }
 
 .hexisle-card { position: relative; width: 58px; height: 80px; border-radius: 9px; flex: none;
   background: radial-gradient(ellipse at 30% 15%, rgba(255,255,255,.35), transparent 55%), linear-gradient(160deg, var(--c1), var(--c2));
@@ -1173,31 +1308,32 @@ const CSS = `
 .hexisle-r-grain { --c1: ${RES_COL.grain[0]}; --c2: ${RES_COL.grain[1]}; }
 .hexisle-r-ore { --c1: ${RES_COL.ore[0]}; --c2: ${RES_COL.ore[1]}; }
 .hexisle-back, .hexisle-devback { width: 100%; height: 100%; border-radius: 5px; border: 1.5px solid #fbf3df; box-shadow: 0 0 0 1px rgba(0,0,0,.6), 0 3px 6px rgba(0,0,0,.4);
-  background: radial-gradient(circle at 50% 50%, #f2c14e 0 16%, #8a2a1a 17% 24%, transparent 25%), repeating-linear-gradient(45deg, rgba(255,255,255,.07) 0 3px, transparent 3px 7px), linear-gradient(160deg, #8a3020, #3d120a); }
+  background: radial-gradient(circle at 50% 50%, #ffd76a 0 16%, #0f4c7a 17% 24%, transparent 25%), repeating-linear-gradient(45deg, rgba(255,255,255,.08) 0 3px, transparent 3px 7px), linear-gradient(160deg, #2a8fc4, #0d3e6e); }
 .hexisle-devback { background: radial-gradient(circle at 50% 50%, #f2c14e 0 14%, #2a1a5a 15% 22%, transparent 23%), repeating-linear-gradient(-45deg, rgba(255,255,255,.07) 0 3px, transparent 3px 7px), linear-gradient(160deg, #4a3a9a, #1a1040); }
 
 .hexisle-dock { display: flex; flex-direction: column; gap: 12px; }
-.hexisle-dock h4 { margin: 0; font-family: var(--font-display); color: var(--gold); font-size: .82rem; letter-spacing: .08em; text-transform: uppercase; }
+.hexisle-dock h4, .hexisle-offer h4 { margin: 0; display: flex; align-items: center; gap: 6px; font-family: var(--font-body); font-weight: 800; color: var(--muted); font-size: .74rem; letter-spacing: .12em; text-transform: uppercase; }
+.hexisle-offer h4 .ic { width: 16px; height: 16px; color: var(--gold); }
 .hexisle-hand { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
 .hexisle-slot { display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .hexisle-slot .hexisle-card { transition: transform .2s var(--ease); }
 .hexisle-slot.zero .hexisle-card { opacity: .32; filter: grayscale(.7); }
 .hexisle-num { position: absolute; top: -9px; right: -9px; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
-  background: radial-gradient(circle at 35% 30%, #fff6d0, #e9b947 60%, #a87418); color: #3a2405; border: 1px solid #6b440c;
-  font-family: var(--font-display); font-weight: 800; font-size: .85rem; box-shadow: 0 2px 4px rgba(0,0,0,.5); }
+  background: linear-gradient(180deg, #2c3d82, #141d45); color: #fff; border: 2px solid #fff;
+  font-family: var(--font-display); font-weight: 700; font-size: .85rem; box-shadow: 0 2px 5px rgba(0,0,0,.45); }
 .hexisle-step { display: flex; gap: 3px; }
-.hexisle-step button { min-height: 38px; min-width: 32px; width: 32px; padding: 0; border-radius: 8px; font-size: 1.15rem; }
+.hexisle-step button { min-height: 38px; min-width: 32px; width: 32px; padding: 0; border-radius: 9px; font-size: 1.15rem; }
 .hexisle-sel { position: absolute; left: -8px; bottom: -8px; min-width: 26px; height: 22px; padding: 0 4px; border-radius: 11px; display: grid; place-items: center;
-  background: radial-gradient(circle at 35% 30%, #ffb9ad, #d4412c 65%, #8a1c0e); color: #fff; border: 1px solid #5a1008; font-weight: 800; font-size: .78rem; box-shadow: 0 2px 4px rgba(0,0,0,.5); }
+  background: linear-gradient(180deg, #ff8a9c, #d9405a); color: #fff; border: 2px solid #fff; font-weight: 800; font-size: .78rem; box-shadow: 0 2px 5px rgba(0,0,0,.45); }
 .hexisle-have { font-size: .68rem; color: var(--muted); font-weight: 700; }
 .hexisle-slot.zero .hexisle-num { filter: grayscale(1); opacity: .7; }
 .hexisle-side .hexisle-card { width: 51px; height: 71px; }
 .hexisle-side .hexisle-hand { gap: 6px; justify-content: space-between; }
 .hexisle-modal .hexisle-hand { justify-content: space-between; gap: 4px; }
 .hexisle-modal .hexisle-card { width: 50px; height: 68px; }
-.hexisle-pickn { font-family: var(--font-display); font-weight: 800; color: var(--gold); min-width: 1.2em; text-align: center; }
+.hexisle-pickn { font-family: var(--font-display); font-weight: 700; color: var(--gold); min-width: 1.2em; text-align: center; }
 
-.hexisle-devs { display: flex; gap: 8px; flex-wrap: wrap; }
+.hexisle-devs { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 4px; }
 .hexisle-dev { position: relative; width: 64px; height: 88px; border-radius: 9px; padding: 4px; flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   background: radial-gradient(ellipse at 30% 10%, rgba(255,255,255,.25), transparent 60%), linear-gradient(160deg, #4a3a9a, #1a1040);
   border: 2px solid #f2d68a; box-shadow: 0 0 0 1px #000, 0 5px 10px rgba(0,0,0,.45); color: #fbefd0; text-align: center; }
@@ -1205,58 +1341,108 @@ const CSS = `
 .hexisle-dev b { font-size: .56rem; line-height: 1.05; letter-spacing: .03em; text-transform: uppercase; font-family: var(--font-display); }
 .hexisle-dev-knight { background: radial-gradient(ellipse at 30% 10%, rgba(255,255,255,.25), transparent 60%), linear-gradient(160deg, #5a5f72, #1e2230); }
 .hexisle-dev-vp { background: radial-gradient(ellipse at 30% 10%, rgba(255,255,255,.25), transparent 60%), linear-gradient(160deg, #2f7a4e, #0f3a22); }
-button.hexisle-devbtn { padding: 0; min-height: 0; background: none; border: none; box-shadow: none; border-radius: 9px; position: relative; }
+button.hexisle-devbtn { padding: 0; min-height: 0; background: none; border: none; box-shadow: none; border-radius: 9px; position: relative; transition: transform .2s var(--ease); }
+button.hexisle-devbtn:hover:not(:disabled) { background: none; }
 button.hexisle-devbtn:disabled { opacity: .6; filter: grayscale(.3); }
-.hexisle-devbtn .hexisle-tag { position: absolute; left: 50%; bottom: -8px; transform: translateX(-50%); white-space: nowrap; font-size: .6rem; font-weight: 800; padding: 1px 6px; border-radius: 8px; background: #1a0f07; color: var(--gold); border: 1px solid rgba(242,193,78,.5); }
-.hexisle-devbtn.ready .hexisle-dev { box-shadow: 0 0 0 1px #000, 0 0 14px rgba(255, 220, 120, .8); }
+button.hexisle-devbtn:active:not(:disabled) { transform: translateY(-2px) scale(.97); }
+@media (hover: hover) { button.hexisle-devbtn.ready:hover { transform: translateY(-4px); } }
+.hexisle-devbtn .hexisle-tag { position: absolute; left: 50%; bottom: -8px; transform: translateX(-50%); z-index: 2; white-space: nowrap; font-size: .6rem; font-weight: 800; padding: 1px 7px; border-radius: 8px;
+  background: #141d45; color: var(--gold); border: 1px solid rgba(255, 207, 92, .5); }
+/* Cards you can play now: a warm rim with a slow breath, like the reference game. */
+.hexisle-devbtn.ready .hexisle-dev { box-shadow: 0 0 0 2px #ffe27a, 0 5px 12px rgba(0,0,0,.45); }
+.hexisle-devbtn.ready::after { content: ''; position: absolute; inset: -2px; border-radius: 11px; pointer-events: none; z-index: 1;
+  box-shadow: 0 0 16px 4px rgba(255, 214, 90, .55); animation: hexisle-breathe 2.6s ease-in-out infinite; }
 
 .hexisle-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: stretch; }
 .hexisle-actions > button { flex: 1 1 auto; }
+.hexisle-actions button:has(> svg) { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.hexisle-actions button > svg:not(.ic), .hexisle-row2 button > svg:not(.ic) { width: 18px; height: 18px; flex: none; }
+.hexisle-rollbtn { position: relative; min-height: 52px; font-family: var(--font-display); font-size: 1.12rem; font-weight: 600; }
+.hexisle-rollbtn .ic { width: 22px; height: 22px; }
+.hexisle-rollbtn::after { content: ''; position: absolute; inset: -3px; border-radius: 15px; pointer-events: none; box-shadow: 0 0 20px 4px rgba(124, 108, 255, .55); animation: hexisle-breathe 2.6s ease-in-out infinite; }
+.hexisle-rob { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.hexisle-rob .hexisle-face { margin-left: -4px; }
 .hexisle-builds { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-.hexisle-builds button { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 4px 7px; min-height: 76px; font-size: .78rem; }
-.hexisle-builds button.on { background: linear-gradient(180deg, #fff0b8 0%, #f6cd63 30%, #dba339 70%, #b57a1c 100%); color: #3a2405; text-shadow: none; }
+.hexisle-builds button { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 4px 7px; min-height: 76px; font-size: .78rem;
+  transition: transform .2s var(--ease), background-color .15s, border-color .15s, box-shadow .2s; }
+.hexisle-builds button:not(:disabled) { border-color: rgba(255, 207, 92, .34); }
+/* The piece you are placing lifts off the tray. */
+.hexisle-builds button.on { transform: translateY(-5px); color: #fff; border-color: var(--gold);
+  background: linear-gradient(180deg, rgba(255, 207, 92, .3), rgba(255, 207, 92, .1));
+  box-shadow: 0 0 0 1px var(--gold), 0 12px 24px rgba(0, 0, 0, .4), 0 0 20px rgba(255, 207, 92, .3); }
+.hexisle-builds button.on:active { transform: translateY(-3px) scale(.97); }
 .hexisle-builds svg.hexisle-piece { width: 30px; height: 26px; }
 .hexisle-cost { display: flex; gap: 1px; justify-content: center; flex-wrap: wrap; }
 .hexisle-cost .hexisle-card.mini { width: 13px; height: 18px; border-width: 1px; border-radius: 3px; box-shadow: 0 1px 2px rgba(0,0,0,.6); }
 .hexisle-row2 { display: flex; gap: 8px; flex-wrap: wrap; }
 .hexisle-row2 > button { flex: 1 1 120px; }
+.hexisle-dock .hexisle-row2 > button { white-space: nowrap; }
+.hexisle-row2 button:has(> svg) { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
 
-.hexisle-offer { border-radius: 12px; padding: 10px; background: rgba(0,0,0,.28); box-shadow: inset 0 0 0 1px rgba(242,193,78,.35); display: flex; flex-direction: column; gap: 8px; }
+.hexisle-offer { border-radius: 14px; padding: 12px; background: rgba(8, 14, 40, .45); border: 1px solid rgba(255, 207, 92, .35); display: flex; flex-direction: column; gap: 8px; }
 .hexisle-offer .hexisle-swap { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .hexisle-mcards { display: flex; gap: 3px; flex-wrap: wrap; }
 .hexisle-mcards .hexisle-card.mini { width: 24px; height: 33px; }
-.hexisle-reply { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-top: 1px dashed rgba(242,200,130,.2); }
+.hexisle-reply { display: flex; align-items: center; gap: 8px; padding: 7px 0 2px; border-top: 1px solid var(--line); }
 
-.hexisle-chip { display: block; position: relative; }
+/* Player faces: portrait ringed in the seat colour, seat emblem pinned on. */
+.hexisle-face { position: relative; width: 30px; height: 30px; flex: none; border-radius: 50%; box-shadow: 0 0 0 2px var(--pc, #fff), 0 2px 6px rgba(0, 0, 0, .4); }
+.hexisle-face .portrait { width: 100%; height: 100%; display: block; border-radius: 50%; }
+.hexisle-emb { position: absolute; right: -5px; bottom: -4px; width: 15px; height: 15px; line-height: 0; }
+.hexisle-emb svg { width: 100%; height: 100%; display: block; }
+.hexisle-face.sm { width: 26px; height: 26px; }
+.hexisle-face.sm .hexisle-emb { width: 13px; height: 13px; right: -4px; bottom: -3px; }
+.hexisle-players { display: flex; flex-direction: column; gap: 10px; }
+.hexisle-plist { display: flex; flex-direction: column; gap: 8px; }
+.hexisle-players h3 { margin: 0; display: flex; align-items: center; gap: 7px; font-family: var(--font-body); font-weight: 800; color: var(--muted); font-size: .74rem; letter-spacing: .12em; text-transform: uppercase; }
+.hexisle-players h3 .ic { width: 16px; height: 16px; color: var(--brand-2); }
+.hexisle-chip { display: block; position: relative; overflow: hidden; padding: 11px 11px 9px; }
+.hexisle-chip::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--pc); opacity: .9; }
+.hexisle-chip.hexisle-me { background: rgba(76, 184, 255, .08); border-color: rgba(76, 184, 255, .32); }
+.hexisle-chip.hexisle-scored { animation: hexisle-scored 1.2s ease-out .5s; }
+@keyframes hexisle-scored { 20% { box-shadow: 0 0 0 2px #fff3b0, 0 0 28px 6px rgba(255, 214, 90, .55); } }
+.hexisle-scored .hexisle-vp { animation: hexisle-vpop .7s var(--spring) .5s; }
+@keyframes hexisle-vpop { 30% { transform: scale(1.35); } }
 .hexisle-chiptop { display: flex; align-items: center; gap: 8px; }
 .hexisle-chiptop .hexisle-seat { flex: none; }
 .hexisle-chip .hexisle-pname { font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
-.hexisle-chip .hexisle-stats { margin: 3px 0 0 34px; }
-.hexisle-chip .hexisle-badges { margin-left: 34px; }
-.hexisle-stats { display: flex; gap: 10px; font-size: .8rem; color: var(--muted); flex-wrap: wrap; }
+.hexisle-chip .hexisle-stats { margin: 4px 0 0 38px; }
+.hexisle-chip .hexisle-badges { margin-left: 38px; }
+.hexisle-stats { display: flex; gap: 10px; font-size: .8rem; font-weight: 700; color: var(--muted); flex-wrap: wrap; }
 .hexisle-stats span { display: inline-flex; align-items: center; gap: 3px; }
 .hexisle-stats svg { width: 14px; height: 14px; }
-.hexisle-vp { flex: none; font-family: var(--font-display); font-weight: 800; font-size: 1.4rem; color: var(--gold); line-height: 1; text-shadow: 0 2px 0 #000; white-space: nowrap; }
-.hexisle-vp small { font-size: .55rem; letter-spacing: .1em; color: var(--muted); margin-left: 2px; }
-.hexisle-badges { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 3px; }
-.hexisle-badge { font-size: .62rem; font-weight: 800; padding: 1px 7px; border-radius: 10px; color: #3a2405; background: linear-gradient(180deg, #fff0b8, #e3ae3f); border: 1px solid #7a5010; }
-.hexisle-players { display: flex; flex-direction: column; gap: 8px; }
-.hexisle-players h3, .hexisle-logbox h3 { margin: 0 0 2px; color: var(--gold); font-size: .95rem; }
+.hexisle-vp { flex: none; display: inline-block; font-family: var(--font-display); font-weight: 700; font-size: 1.45rem; color: var(--gold); line-height: 1; text-shadow: 0 0 14px rgba(255, 207, 92, .35); white-space: nowrap; }
+.hexisle-vp small { font-family: var(--font-body); font-weight: 800; font-size: .52rem; letter-spacing: .1em; color: var(--muted); margin-left: 2px; }
+.hexisle-badges { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+.hexisle-badge { display: inline-flex; align-items: center; gap: 4px; font-size: .64rem; font-weight: 800; letter-spacing: .03em; padding: 2px 8px 2px 5px; border-radius: 999px;
+  color: var(--gold); background: rgba(255, 207, 92, .14); border: 1px solid rgba(255, 207, 92, .35); }
+.hexisle-badge svg { width: 13px; height: 13px; flex: none; }
 .hexisle-wait { font-size: .7rem; color: var(--gold); font-weight: 800; }
 
-.hexisle-modal h3 { color: var(--gold); margin: 0 0 8px; }
+/* Island log drawer */
+.hexisle-logbox > summary > span:not(.note) { white-space: nowrap; }
+.hexisle-logbox > summary .note { min-width: 0; max-width: 60%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hexisle-logbox[open] > summary .note { visibility: hidden; }
+.hexisle-logbox .log { max-height: 220px; color: var(--muted); }
+.hexisle-logbox .log div { border-bottom-color: var(--line); }
+.hexisle-logbox .log div:first-child { color: var(--text); }
+
+.hexisle-modal { position: relative; }
+.hexisle-modal h3 { color: var(--text); margin: 0 0 10px; padding-right: 48px; }
+.hexisle-x { position: absolute; top: 12px; right: 12px; z-index: 2; }
 .hexisle-still, .hexisle-still .modal { animation: none; }
 .hexisle-modal::before { display: none; }
-.hexisle-modal { box-shadow: inset 0 0 0 1.5px rgba(242, 200, 130, .25), inset 0 1px 0 rgba(255, 220, 170, .18), 0 20px 50px rgba(0, 0, 0, .6); }
-.hexisle-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
-.hexisle-tabs button { flex: 1; }
-.hexisle-tabs button.on { background: linear-gradient(180deg, #fff0b8 0%, #f6cd63 30%, #dba339 70%, #b57a1c 100%); color: #3a2405; text-shadow: none; }
+.hexisle-tabs { display: flex; gap: 6px; margin-bottom: 12px; padding: 4px; border-radius: 14px; background: rgba(5, 10, 30, .42); border: 1px solid var(--line); }
+.hexisle-tabs button { flex: 1; background: transparent; border-color: transparent; box-shadow: none; color: var(--muted); }
+.hexisle-tabs button.on { color: #fff; background: linear-gradient(135deg, var(--brand), #6a7dff 50%, var(--brand-2) 130%); box-shadow: var(--glow-brand); }
 .hexisle-pick { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin: 6px 0 12px; }
-.hexisle-pick button { padding: 6px 2px; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: .72rem; background: rgba(0,0,0,.25); box-shadow: inset 0 0 0 1px rgba(242,193,78,.2); }
-.hexisle-pick button.on { box-shadow: inset 0 0 0 2px var(--gold), 0 0 12px rgba(242,193,78,.5); background: rgba(242,193,78,.15); }
+.hexisle-pick button { padding: 8px 2px 6px; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: .72rem;
+  background: rgba(255, 255, 255, .04); border-color: var(--line); box-shadow: none; transition: transform .2s var(--ease), background-color .15s, border-color .15s, box-shadow .2s; }
+.hexisle-pick button.on { transform: translateY(-4px); border-color: var(--gold); background: rgba(255, 207, 92, .14);
+  box-shadow: 0 0 0 1px var(--gold), 0 10px 20px rgba(0, 0, 0, .35), 0 0 16px rgba(255, 207, 92, .35); }
 .hexisle-pick .hexisle-card { width: 44px; height: 60px; }
 .hexisle-pick .hexisle-card b { display: none; }
-.hexisle-lbl2 { font-size: .8rem; color: var(--muted); font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+.hexisle-lbl2 { font-size: .74rem; color: var(--muted); font-weight: 800; text-transform: uppercase; letter-spacing: .1em; }
 
 .hexisle-show { position: fixed; z-index: 125; pointer-events: none; perspective: 900px; width: 120px; height: 166px; }
 .hexisle-show .in { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; animation: hexisle-flip 2.4s cubic-bezier(.3,.9,.3,1) forwards; }
@@ -1277,7 +1463,8 @@ button.hexisle-devbtn:disabled { opacity: .6; filter: grayscale(.3); }
 
 @media (max-width: 900px) {
   .hexisle-side { display: contents; }
-  .hexisle-players { order: -1; }
+  .hexisle-players { order: -1; padding: 10px; }
+  .hexisle-players h3 { display: none; }
   .hexisle-dock { order: 1; }
   .hexisle-logbox { order: 3; }
   .hexisle-side .hexisle-card { width: 58px; height: 80px; }
@@ -1285,28 +1472,32 @@ button.hexisle-devbtn:disabled { opacity: .6; filter: grayscale(.3); }
   .hexisle-board svg { max-height: none; }
 }
 @media (max-width: 480px) {
-  .hexisle-felt { padding: 4px; border-width: 6px; }
-  .hexisle-bar { margin: 2px 2px 4px; gap: 6px; min-height: 46px; }
-  .hexisle-bar .status { font-size: .95rem; }
+  .hexisle-felt { padding: 6px; }
+  .hexisle-bar { margin: 0 0 6px; gap: 6px; min-height: 50px; padding: 5px 6px 5px 8px; border-radius: 13px; }
+  .hexisle-bar .status { font-size: .95rem; gap: 7px; }
   .hexisle-hint { font-size: .78rem; }
   .hexisle-card, .hexisle-side .hexisle-card { width: 54px; height: 75px; }
   .hexisle-hand { gap: 6px; justify-content: space-between; }
   .hexisle-builds { gap: 5px; }
   .hexisle-builds button { font-size: .68rem; min-height: 72px; padding: 5px 2px; }
-  .hexisle-felt .winner-banner { font-size: 1.15rem; padding: 8px 4px 2px; }
+  .hexisle-felt .winner-banner.hexisle-win { font-size: 1.1rem; gap: 8px; }
+  .hexisle-win .hexisle-face { width: 32px; height: 32px; }
   .hexisle-cost { gap: 0; }
   .hexisle-cost .hexisle-card.mini { width: 12px; height: 17px; }
-  .hexisle-players .pchip { padding: 6px 7px; gap: 6px; }
+  .hexisle-players { padding: 8px; }
+  .hexisle-players .pchip { padding: 9px 7px 6px; gap: 6px; }
   .hexisle-chip .hexisle-pname { font-size: .82rem; }
   .hexisle-chiptop { gap: 6px; }
-  .hexisle-chiptop .hexisle-seat { width: 22px; height: 22px; }
+  .hexisle-chip .hexisle-face { width: 26px; height: 26px; }
+  .hexisle-chip .hexisle-face .hexisle-emb { width: 13px; height: 13px; right: -4px; bottom: -3px; }
+  .hexisle-chip .tag.t-you { display: none; }
   .hexisle-chip .hexisle-stats, .hexisle-chip .hexisle-badges { margin-left: 0; }
   .hexisle-vp { font-size: 1.2rem; }
   .hexisle-dice .die3d { --die: 28px !important; }
-  .hexisle-dice { gap: 7px; padding: 2px; }
+  .hexisle-dice { gap: 7px; padding: 4px 6px; }
   .hexisle-stats { gap: 6px; font-size: .72rem; }
   .hexisle-stack { width: 28px; height: 38px; }
-  .hexisle-bankrow { gap: 6px; }
+  .hexisle-bankrow { gap: 6px; padding: 6px 8px 12px; margin-top: 8px; }
   .hexisle-bankrow .hexisle-lbl { display: none; }
 }
 `;
@@ -1407,30 +1598,42 @@ function boardSVG(v, T, me) {
   ui.prevKeys = keys;
   const rh = HEXES[v.robber];
   out.push(`<use data-k="robber" class="hexisle-robber" href="#hx-robber" x="${(rh.x + 30).toFixed(1)}" y="${(rh.y + 16).toFixed(1)}"/>`);
-  // legal targets
-  T.h.forEach((i) => out.push(`<polygon class="hexisle-hexhit pulse-glow" data-hit="h:${i}" points="${hexPts(54, HEXES[i].x, HEXES[i].y)}"/>`));
+  // Legal targets: a crisp rim on each spot, plus one soft halo layer that breathes (opacity only).
+  // The hit area comes first so pressing it can dip the marker drawn right after it.
+  const halos = [], marks = [];
+  T.h.forEach((i) => {
+    const H = HEXES[i];
+    halos.push(`<polygon points="${hexPts(55, H.x, H.y)}" fill="#fff3b8" fill-opacity=".07" stroke="#ffd76a" stroke-opacity=".42" stroke-width="7" stroke-linejoin="round"/>`);
+    marks.push(`<polygon class="hexisle-hexhit" data-hit="h:${i}" points="${hexPts(54, H.x, H.y)}"/>`);
+  });
   T.e.forEach((e) => {
     const A = VERTS[EDGES[e].a], B = VERTS[EDGES[e].b], E = EDGES[e];
     const ax = A.x + (B.x - A.x) * 0.28, ay = A.y + (B.y - A.y) * 0.28, bx = B.x - (B.x - A.x) * 0.28, by = B.y - (B.y - A.y) * 0.28;
     const ln = `x1="${ax.toFixed(1)}" y1="${ay.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${by.toFixed(1)}" stroke-linecap="round"`;
-    out.push(`<g class="pulse-glow" pointer-events="none"><g class="hexisle-spot"><line ${ln} stroke="#2a1606" stroke-width="13" opacity=".55"/><line ${ln} stroke="#ffc93c" stroke-width="9.5"/><line ${ln} stroke="#fffdf0" stroke-width="4.5"/></g></g>
-      <circle class="hexisle-hit" data-hit="e:${e}" cx="${E.x.toFixed(1)}" cy="${E.y.toFixed(1)}" r="28"/>`);
+    halos.push(`<line ${ln} stroke="#ffe08a" stroke-width="26" stroke-opacity=".28"/><line ${ln} stroke="#fff3c0" stroke-width="16" stroke-opacity=".45"/>`);
+    marks.push(`<circle class="hexisle-hit" data-hit="e:${e}" cx="${E.x.toFixed(1)}" cy="${E.y.toFixed(1)}" r="28"/>
+      <g class="hexisle-mark"><line ${ln} stroke="#0e1530" stroke-width="13" opacity=".5"/><line ${ln} stroke="#ffc93c" stroke-width="9.5"/><line ${ln} stroke="#fffdf0" stroke-width="4.5"/></g>`);
   });
   T.v.forEach((vi) => {
     const V = VERTS[vi];
-    out.push(`<g class="pulse-glow" pointer-events="none"><g class="hexisle-spot"><circle cx="${V.x}" cy="${V.y}" r="10.5" fill="#ffc93c" stroke="#2a1606" stroke-width="2.5"/><circle cx="${V.x}" cy="${V.y}" r="5" fill="#fffdf0"/></g></g>
-      <circle class="hexisle-hit" data-hit="v:${vi}" cx="${V.x}" cy="${V.y}" r="30"/>`);
+    halos.push(`<circle cx="${V.x}" cy="${V.y}" r="21" fill="url(#hx-halo)"/>`);
+    marks.push(`<circle class="hexisle-hit" data-hit="v:${vi}" cx="${V.x}" cy="${V.y}" r="30"/>
+      <g class="hexisle-mark"><circle cx="${V.x}" cy="${V.y}" r="10.5" fill="#ffc93c" stroke="#0e1530" stroke-width="2.5"/><circle cx="${V.x}" cy="${V.y}" r="5" fill="#fffdf0"/></g>`);
   });
   T.c.forEach((vi) => {
     const V = VERTS[vi];
-    out.push(`<g class="pulse-glow"><circle class="hexisle-spot" cx="${V.x}" cy="${V.y - 2}" r="19" fill="none" stroke="#fff3c0" stroke-width="3.5"/></g>
-      <circle class="hexisle-hit" data-hit="c:${vi}" cx="${V.x}" cy="${V.y}" r="30"/>`);
+    halos.push(`<circle cx="${V.x}" cy="${V.y - 2}" r="30" fill="url(#hx-halo)"/>`);
+    marks.push(`<circle class="hexisle-hit" data-hit="c:${vi}" cx="${V.x}" cy="${V.y}" r="30"/>
+      <g class="hexisle-mark"><circle cx="${V.x}" cy="${V.y - 2}" r="19" fill="none" stroke="#0e1530" stroke-opacity=".45" stroke-width="6"/><circle cx="${V.x}" cy="${V.y - 2}" r="19" fill="none" stroke="#fff3c0" stroke-width="3.5"/></g>`);
   });
   T.s.forEach(([vi, idx]) => {
     const V = VERTS[vi];
-    out.push(`<g class="pulse-glow"><circle class="hexisle-spot" cx="${V.x}" cy="${V.y - 2}" r="19" fill="none" stroke="#ff9a7a" stroke-width="3.5"/></g>
-      <circle class="hexisle-hit" data-hit="s:${idx}" cx="${V.x}" cy="${V.y}" r="30"/>`);
+    halos.push(`<circle cx="${V.x}" cy="${V.y - 2}" r="30" fill="url(#hx-halor)"/>`);
+    marks.push(`<circle class="hexisle-hit" data-hit="s:${idx}" cx="${V.x}" cy="${V.y}" r="30"/>
+      <g class="hexisle-mark"><circle cx="${V.x}" cy="${V.y - 2}" r="19" fill="none" stroke="#0e1530" stroke-opacity=".45" stroke-width="6"/><circle cx="${V.x}" cy="${V.y - 2}" r="19" fill="none" stroke="#ff9a7a" stroke-width="3.5"/></g>`);
   });
+  if (halos.length) out.push(`<g class="hexisle-halos">${halos.join('')}</g>`);
+  out.push(marks.join(''));
   void me;
   out.push('</svg>');
   return out.join('');
@@ -1438,6 +1641,8 @@ function boardSVG(v, T, me) {
 
 /* ---------------- side panel & dock ---------------- */
 const ui = { key: '', mode: null, modal: null, tab: 'bank', bGive: null, bGet: null, give: zeroRes(), want: zeroRes(), disc: zeroRes(), plenty: [], prevKeys: null, flash: null };
+let prevVP = new Map(); // player id -> VP at the last render, for the "scored" flash
+let logOpen = typeof matchMedia === 'function' ? matchMedia('(min-width: 901px)').matches : true;
 
 const SMALL = {
   cards: '<svg viewBox="0 0 16 16"><rect x="2" y="3" width="8" height="11" rx="1.5" fill="#c9b18c" transform="rotate(-10 6 8)"/><rect x="6" y="2" width="8" height="11" rx="1.5" fill="#f1e2bf" stroke="#6b4a2a" stroke-width=".8"/></svg>',
@@ -1477,16 +1682,18 @@ function statusOf(v, me) {
   return ['', ''];
 }
 
-function chipsHTML(v, me) {
+function chipsHTML(v, me, ctx) {
   const due = turnOf(v);
   return v.order.map((p) => {
     const P = v.ps[p];
     const vp = vpOf(v, p, true);
-    const badges = [v.longest === p ? '<span class="hexisle-badge">Longest Road</span>' : '', v.army === p ? '<span class="hexisle-badge">Largest Army</span>' : '',
+    const had = prevVP.get(p);
+    const scored = had != null && vp > had; // one-off flash when this player's points go up
+    const badges = [v.longest === p ? `<span class="hexisle-badge">${SMALL.road}Longest Road</span>` : '', v.army === p ? `<span class="hexisle-badge">${SMALL.sword}Largest Army</span>` : '',
       v.phase === 'discard' && v.discard[p] ? '<span class="hexisle-wait">discarding…</span>' : '',
       v.trade && v.trade.replies[p] === 'yes' ? '<span class="hexisle-wait">accepted</span>' : ''].join('');
-    return `<div class="pchip hexisle-chip${due.includes(p) && !v.over ? ' turn' : ''}">
-      <div class="hexisle-chiptop">${seatSVG(P.seat, 26)}<span class="hexisle-pname">${esc(P.name)}${p === me ? ' <span class="muted small">(you)</span>' : ''}</span>
+    return `<div class="pchip hexisle-chip${due.includes(p) && !v.over ? ' turn' : ''}${p === me ? ' hexisle-me' : ''}${scored ? ' hexisle-scored' : ''}" style="--pc:${PCOL[P.seat % 4].c}">
+      <div class="hexisle-chiptop">${faceHTML(v, p, ctx)}<span class="hexisle-pname">${esc(P.name)}</span>${p === me ? '<span class="tag t-you">You</span>' : ''}
         <span class="hexisle-vp" data-a="p-${p}-vp">${vp}<small>VP</small></span></div>
       <div class="hexisle-stats"><span data-a="p-${p}-hand" title="Resource cards">${SMALL.cards}${P.nRes}</span><span data-a="p-${p}-dev" title="Development cards">${SMALL.dev}${P.nDev}</span><span title="Knights played">${SMALL.sword}${P.knights}</span><span title="Longest road">${SMALL.road}${v.roadLen[p] || 0}</span></div>
       ${badges ? `<div class="hexisle-badges">${badges}</div>` : ''}</div>`;
@@ -1515,39 +1722,39 @@ function handHTML(v, me) {
     devs = `<div class="hexisle-devs">${P.dev.map((c, i) => {
       const ok = canNow(c);
       const tag = c.t === 'vp' ? '+1 VP' : c.turn >= v.turn ? 'new' : ok ? 'play' : '';
-      return `<button class="hexisle-devbtn${ok ? ' ready pulse-glow' : ''}" data-dev="${c.t}" data-i="${i}" ${ok ? '' : 'disabled'} title="${esc(DEV[c.t].desc)}">${devCardHTML(c.t)}${tag ? `<span class="hexisle-tag">${tag}</span>` : ''}</button>`;
+      return `<button class="hexisle-devbtn${ok ? ' ready' : ''}" data-dev="${c.t}" data-i="${i}" ${ok ? '' : 'disabled'} title="${esc(DEV[c.t].desc)}">${devCardHTML(c.t)}${tag ? `<span class="hexisle-tag">${tag}</span>` : ''}</button>`;
     }).join('')}</div>`;
   }
   const discBar = disc ? `<div class="hexisle-row2"><button class="primary" id="hx-disc" ${total(ui.disc) === disc ? '' : 'disabled'}>Discard ${total(ui.disc)} / ${disc}</button></div>` : '';
   return `<div><h4>Your hand</h4></div><div class="hexisle-hand">${slots}</div>${discBar}${devs ? `<h4>Development cards</h4>${devs}` : ''}`;
 }
 
-function offerHTML(v, me) {
+function offerHTML(v, me, ctx) {
   const tr = v.trade, cur = curId(v);
-  let body = `<div class="hexisle-swap"><b>${esc(nameOf(v, cur))}</b> gives <span class="hexisle-mcards">${miniCards(tr.give)}</span> for <span class="hexisle-mcards">${miniCards(tr.want)}</span></div>`;
+  let body = `<div class="hexisle-swap">${faceHTML(v, cur, ctx, 'sm')}<b>${esc(nameOf(v, cur))}</b> gives <span class="hexisle-mcards">${miniCards(tr.give)}</span> for <span class="hexisle-mcards">${miniCards(tr.want)}</span></div>`;
   if (me === cur) {
     body += Object.keys(tr.replies).map((p) => {
       const r = tr.replies[p];
-      return `<div class="hexisle-reply">${seatSVG(v.ps[p].seat, 20)}<span class="grow">${esc(nameOf(v, p))}</span>${r === 'yes' ? `<button class="good small" data-with="${esc(p)}">Trade</button>` : `<span class="muted small">${r === 'no' ? 'declined' : 'thinking…'}</span>`}</div>`;
+      return `<div class="hexisle-reply">${faceHTML(v, p, ctx, 'sm')}<span class="grow">${esc(nameOf(v, p))}</span>${r === 'yes' ? `<button class="good small" data-with="${esc(p)}">Trade</button>` : `<span class="muted small">${r === 'no' ? 'declined' : 'thinking…'}</span>`}</div>`;
     }).join('');
     body += '<div class="hexisle-row2"><button class="bad small" id="hx-cancel">Cancel offer</button></div>';
   } else if (tr.replies[me] === null) {
     const can = hasRes(v.ps[me].res, tr.want);
     body += `<div class="hexisle-row2"><button class="good" id="hx-yes" ${can ? '' : 'disabled'}>${can ? 'Accept' : "Can't afford"}</button><button class="bad" id="hx-no">Decline</button></div>`;
   } else if (tr.replies[me]) body += `<div class="muted small">You ${tr.replies[me] === 'yes' ? 'accepted' : 'declined'}.</div>`;
-  return `<div class="hexisle-offer"><h4>Trade offer</h4>${body}</div>`;
+  return `<div class="hexisle-offer"><h4>${SWAP_IC}Trade offer</h4>${body}</div>`;
 }
 
-function actionsHTML(v, me) {
+function actionsHTML(v, me, ctx) {
   const P = v.ps[me], cur = curId(v), mine = cur === me && !v.over;
   if (v.over) return '';
-  if (v.trade) return offerHTML(v, me);
+  if (v.trade) return offerHTML(v, me, ctx);
   if (!mine) return '';
   if (v.phase === 'roll') {
-    return `<div class="hexisle-actions"><button class="primary" id="hx-roll">🎲 Roll dice</button>${canPlay(v, me, 'knight') ? '<button id="hx-knight">Play Knight</button>' : ''}</div>`;
+    return `<div class="hexisle-actions"><button class="primary hexisle-rollbtn" id="hx-roll">${icon('dice')}Roll dice</button>${canPlay(v, me, 'knight') ? `<button id="hx-knight">${SMALL.sword}Play Knight</button>` : ''}</div>`;
   }
   if (v.phase === 'roads') return '<div class="hexisle-actions"><button id="hx-skip">Skip remaining roads</button></div>';
-  if (v.phase === 'steal') return `<div class="hexisle-actions">${v.victims.map((p, i) => `<button class="bad" data-steal="${i}">Rob ${esc(nameOf(v, p))} (${v.ps[p].nRes})</button>`).join('')}</div>`;
+  if (v.phase === 'steal') return `<div class="hexisle-actions">${v.victims.map((p, i) => `<button class="bad hexisle-rob" data-steal="${i}">${faceHTML(v, p, ctx, 'sm')}Rob ${esc(nameOf(v, p))} (${v.ps[p].nRes})</button>`).join('')}</div>`;
   if (v.phase !== 'main') return '';
   const u = used(v, me), seat = P.seat;
   const can = {
@@ -1561,7 +1768,7 @@ function actionsHTML(v, me) {
   const tiles = ['road', 'settlement', 'city', 'dev'].map((k) => `<button data-build="${k}" class="${ui.mode === k ? 'on' : ''}" ${can[k] || ui.mode === k ? '' : 'disabled'}>
       ${pieceIcon(k, seat)}<span>${label[k]} <span class="muted small">${left[k]}</span></span>${costHTML(COST[k])}</button>`).join('');
   return `<div class="hexisle-builds">${tiles}</div>
-    <div class="hexisle-row2">${ui.mode ? '<button id="hx-cancelmode">Cancel build</button>' : '<button id="hx-trade">⇄ Trade</button>'}<button class="primary" id="hx-end">End turn</button></div>`;
+    <div class="hexisle-row2">${ui.mode ? `<button id="hx-cancelmode">${icon('close')}Cancel build</button>` : `<button id="hx-trade">${SWAP_IC}Trade</button>`}<button class="primary" id="hx-end">End turn</button></div>`;
 }
 
 function stepper(kind, r, n, max) {
@@ -1600,7 +1807,7 @@ function modalHTML(v, me) {
   }
   const again = ui.shown === ui.modal;
   ui.shown = ui.modal;
-  return `<div class="modal-bg${again ? ' hexisle-still' : ''}" id="hx-modalbg"><div class="modal panel hexisle-modal">${body}</div></div>`;
+  return `<div class="modal-bg${again ? ' hexisle-still' : ''}" id="hx-modalbg"><div class="modal panel hexisle-modal"><button class="icon-btn hexisle-x" data-close aria-label="Close">${icon('close')}</button>${body}</div></div>`;
 }
 
 function showDevPlayed(el, v) {
@@ -1656,15 +1863,13 @@ function render(el, v, ctx) {
   }
 
   const [st, hint] = statusOf(v, me);
-  const curP = v.ps[curId(v)];
   const sum = v.dice[0] + v.dice[1];
-  const banner = v.over ? `<div class="winner-banner">🏆 ${esc(nameOf(v, v.winners[0]))} wins with ${vpOf(v, v.winners[0])} VP!</div>` : '';
+  const banner = v.over ? `<div class="winner-banner hexisle-win">${faceHTML(v, v.winners[0], ctx)}<span>${icon('trophy')} ${esc(nameOf(v, v.winners[0]))} wins with ${vpOf(v, v.winners[0])} VP!</span></div>` : '';
   el.innerHTML = `<div class="game-layout hexisle">
     <div class="hexisle-main">
       <div class="felt hexisle-felt">
-        ${banner}
         <div class="hexisle-bar">
-          <div class="hexisle-says">${st ? `<div class="status${mine || due.includes(me) ? ' myturn' : ''}">${v.over ? '' : seatSVG(curP.seat, 20)}${st}</div>` : ''}${hint ? `<div class="hexisle-hint">${hint}</div>` : ''}</div>
+          <div class="hexisle-says">${banner}${st ?`<div class="status${mine || due.includes(me) ? ' myturn' : ''}">${v.over ? '' : faceHTML(v, curId(v), ctx, 'sm')}<span>${st}</span></div>` : ''}${hint ? `<div class="hexisle-hint">${hint}</div>` : ''}</div>
           <div class="dice-tray hexisle-dice${v.rollSeq ? '' : ' idle'}">${dieHTML(v.dice[0], 34)}${dieHTML(v.dice[1], 34)}<span class="hexisle-sum${sum === 7 ? ' seven' : ''}">${v.rollSeq ? sum : ''}</span></div>
         </div>
         <div class="board-wrap hexisle-board">${boardSVG(v, T, me)}</div>
@@ -1675,12 +1880,16 @@ function render(el, v, ctx) {
       </div>
     </div>
     <div class="side hexisle-side">
-      <div class="panel hexisle-players"><h3>Players</h3><div class="hexisle-plist">${chipsHTML(v, me)}</div></div>
-      ${P ? `<div class="panel hexisle-dock">${actionsHTML(v, me)}${handHTML(v, me)}</div>` : ''}
-      <div class="parchment hexisle-logbox"><div class="log">${v.log.map((l) => `<div>${esc(l)}</div>`).join('')}</div></div>
+      <div class="panel hexisle-players"><h3>${icon('users')}Players</h3><div class="hexisle-plist">${chipsHTML(v, me, ctx)}</div></div>
+      ${P ? `<div class="panel hexisle-dock">${actionsHTML(v, me, ctx)}${handHTML(v, me)}</div>` : ''}
+      <details class="panel drawer hexisle-logbox" ${logOpen ? 'open' : ''}><summary>${icon('book')}<span>Island log</span><span class="note">${esc(v.log[0] || '')}</span>${icon('chevron', 'chev')}</summary>
+        <div class="drawer-body"><div class="log">${v.log.map((l) => `<div>${esc(l)}</div>`).join('')}</div></div></details>
     </div>
   </div>${modalHTML(v, me)}`;
 
+  // The log folds away on phones so the island gets the screen; it stays as the player left it.
+  el.querySelector('.hexisle-logbox')?.addEventListener('toggle', (e) => { logOpen = e.currentTarget.open; });
+  prevVP = new Map(v.order.map((p) => [p, vpOf(v, p, true)]));
   if (rolled) { const tray = el.querySelector('.hexisle-dice'); if (tray) rollDice(tray); }
   if (devPlayed) showDevPlayed(el, v);
 
@@ -1720,6 +1929,7 @@ function render(el, v, ctx) {
   on('#hx-cancelmode', () => { ui.mode = null; rerender(); });
   on('#hx-trade', () => { ui.modal = 'trade'; rerender(); });
   on('#hx-close', () => { ui.modal = null; rerender(); });
+  on('.hexisle-x', () => { ui.modal = null; rerender(); });
   const bg = el.querySelector('#hx-modalbg');
   if (bg) bg.onclick = (e) => { if (e.target === bg) { ui.modal = null; rerender(); } };
   const mod = el.querySelector('.hexisle-modal');

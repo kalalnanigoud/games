@@ -122,6 +122,96 @@ const items = {
     icon: '<rect x="13" y="6" width="14" height="28" rx="3" fill="#e8d6a0" stroke="#5a4a20" stroke-width="1.5"/><rect x="13" y="6" width="14" height="6" fill="#9aaab0"/><rect x="13" y="28" width="14" height="6" fill="#9aaab0"/><path d="M20 14v12" stroke="#c47e10" stroke-width="2"/>' },
 };
 
+/* ---------------- cover ---------------- */
+
+// Cover: two divers follow the beacon down a dim station corridor. Its pulses glow along the floor
+// and ripple out of the far hatch, under a red emergency lamp. Self-contained "sgc-" ids.
+function coverArt() {
+  const stop = (o, c, a = 1) => `<stop offset="${o}" stop-color="${c}"${a < 1 ? ` stop-opacity="${a}"` : ''}/>`;
+  const f1 = (n) => n.toFixed(1);
+  const X = 196, Y = 96; // vanishing point: the far hatch
+  const frame = (s) => { const w = 180 * s, h = 118 * s, c = 0.34 * h; return [[X - w + c, Y - h], [X + w - c, Y - h], [X + w, Y - h + c], [X + w, Y + h - c], [X + w - c, Y + h], [X - w + c, Y + h], [X - w, Y + h - c], [X - w, Y - h + c]]; };
+  const pts = (list) => list.map(([a, b]) => `${f1(a)},${f1(b)}`).join(' ');
+  const S = [1, 0.74, 0.55, 0.41, 0.31, 0.235, 0.18];
+  const shade = ['#0a1c28', '#0b2330', '#0d2a38', '#0f3240', '#123a49', '#154553', '#19515f'];
+  const ribs = S.map((s, i) => `<polygon points="${pts(frame(s))}" fill="${shade[i]}" stroke="#3a5864" stroke-width="${f1(1 + 5 * s)}" stroke-linejoin="round"/><polygon points="${pts(frame(s * 0.975))}" fill="none" stroke="#7fa0aa" stroke-opacity=".35" stroke-width="${f1(0.4 + 0.8 * s)}" stroke-linejoin="round"/>`).join('');
+  const near = frame(1), far = frame(0.18);
+  const lerp = (p, q, u) => [p[0] + (q[0] - p[0]) * u, p[1] + (q[1] - p[1]) * u];
+  const grate = Array.from({ length: 9 }, (_, k) => { const a = lerp(near[5], near[4], k / 8), b = lerp(far[5], far[4], k / 8); return `M${f1(a[0])} ${f1(a[1])}L${f1(b[0])} ${f1(b[1])}`; }).join('');
+  const floorRibs = S.map((s) => { const q = frame(s); return `<path d="M${f1(q[5][0])} ${f1(q[5][1])}H${f1(q[4][0])}" stroke="#3a5864" stroke-width="${f1(1 + 4 * s)}"/>`; }).join('');
+  const taper = (a, b, wa, wb, fill) => { const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy), nx = -dy / L, ny = dx / L;
+    return `<polygon points="${pts([[a[0] + nx * wa, a[1] + ny * wa], [b[0] + nx * wb, b[1] + ny * wb], [b[0] - nx * wb, b[1] - ny * wb], [a[0] - nx * wa, a[1] - ny * wa]])}" fill="${fill}"/>`; };
+  const chamfer = (s, k) => { const q = frame(s); return lerp(q[k], q[k + 1], 0.5); };
+  const lights = [[0.74, 0.28], [0.55, 0.07], [0.41, 0.32], [0.31, 0.4]].map(([s, o]) => `<rect x="${f1(X - 26 * s)}" y="${f1(Y - 118 * s + 2 * s)}" width="${f1(52 * s)}" height="${f1(4 * s)}" rx="${f1(2 * s)}" fill="#9ff8ff" opacity="${o}"/>`).join('');
+  const trail = [[0.66, 'd'], [0.55, 'l'], [0.465, 'd'], [0.395, 'd'], [0.335, 'l'], [0.285, 'd'], [0.245, 'l']].map(([s, k]) => {
+    const y = Y + 112 * s, q = s * 1.6;
+    return k === 'd' ? `<ellipse cx="${X}" cy="${f1(y)}" rx="${f1(4 * q)}" ry="${f1(1.6 * q)}"/>` : `<rect x="${f1(X - 7 * q)}" y="${f1(y - 1.6 * q)}" width="${f1(14 * q)}" height="${f1(3.2 * q)}" rx="${f1(1.6 * q)}"/>`;
+  }).join('');
+  const dots = (list, attrs) => list.map(([x, y, r]) => `<circle cx="${x}" cy="${y}" r="${r}" ${attrs}/>`).join('');
+  const glint = (x, y, r, o = 1) => `<path d="M${x} ${y - r}Q${x} ${y} ${x + r} ${y}Q${x} ${y} ${x} ${y + r}Q${x} ${y} ${x - r} ${y}Q${x} ${y} ${x} ${y - r}Z" fill="#e8ffff" opacity="${o}"/>`;
+  return `<svg viewBox="0 0 320 200" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Two divers follow a glowing signal down a dark underwater station corridor"><defs>
+    <radialGradient id="sgc-haze">${stop(0, '#a8ffff', 0.55)}${stop(0.35, '#2ad4e8', 0.2)}${stop(1, '#2ad4e8', 0)}</radialGradient>
+    <radialGradient id="sgc-red">${stop(0, '#ff4a4a', 0.62)}${stop(1, '#ff2a2a', 0)}</radialGradient>
+    <linearGradient id="sgc-steel" x1="0" y1="0" x2="1" y2="1">${stop(0, '#d6e2e8')}${stop(0.45, '#7d939c')}${stop(1, '#34464e')}</linearGradient>
+    <linearGradient id="sgc-floor" x1="0" y1="0" x2="0" y2="1">${stop(0, '#0c1f28')}${stop(1, '#07141a')}</linearGradient>
+    <linearGradient id="sgc-suitA" x1="0" y1="0" x2="1" y2="1">${stop(0, '#ffa24f')}${stop(1, '#d9531e')}</linearGradient>
+    <linearGradient id="sgc-suitB" x1="0" y1="0" x2="1" y2="1">${stop(0, '#ffe27a')}${stop(1, '#e09a1a')}</linearGradient>
+    <radialGradient id="sgc-glass" cx=".35" cy=".3" r=".75">${stop(0, '#eaffff', 0.4)}${stop(0.5, '#7fe8f0', 0.14)}${stop(1, '#0a3a4a', 0.45)}</radialGradient>
+    <linearGradient id="sgc-beam" gradientUnits="userSpaceOnUse" x1="152" y1="127" x2="212" y2="86">${stop(0, '#fff4c0', 0.6)}${stop(1, '#fff4c0', 0)}</linearGradient>
+    <radialGradient id="sgc-hatch">${stop(0, '#f2ffff')}${stop(0.35, '#8ff6f6')}${stop(0.8, '#1a8f9e')}${stop(1, '#0a3a48')}</radialGradient>
+    <radialGradient id="sgc-term">${stop(0, '#9dffd8', 0.8)}${stop(0.45, '#3fe0a1', 0.3)}${stop(1, '#3fe0a1', 0)}</radialGradient>
+    <filter id="sgc-blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.5"/></filter></defs>
+    <rect width="320" height="200" fill="#061520"/>${ribs}
+    <polygon points="${pts([near[5], near[4], far[4], far[5]])}" fill="url(#sgc-floor)" opacity=".9"/>${floorRibs}
+    <path d="${grate}" stroke="#040c10" stroke-width="1.2" opacity=".7"/>
+    ${lights}
+    ${taper(chamfer(1, 1), chamfer(0.18, 1), 6, 1.2, '#2c4752')}${taper([chamfer(1, 1)[0] - 1, chamfer(1, 1)[1] - 3], [chamfer(0.18, 1)[0], chamfer(0.18, 1)[1] - 0.6], 1.2, 0.25, '#7fa0aa')}
+    ${taper([chamfer(1, 1)[0] - 6, chamfer(1, 1)[1] + 14], [chamfer(0.18, 1)[0] - 1, chamfer(0.18, 1)[1] + 2.6], 4, 0.8, '#5a1e26')}
+    ${taper(chamfer(1, 5), chamfer(0.18, 5), 5, 1, '#2c4752')}
+    <text x="67" y="74" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="6" font-weight="700" letter-spacing="1" fill="#7ff6ff" opacity=".55">COMMS</text><path d="M93 70.5l4 2-4 2z" fill="#7ff6ff" opacity=".55"/>
+    <circle cx="286" cy="86" r="14" fill="#ff9ad8" opacity=".14" filter="url(#sgc-blur)"/><circle cx="286" cy="86" r="10" fill="#03121c" stroke="url(#sgc-steel)" stroke-width="3.2"/>
+    <path d="M282 87q4-6 8 0z" fill="#ff9ad8" opacity=".85"/><path d="M283 87v4M286 87v5M289 87v4" stroke="#ff9ad8" stroke-width=".9" opacity=".7"/><path d="M279.5 80.5a9 9 0 0 1 7-3.5" stroke="#fff" stroke-opacity=".4" stroke-width="1.4" fill="none"/>
+    <circle cx="106" cy="40" r="84" fill="url(#sgc-red)"/><circle cx="145" cy="64" r="20" fill="url(#sgc-red)" opacity=".7"/>
+    <rect x="99" y="35" width="14" height="9" rx="3" fill="#2a0c10" stroke="#5a1a20"/><ellipse cx="106" cy="40" rx="5" ry="3.2" fill="#ff6a6a"/><ellipse cx="145" cy="64" rx="2.4" ry="1.6" fill="#ff6a6a"/>
+    <circle cx="${X}" cy="${Y}" r="130" fill="url(#sgc-haze)"/>
+    <circle cx="${X}" cy="${Y}" r="20" fill="url(#sgc-hatch)" stroke="#6f8f9a" stroke-width="3"/>
+    <g stroke="#0a3a48" stroke-width="2.2" fill="none" opacity=".75"><circle cx="${X}" cy="${Y}" r="8"/><path d="M${X} ${Y - 10}v20M${X - 10} ${Y}h20"/></g>
+    <g fill="none" stroke="#5ff0d0" stroke-linecap="round">${[[30, 2, 0.6], [46, 1.8, 0.45], [66, 1.6, 0.3], [92, 1.4, 0.2], [124, 1.2, 0.12]].map(([r, w, o]) => `<circle cx="${X}" cy="${Y}" r="${r}" stroke-width="${w}" opacity="${o}"/>`).join('')}</g>
+    <g fill="#7ff6ff" filter="url(#sgc-blur)" opacity=".85">${trail}</g><g fill="#d8ffff">${trail}</g>
+    <polygon points="150.3,124.6 196.3,69 221.7,105 153.7,129.4" fill="url(#sgc-beam)"/><circle cx="206" cy="90" r="16" fill="#fff4c0" opacity=".12" filter="url(#sgc-blur)"/>
+    <ellipse cx="196" cy="182" rx="64" ry="6" fill="#7ff6ff" opacity=".08"/>
+    <ellipse cx="88" cy="199" rx="38" ry="5" fill="#000" opacity=".4"/>
+    <rect x="42" y="146" width="18" height="48" rx="8" fill="url(#sgc-steel)"/><rect x="47" y="140" width="8" height="8" rx="2" fill="#8fa3ab"/>
+    <path d="M52 200C52 170 62 150 88 145C114 150 124 170 124 200Z" fill="url(#sgc-suitA)"/><path d="M58 178h60" stroke="#e8f0f2" stroke-width="3.5" opacity=".75"/>
+    <rect x="77" y="156" width="22" height="13" rx="3" fill="#24343c" stroke="#0d1a20"/><circle cx="83" cy="162.5" r="1.7" fill="#3fe0a1"/><circle cx="89" cy="162.5" r="1.7" fill="#ffd25a"/><circle cx="95" cy="162.5" r="1.7" fill="#ff5a64"/>
+    <ellipse cx="88" cy="143" rx="22" ry="6.5" fill="url(#sgc-steel)" stroke="#34464e"/>
+    <circle cx="78.5" cy="121" r="2.8" fill="#cf9168"/><circle cx="90" cy="119" r="13" fill="#e0a57a"/><path d="M77 116q2-14 15-14q11 1 13 11q-8-6-15-4q-7 1-13 7z" fill="#3b2418"/>
+    <ellipse cx="94.5" cy="118" rx="1.6" ry="2" fill="#1a1010"/><ellipse cx="101" cy="117.2" rx="1.6" ry="2" fill="#1a1010"/>
+    <path d="M95 125q3.5 2.6 7.5-.4" stroke="#7a2e35" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="102.5" cy="121.5" r="2.4" fill="#ff7f8f" opacity=".35"/>
+    <circle cx="88" cy="116" r="22" fill="url(#sgc-glass)" stroke="#cfeef2" stroke-width="2.4"/><rect x="82" y="91" width="12" height="5" rx="2" fill="#8fa3ab"/>
+    <path d="M72 108q5-12 18-15" stroke="#fff" stroke-opacity=".6" stroke-width="2.6" fill="none" stroke-linecap="round"/><circle cx="104" cy="104" r="1.8" fill="#fff" opacity=".55"/>
+    <path d="M104 152C114 148 122 144 128 138L133 145C127 152 118 158 108 162Z" fill="url(#sgc-suitA)"/>
+    <g transform="rotate(-36 140 136)"><rect x="128" y="131.5" width="24" height="9" rx="3" fill="url(#sgc-steel)" stroke="#34464e"/><rect x="150" y="129.5" width="5" height="13" rx="1.5" fill="#fff6c8"/></g>
+    <circle cx="131" cy="141" r="6" fill="#2a3a44"/>
+    <ellipse cx="242" cy="199" rx="32" ry="4.5" fill="#000" opacity=".4"/>
+    <rect x="262" y="150" width="15" height="42" rx="6.5" fill="url(#sgc-steel)"/>
+    <path d="M214 200C214 176 222 158 240 154C258 158 266 176 266 200Z" fill="url(#sgc-suitB)"/><path d="M218 180h44" stroke="#e8f0f2" stroke-width="3.2" opacity=".75"/>
+    <ellipse cx="240" cy="152" rx="18" ry="5.5" fill="url(#sgc-steel)" stroke="#34464e"/>
+    <circle cx="249" cy="132.5" r="2.4" fill="#8a5230"/><circle cx="239" cy="131" r="11" fill="#9a5d36"/>
+    ${dots([[233, 123, 5], [240, 120.5, 5.5], [246.5, 123.5, 4.6], [240, 113.5, 4]], 'fill="#1d1412"')}
+    <ellipse cx="233" cy="132" rx="1.5" ry="1.8" fill="#120a08"/><ellipse cx="239.5" cy="132.5" rx="1.5" ry="1.8" fill="#120a08"/>
+    <path d="M232.5 137.5q3.5 2.6 7 0" stroke="#5a1e24" stroke-width="1.4" fill="none" stroke-linecap="round"/><circle cx="230.5" cy="135.5" r="2.2" fill="#ff7f8f" opacity=".35"/>
+    <circle cx="240" cy="130" r="18" fill="url(#sgc-glass)" stroke="#cfeef2" stroke-width="2.2"/><path d="M227 122q4-10 14-12" stroke="#fff" stroke-opacity=".55" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+    <path d="M234 167Q223 161 220 150" stroke="#f0ae2c" stroke-width="9" stroke-linecap="round" fill="none"/><circle cx="220" cy="148" r="4.6" fill="#2a3a44"/>
+    <circle cx="215" cy="146" r="18" fill="url(#sgc-term)"/>
+    <rect x="207" y="140" width="16" height="11" rx="2.5" fill="#06221c" stroke="#3fe0a1" stroke-width="1.4"/><rect x="209.5" y="142.5" width="11" height="6" rx="1" fill="#3fe0a1" opacity=".9"/><circle cx="215" cy="145.5" r="1.8" fill="none" stroke="#06221c" stroke-width=".9"/>
+    <path d="M204 139q-5 6.5 0 13M199 135q-8 10.5 0 21" stroke="#3fe0a1" stroke-width="1.6" fill="none" stroke-linecap="round" opacity=".7"/>
+    ${dots([[108, 88, 2.4], [112, 76, 1.6], [109, 64, 2], [252, 104, 2], [256, 93, 1.4], [253, 84, 1.1]], 'fill="#bff8ff" fill-opacity=".15" stroke="#bff8ff" stroke-width="1"')}
+    ${dots([[30, 60, 0.9], [160, 30, 0.7], [270, 40, 0.9], [300, 150, 0.8], [140, 170, 0.7], [20, 120, 0.8], [230, 60, 0.6], [60, 30, 0.7]], 'fill="#dff" opacity=".35"')}
+    ${glint(211, 81, 4, 0.9)}${glint(160, 120, 2.6, 0.7)}
+  </svg>`;
+}
+
 /* ---------------- the station ---------------- */
 
 const frag = (v, id) => v.frags.find((f) => f.id === id && f.data);
@@ -134,11 +224,25 @@ export default escapeRoom({
   theme: { accent: '#7fe8f0', glow: '#bff8ff', deep: '#02090c' },
   doneLabel: 'The crew of Meridian Deep is safe',
   fragLabel: 'Your wrist terminal',
-  cover: `<svg viewBox="0 0 320 200" role="img" aria-label="An underwater research station glowing on the dark sea floor">${DEFS}<rect width="320" height="200" fill="url(#sg-sea)"/>${Array.from({ length: 5 }, (_, i) => `<path d="M${40 + i * 70} 0L${10 + i * 70} 200" stroke="#bff" stroke-opacity=".06" stroke-width="26"/>`).join('')}
-    <path d="M0 176Q80 150 170 170T320 160V200H0Z" fill="#020b10"/><path d="M60 168V120h110v48M170 150h70v20" fill="#34464e" stroke="#0a1418" stroke-width="3"/><path d="M60 120q55-50 110 0z" fill="url(#sg-steel)" stroke="#0a1418" stroke-width="3"/>
-    ${[78, 104, 130].map((x) => `<circle cx="${x}" cy="142" r="8" fill="#ffd25a" opacity=".85"/>`).join('')}${halo(115, 140, 90, 'amber')}<rect x="196" y="156" width="10" height="8" fill="#7ff6ff"/><rect x="216" y="156" width="10" height="8" fill="#7ff6ff"/>
-    ${[0, 1, 2].map((i) => `<path d="M${120 + i * 0} ${84 - i * 18}q30 -10 60 0" stroke="#7ff6ff" stroke-width="2.5" fill="none" opacity="${0.8 - i * 0.22}"/>`).join('')}<path d="M118 120V96" stroke="#9ab" stroke-width="2"/><circle cx="118" cy="94" r="3" fill="#ff5a4a"/>
-    <circle cx="250" cy="70" r="2" fill="#bff" opacity=".6"/><circle cx="258" cy="56" r="1.4" fill="#bff" opacity=".6"/><path d="M240 110q16-10 34 0q-18 9-34 0zM274 110l10-7v14z" fill="#2a7a8a" opacity=".6"/></svg>`,
+  cover: coverArt(),
+  css: `/* Meridian Deep: deep teal water, sonar rings and a red emergency glow around the scene. */
+    .esc-signal{--accent-2:#ff5a64;--win:#3ee0a1;--ink-on:#032a2e;--acc-soft:rgba(127,232,240,.11);--acc-line:rgba(127,232,240,.4);--acc-line-2:rgba(127,232,240,.18);
+      --acc-glow:rgba(90,230,240,.5);--glass-1:rgba(14,46,72,.82);--glass-2:rgba(9,26,50,.9);--item-1:#15507a;--item-2:#0a1e3a}
+    .esc-signal .esc-felt{border-color:rgba(127,232,240,.2);background:
+      radial-gradient(circle at 94% 104%,transparent 0 58px,rgba(63,224,192,.12) 58px 60px,transparent 60px 112px,rgba(63,224,192,.09) 112px 114px,transparent 114px 166px,rgba(63,224,192,.06) 166px 168px,transparent 168px 220px,rgba(63,224,192,.035) 220px 222px,transparent 222px),
+      linear-gradient(104deg,transparent 16%,rgba(170,250,255,.05) 22%,transparent 29%,transparent 52%,rgba(170,250,255,.04) 58%,transparent 65%),
+      radial-gradient(1.6px 1.6px at 14% 22%,rgba(200,255,255,.45),transparent 60%),radial-gradient(1.2px 1.2px at 31% 64%,rgba(200,255,255,.35),transparent 60%),
+      radial-gradient(1.4px 1.4px at 71% 30%,rgba(200,255,255,.4),transparent 60%),radial-gradient(1.2px 1.2px at 86% 72%,rgba(200,255,255,.35),transparent 60%),
+      radial-gradient(1.2px 1.2px at 52% 88%,rgba(200,255,255,.3),transparent 60%),radial-gradient(45% 35% at 0% 0%,rgba(255,70,80,.17),transparent 70%),
+      radial-gradient(90% 55% at 50% -12%,rgba(70,210,230,.28),transparent 70%),linear-gradient(180deg,#0b3247 0%,#0a2338 50%,#071628 100%)}
+    .esc-signal .esc-scene{border-color:rgba(127,232,240,.45);box-shadow:0 14px 30px rgba(2,4,16,.55),0 0 0 4px rgba(4,14,28,.6),0 0 38px rgba(60,210,230,.14)}
+    .esc-signal .esc-val{font-family:ui-monospace,Menlo,Consolas,monospace;color:#8ffcff;text-shadow:0 0 10px rgba(127,246,255,.55);
+      background:linear-gradient(180deg,#021318,#072e38);border-color:rgba(63,224,192,.55)}
+    .esc-signal .esc-paper{color:#12303a;font-style:normal;background:linear-gradient(170deg,#eef7f9,#cfe2e9);box-shadow:inset 0 0 14px rgba(40,100,120,.25),0 4px 10px rgba(0,0,0,.25)}
+    .esc-signal .esc-goal-ic{position:relative;background:radial-gradient(circle at 40% 30%,#e8ffff,#7fe8f0 55%,#2ab8c8)}
+    .esc-signal .esc-goal:not(.esc-done) .esc-goal-ic::after{content:'';position:absolute;top:-1px;right:-1px;width:11px;height:11px;border-radius:50%;
+      background:#ff5a64;box-shadow:0 0 0 2px #0b2236,0 0 10px #ff5a64;animation:sgBeacon 1.6s ease-in-out infinite}
+    @keyframes sgBeacon{50%{opacity:.25}}`,
   intro: {
     title: 'Signal from Below',
     text: [
@@ -151,7 +255,7 @@ export default escapeRoom({
   howTo: {
     goal: 'Find out what happened to the crew of Meridian Deep and bring them home. Everyone wins together. There is no time limit, and the clock records how long you took.',
     turn: [
-      ['🔦', 'Explore at the same time', 'There are no turns. Tap anything in a room (or its button below the picture) for a close-up. Twinkling marks show what nobody has examined yet.'],
+      ['🔦', 'Explore at the same time', 'There are no turns. Tap anything in a room (or its button below the picture) for a close-up. Glowing corners and twinkles show what nobody has examined yet.'],
       ['⌚', 'Read your wrist terminal', 'Each diver holds different archive fragments, listed beside the room. Read them aloud to your team, or press Share to copy one into the team journal.'],
       ['🎒', 'Shared inventory', 'Anything someone picks up is available to the whole team. Open an object and choose an item to use it there.'],
       ['🎛', 'Work the controls', 'Breakers, keypads and winches use dials: set each with ▲ ▼ and confirm. Wrong tries cost nothing.'],

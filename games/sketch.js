@@ -3,9 +3,11 @@
 // Strokes are sent in short chunks while you draw. Time-based events (hints, the end of a turn)
 // are triggered by any player's screen sending { type: 'clock' }; the host's own clock decides.
 // The game keeps its DOM between updates (keepDom), so the canvas and the guess box never reset.
-import { esc, log, addFx, rand, shuffle } from '../js/util.js';
-import { injectCSS } from '../js/fx.js';
+import { esc, log, addFx, rand, shuffle, PLAYER_COLORS } from '../js/util.js';
+import { injectCSS, floatText } from '../js/fx.js';
 import { sound } from '../js/sound.js';
+import { icon } from '../js/icons.js';
+import { portrait } from '../js/avatar.js';
 
 const browser = typeof document !== 'undefined';
 const W = 1000, H = 750;
@@ -223,9 +225,24 @@ function bot(v, pid) {
 
 /* ---------------- interface ---------------- */
 
-const UI = { gid: null, v: null, ctx: null, color: 0, size: 1, gesture: 0, drawing: false, pending: null, local: [], sentAt: 0, offset: 0, hostNow: 0, clockSent: 0, root: null };
+// A few line icons this game needs that the shared set doesn't have (same style as js/icons.js).
+const ic = (d) => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${d}</svg>`;
+const IC = {
+  pencil: ic('<path d="M4.5 19.5l1-4.2L15.6 5.2a2 2 0 0 1 2.8 0l.4.4a2 2 0 0 1 0 2.8L8.7 18.5z"/><path d="M13.8 7l3.2 3.2"/>'),
+  undo: ic('<path d="M9 14.5L4.5 10 9 5.5"/><path d="M4.5 10H14a5.5 5.5 0 0 1 0 11h-2.5"/>'),
+  trash: ic('<path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 12.5h9l1-12.5M10 11v5M14 11v5"/>'),
+  flag: ic('<path d="M6 21V4"/><path d="M6 4.5c4.5-2 7.5 2 12 0V13c-4.5 2-7.5-2-12 0"/>'),
+  eraser: ic('<path d="M9 20h11"/><path d="M4.8 14.8l9.4-9.4a2 2 0 0 1 2.8 0l2.6 2.6a2 2 0 0 1 0 2.8L12 18.4a3 3 0 0 1-2.1.9H8.6a3 3 0 0 1-2.1-.9l-1.7-1.7a2 2 0 0 1 0-2.8z"/><path d="M9.6 10l5.4 5.4"/>'),
+};
+const TICKER = 4; // the latest guesses stay beside the guess box; older ones fold into a drawer
+// The guess history folds away on phones so the canvas gets the screen; it stays as the player left it.
+let historyOpen = typeof matchMedia === 'function' ? matchMedia('(min-width: 901px)').matches : true;
+
+const UI = { gid: null, v: null, ctx: null, color: 0, size: 1, gesture: 0, drawing: false, pending: null, local: [], sentAt: 0, offset: 0, hostNow: 0, clockSent: 0, root: null,
+  scoreKey: null, scores: {}, until: {}, mask: '', maskKey: null };
 const amDrawer = () => UI.v && UI.v.phase === 'draw' && UI.v.drawer === UI.ctx.me && !UI.v.over;
 const amPlayer = () => UI.v?.players.some((p) => p.id === UI.ctx.me);
+const deadline = (v) => (v.phase === 'choose' ? v.chooseUntil : v.phase === 'draw' ? v.endsAt : v.phase === 'reveal' ? v.revealUntil : 0);
 
 function paint() {
   const cv = UI.root?.querySelector('canvas');
@@ -263,6 +280,22 @@ const point = (e) => {
   const cv = UI.root.querySelector('canvas'), r = cv.getBoundingClientRect();
   return [Math.round(Math.min(W, Math.max(0, ((e.clientX - r.left) / r.width) * W))), Math.round(Math.min(H, Math.max(0, ((e.clientY - r.top) / r.height) * H)))];
 };
+
+// The countdown: the number in the middle and the ring around it that runs down.
+function clockFace() {
+  const v = UI.v;
+  if (!v || !UI.root) return;
+  const msLeft = deadline(v) - (Date.now() + UI.offset);
+  const total = v.phase === 'choose' ? CHOOSE_MS : v.phase === 'draw' ? v.drawMs : REVEAL_MS;
+  UI.root.querySelectorAll('.sk-time').forEach((t) => {
+    const left = Math.max(0, Math.ceil(msLeft / 1000)), text = v.over ? '' : String(left), low = v.phase === 'draw' && left <= 10;
+    if (t.textContent !== text) t.textContent = text;
+    t.classList.toggle('low', low);
+    const ring = t.closest('.sk-clock');
+    if (ring) { ring.classList.toggle('low', low); ring.style.setProperty('--p', v.over ? '0' : Math.max(0, Math.min(1, msLeft / total)).toFixed(3)); }
+  });
+}
+
 if (browser) {
   addEventListener('pointermove', (e) => {
     if (!UI.drawing) return;
@@ -280,23 +313,37 @@ if (browser) {
     const v = UI.v;
     if (!v || !UI.root?.isConnected) return;
     const now = Date.now() + UI.offset;
-    const until = v.phase === 'choose' ? v.chooseUntil : v.phase === 'draw' ? v.endsAt : v.phase === 'reveal' ? v.revealUntil : 0;
-    UI.root.querySelectorAll('.sk-time').forEach((t) => {
-      const left = Math.max(0, Math.ceil((until - now) / 1000));
-      t.textContent = v.over ? '' : left;
-      t.classList.toggle('low', v.phase === 'draw' && left <= 10);
-    });
+    const until = deadline(v);
+    clockFace();
     const next = v.phase === 'draw' ? Math.min(v.endsAt, v.hintAt[v.hints.length] ?? Infinity) : until;
     if (!v.over && amPlayer() && next && now > next + 250 && Date.now() - UI.clockSent > 1500) { UI.clockSent = Date.now(); UI.ctx.send({ type: 'clock' }); }
   }, 250);
 }
 
+// The selected colour and brush are marked in place, so the palette isn't rebuilt (and the lift can animate).
+function syncTools() {
+  const t = UI.root?.querySelector('[data-r="tools"]');
+  if (!t) return;
+  t.querySelectorAll('[data-do^="color:"]').forEach((b) => { const on = +b.dataset.do.slice(6) === UI.color; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+  t.querySelectorAll('[data-do^="size:"]').forEach((b) => { const on = +b.dataset.do.slice(5) === UI.size; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+  t.querySelector('.sk-sizes')?.style.setProperty('--brush', COLORS[UI.color]);
+}
+
+// Built once; later updates only rewrite the regions inside, so the canvas and the guess box are never replaced.
 function skeleton(el) {
-  el.innerHTML = `<div class="sk-root"><div class="sk-top" data-r="top"></div><div class="sk-grid">
-    <div class="sk-boardcol"><div class="sk-board"><canvas width="${W}" height="${H}" aria-label="Drawing canvas"></canvas><div class="sk-over" data-r="over"></div></div><div class="sk-tools" data-r="tools"></div></div>
-    <div class="panel sk-chat"><div class="sk-feed" data-r="feed" aria-live="polite"></div>
-      <form class="sk-guess"><input maxlength="40" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="send" aria-label="Your guess"><button class="primary">Guess</button></form></div>
-    <div class="panel sk-scores"><h3 class="gold">Scores</h3><div data-r="scores"></div></div>
+  el.innerHTML = `<div class="sk-root"><div class="sk-grid">
+    <div class="sk-boardcol felt sk-felt">
+      <div class="sk-top" data-r="top"></div>
+      <div class="sk-easel"><div class="sk-board"><canvas width="${W}" height="${H}" aria-label="Drawing canvas"></canvas><div class="sk-over" data-r="over"></div></div></div>
+      <div class="sk-tools" data-r="tools"></div>
+    </div>
+    <div class="sk-side">
+      <div class="panel sk-chat"><div class="sk-feed" data-r="feed" aria-live="polite"></div>
+        <form class="sk-guess"><input maxlength="40" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="send" aria-label="Your guess"><button class="primary">Guess</button></form></div>
+      <div class="panel sk-scores"><h3 class="gold">${icon('trophy')}Scores</h3><div class="sk-scorelist" data-r="scores"></div></div>
+      <details class="panel drawer sk-history" ${historyOpen ? 'open' : ''}><summary>${icon('book')}<span>Earlier guesses</span><span class="note" data-r="hnote"></span>${icon('chevron', 'chev')}</summary>
+        <div class="drawer-body"><div class="sk-hist" data-r="history"></div></div></details>
+    </div>
   </div></div>`;
   UI.root = el;
   const cv = el.querySelector('canvas');
@@ -304,6 +351,7 @@ function skeleton(el) {
     if (!amDrawer()) return;
     e.preventDefault();
     UI.gesture++; UI.drawing = true; UI.pending = point(e); UI.sentAt = Date.now();
+    el.querySelector('.sk-easel')?.classList.remove('ready');
     paint();
   });
   el.querySelector('.sk-guess').addEventListener('submit', (e) => {
@@ -313,44 +361,112 @@ function skeleton(el) {
     input.value = '';
     UI.ctx.send({ type: 'guess', text });
   });
+  const hist = el.querySelector('.sk-history');
+  hist.addEventListener('toggle', () => {
+    historyOpen = hist.open;
+    if (hist.open) { const h = hist.querySelector('[data-r="history"]'); h.scrollTop = h.scrollHeight; }
+  });
   el.addEventListener('click', (e) => {
     const b = e.target.closest('[data-do]');
     if (!b) return;
     const [kind, arg] = b.dataset.do.split(':');
-    if (kind === 'color') { UI.color = +arg; sound('click'); return draw(); }
-    if (kind === 'size') { UI.size = +arg; sound('click'); return draw(); }
+    if (kind === 'color') { UI.color = +arg; sound('click'); return syncTools(); }
+    if (kind === 'size') { UI.size = +arg; sound('click'); return syncTools(); }
     if (kind === 'skip' && !confirm('Give up on this drawing?')) return;
     if (kind === 'clear' && !confirm('Clear the whole drawing?')) return;
+    if (kind === 'choose') b.classList.add('sk-chosen'); // the word you picked lifts while the host answers
     UI.ctx.send(kind === 'choose' ? { type: 'choose', i: +arg } : { type: kind });
   });
 }
 
 function draw() {
-  const v = UI.v, ctx = UI.ctx, el = UI.root, me = ctx.me;
+  const v = UI.v, ctx = UI.ctx, el = UI.root, me = ctx.me, now = Date.now();
   const drawer = v.players.find((p) => p.id === v.drawer), isDrawer = me === v.drawer, player = amPlayer();
-  const region = (r, html) => { const n = el.querySelector(`[data-r="${r}"]`); if (n.innerHTML !== html) n.innerHTML = html; };
-  const word = v.mask.split('').map((c) => (c === ' ' ? '<i class="gap"></i>' : `<b>${c === '_' ? '' : esc(c)}</b>`)).join('');
-  region('top', `<div class="sk-round">Round ${Math.min(v.round, v.rounds)} of ${v.rounds}</div>
-    <div class="sk-word">${v.over ? '<span class="winner-banner">Final scores</span>'
-      : v.phase === 'choose' ? `<span>${isDrawer ? 'Choose a word to draw' : esc(drawer.name) + ' is choosing a word…'}</span>`
-      : isDrawer && v.phase === 'draw' ? `<span class="sk-label">Draw</span><span class="sk-letters mine">${word}</span>`
-      : `<span class="sk-label">${v.phase === 'reveal' ? 'The word was' : v.guessed[me] ? 'You got it!' : 'Guess'}</span><span class="sk-letters">${word}</span><small>${v.phase === 'draw' && !v.word ? v.mask.replace(/ /g, '').length + ' letters' : ''}</small>`}</div>
-    <div class="sk-clock"><span class="sk-time"></span></div>`);
-  region('over', v.over ? `<div class="sk-card">${v.players.slice().sort((a, b) => b.score - a.score).map((p, i) => `<div class="sk-final ${v.winners.includes(p.id) ? 'win' : ''}">${i + 1}. ${esc(p.name)} <b>${p.score}</b></div>`).join('')}</div>`
-    : v.phase === 'choose' ? `<div class="sk-card">${isDrawer ? `<p>Pick one to draw. Don’t say it out loud!</p><div class="sk-choices">${v.choices.map((w, i) => `<button class="primary" data-do="choose:${i}">${esc(w)}</button>`).join('')}</div>` : `<p>${esc(drawer.name)} is picking something to draw…</p>`}</div>`
-    : v.phase === 'reveal' ? `<div class="sk-card"><p class="sk-big">${esc(v.word)}</p>${Object.keys(v.guessed).length ? Object.entries(v.guessed).map(([id, pts]) => `<div>✓ ${esc(v.players.find((p) => p.id === id)?.name)} +${pts}</div>`).join('') : '<div>Nobody guessed it.</div>'}</div>` : '');
+  // A region is rewritten only when its markup changes, so effects already playing aren't restarted.
+  const region = (r, html) => { const n = el.querySelector(`[data-r="${r}"]`); if (!n || n._skHtml === html) return false; n._skHtml = html; n.innerHTML = html; return true; };
+  const col = (id) => PLAYER_COLORS[Math.max(0, v.players.findIndex((p) => p.id === id)) % PLAYER_COLORS.length];
+  const face = (id, cls = '') => `<span class="sk-face ${cls}" style="--pc:${col(id)}">${portrait({ id, bot: !!ctx.isBot?.(id) })}</span>`;
+  const nameOf = (id) => esc(v.players.find((p) => p.id === id)?.name || '?');
+  const hot = (k) => (UI.until[k] || 0) > now;
+
+  // A score that rose since the last update flashes for a moment and floats its "+N".
+  const scoreKey = v.players.map((p) => p.id).join(), risen = [];
+  if (UI.scoreKey === scoreKey) for (const p of v.players) { const had = UI.scores[p.id]; if (had != null && p.score > had) { UI.until['s' + p.id] = now + 1500; risen.push([p.id, p.score - had]); } }
+  UI.scoreKey = scoreKey; UI.scores = Object.fromEntries(v.players.map((p) => [p.id, p.score]));
+  // Letters that just appeared (a hint, or the whole word once you guess it) pop in.
+  const maskKey = v.used + ':' + v.phase;
+  if (UI.maskKey !== maskKey) {
+    for (const k of Object.keys(UI.until)) if (k[0] === 'm') delete UI.until[k];
+  } else if (v.phase === 'draw' && UI.mask.length === v.mask.length) {
+    [...v.mask].forEach((c, i) => { if (c !== '_' && c !== ' ' && UI.mask[i] === '_') UI.until['m' + i] = now + 1200; });
+  }
+  UI.maskKey = maskKey; UI.mask = v.mask;
+
+  // ---- top bar: who draws, the word, the clock ----
+  const tiles = [...v.mask].map((c, i) => (c === ' ' ? '<i class="gap"></i>'
+    : `<b class="${[c === '_' ? '' : 'on', hot('m' + i) ? 'pop' : ''].join(' ').trim()}" style="--d:${i * 45}ms">${c === '_' ? '' : esc(c)}</b>`)).join('');
+  const round = `<span class="sk-round">Round ${Math.min(v.round, v.rounds)} of ${v.rounds}</span>`;
+  const doing = v.phase === 'choose' ? (isDrawer ? 'Your turn to draw' : `${esc(drawer.name)} is up`)
+    : v.phase === 'draw' ? (isDrawer ? 'You are drawing' : `${esc(drawer.name)} is drawing`) : `${isDrawer ? 'You' : esc(drawer.name)} drew`;
+  const who = v.over ? `<div class="sk-who"><span class="sk-face sk-trophy">${icon('trophy')}</span><span class="sk-whotext">${round}<b>Game over</b></span></div>`
+    : `<div class="sk-who">${face(drawer.id)}<span class="sk-whotext">${round}<b>${doing}</b></span></div>`;
+  const word = v.over ? `<span class="winner-banner">${icon('trophy')}${v.winners.map(nameOf).join(' & ')} ${v.winners.length > 1 ? 'win' : 'wins'}!</span>`
+    : v.phase === 'choose' ? `<span class="sk-say">${isDrawer ? 'Choose a word to draw' : esc(drawer.name) + ' is choosing a word…'}</span>`
+    : isDrawer && v.phase === 'draw' ? `<span class="sk-label">Draw</span><span class="sk-letters mine">${tiles}</span>`
+    : `<span class="sk-label">${v.phase === 'reveal' ? 'The word was' : v.guessed[me] ? 'You got it!' : 'Guess'}</span><span class="sk-letters">${tiles}</span><small>${v.phase === 'draw' && !v.word ? v.mask.replace(/ /g, '').length + ' letters' : ''}</small>`;
+  if (region('top', `${who}<div class="sk-word">${word}</div>${v.over ? '' : '<div class="sk-clock"><span class="sk-time"></span></div>'}`)) clockFace();
+
+  // ---- over the canvas: choosing, the reveal, final scores ----
+  const ranked = v.players.slice().sort((a, b) => b.score - a.score), got = Object.entries(v.guessed);
+  region('over', v.over
+    ? `<div class="sk-card sk-finalcard"><div class="sk-cardtitle">${icon('trophy')}Final scores</div>${ranked.map((p, i) => `<div class="sk-final ${v.winners.includes(p.id) ? 'win' : ''}"><span class="sk-rank">${i + 1}</span>${face(p.id)}<span class="grow">${esc(p.name)}</span><b>${p.score}</b></div>`).join('')}</div>`
+    : v.phase === 'choose' ? (isDrawer
+      ? `<div class="sk-card sk-choosecard"><p>Pick one to draw. Don’t say it out loud!</p><div class="sk-choices">${v.choices.map((w, i) => `<button class="sk-pick" data-do="choose:${i}" style="--r:${[-2.5, 1.5, -1][i % 3]}deg;--t:${['#ff6fae', '#ffd166', '#4cb8ff'][i % 3]}">${IC.pencil}<span>${esc(w)}</span></button>`).join('')}</div></div>`
+      : `<div class="sk-card sk-waitcard">${face(drawer.id, 'big')}<p>${esc(drawer.name)} is picking something to draw…</p></div>`)
+    : v.phase === 'reveal' ? `<div class="sk-card sk-revealcard"><small>The word was</small><p class="sk-big">${esc(v.word)}</p>${got.length
+      ? `<div class="sk-gotlist">${got.map(([id, pts]) => `<div class="sk-gotrow">${face(id)}<span class="grow">${nameOf(id)}</span><b>+${pts}</b></div>`).join('')}<div class="sk-gotrow artist">${face(drawer.id)}<span class="grow">${esc(drawer.name)} <small>drew it</small></span><b>+${got.length * 50}</b></div></div>`
+      : '<div class="sk-nobody">Nobody guessed it.</div>'}</div>` : '');
+
+  // ---- under the canvas: the palette, or a hint ----
+  const tip = v.over ? 'Thanks for playing!' : !player ? 'You are watching.' : isDrawer ? '' : 'Type your guesses below. Wrong guesses are shown to everyone. Close guesses only to you.';
   region('tools', isDrawer && v.phase === 'draw' && !v.over
-    ? `<div class="sk-colors">${COLORS.map((c, i) => `<button class="sk-swatch ${UI.color === i ? 'on' : ''}" style="--c:${c}" data-do="color:${i}" aria-label="${COLOR_NAMES[i]}" title="${COLOR_NAMES[i]}">${i === 1 ? '⌫' : ''}</button>`).join('')}</div>
-      <div class="row">${SIZES.map((sz, i) => `<button class="small sk-size ${UI.size === i ? 'on' : ''}" data-do="size:${i}" aria-label="Brush size ${i + 1}"><i style="width:${6 + i * 6}px;height:${6 + i * 6}px"></i></button>`).join('')}
-      <button class="small" data-do="undo">↶ Undo</button><button class="small" data-do="clear">Clear</button><button class="small bad" data-do="skip">Give up</button></div>`
-    : `<p class="muted small sk-tip">${v.over ? 'Thanks for playing!' : !player ? 'You are watching.' : isDrawer ? '' : 'Type your guesses below. Wrong guesses are shown to everyone. Close guesses only to you.'}</p>`);
-  region('feed', v.feed.map((f) => `<div class="sk-msg ${f.k}">${f.k === 'guess' ? `<b>${esc(v.players.find((p) => p.id === f.pid)?.name)}:</b> ` : ''}${esc(f.text)}</div>`).join('') || '<div class="muted small">Guesses appear here.</div>');
-  const feed = el.querySelector('[data-r="feed"]'); feed.scrollTop = feed.scrollHeight;
-  region('scores', v.players.slice().sort((a, b) => b.score - a.score).map((p) => `<div class="sk-player ${p.id === v.drawer && !v.over ? 'drawing' : ''}"><span class="grow">${p.id === v.drawer && !v.over ? '✏️ ' : v.guessed[p.id] ? '✓ ' : ''}${esc(p.name)}${p.id === me ? ' · you' : ''}</span><b>${p.score}</b></div>`).join(''));
-  const input = el.querySelector('.sk-guess input'), canGuess = player && !isDrawer && v.phase === 'draw' && !v.guessed[me] && !v.over;
-  input.disabled = !canGuess; el.querySelector('.sk-guess button').disabled = !canGuess;
+    ? `<div class="sk-palette"><div class="sk-colors">${COLORS.map((c, i) => `<button class="sk-swatch${i === 1 ? ' eraser' : ''}" style="--c:${c}" data-do="color:${i}" aria-label="${COLOR_NAMES[i]}" title="${COLOR_NAMES[i]}">${i === 1 ? IC.eraser : ''}</button>`).join('')}</div>
+      <div class="sk-tooldeck"><div class="sk-sizes">${SIZES.map((sz, i) => `<button class="sk-size" data-do="size:${i}" aria-label="Brush size ${i + 1}" title="Brush size ${i + 1}"><i style="width:${6 + i * 6}px;height:${6 + i * 6}px"></i></button>`).join('')}</div>
+      <div class="sk-acts"><button class="sk-act" data-do="undo" aria-label="Undo" title="Undo">${IC.undo}<span>Undo</span></button><button class="sk-act" data-do="clear" aria-label="Clear" title="Clear the drawing">${IC.trash}<span>Clear</span></button><button class="sk-act bad" data-do="skip" aria-label="Give up" title="Give up">${IC.flag}<span>Give up</span></button></div></div></div>`
+    : tip ? `<p class="sk-tip">${icon(v.over ? 'trophy' : !player ? 'eye' : 'bulb')}<span>${tip}</span></p>` : '');
+  syncTools();
+
+  // ---- guesses: the latest few beside the guess box, the rest in the drawer ----
+  const line = (f) => {
+    const pc = f.pid ? ` style="--pc:${col(f.pid)}"` : '';
+    if (f.k === 'guess') return `<div class="sk-msg guess"${pc}><b>${nameOf(f.pid)}:</b> ${esc(f.text)}</div>`;
+    if (f.k === 'right') return `<div class="sk-msg right"${pc}>${icon('check')}${esc(f.text)}</div>`;
+    if (f.k === 'close') return `<div class="sk-msg close">${icon('sparkle')}${esc(f.text)}</div>`;
+    return `<div class="sk-msg ${esc(f.k)}">${esc(f.text)}</div>`;
+  };
+  const older = v.feed.slice(0, Math.max(0, v.feed.length - TICKER));
+  region('feed', v.feed.slice(-TICKER).map(line).join('') || '<div class="muted small sk-empty">Guesses appear here.</div>');
+  if (region('history', older.map(line).join('') || '<p class="muted small sk-empty">Older guesses collect here.</p>')) { const h = el.querySelector('[data-r="history"]'); h.scrollTop = h.scrollHeight; }
+  region('hnote', older.length ? String(older.length) : '');
+
+  // ---- scores ----
+  region('scores', ranked.map((p) => {
+    const drawingNow = p.id === v.drawer && !v.over, gotIt = v.guessed[p.id];
+    const cls = ['sk-player', drawingNow && 'drawing', gotIt && 'got', p.id === me && 'me', hot('s' + p.id) && 'sk-scored'].filter(Boolean).join(' ');
+    return `<div class="${cls}" data-k="sk-p-${esc(p.id)}" style="--pc:${col(p.id)}">${face(p.id)}<span class="sk-pname">${esc(p.name)}</span>${p.id === me ? '<span class="tag t-you">You</span>' : ''}`
+      + `${drawingNow ? `<span class="sk-badge draw" title="Drawing">${IC.pencil}</span>` : gotIt ? `<span class="sk-badge ok" title="Guessed it">${icon('check')}</span>` : ''}<b class="sk-pts">${p.score}</b></div>`;
+  }).join(''));
+  for (const [id, d] of risen) {
+    const r = [...el.querySelectorAll('.sk-player')].find((n) => n.dataset.k === 'sk-p-' + id)?.querySelector('.sk-pts')?.getBoundingClientRect();
+    if (r && r.width) floatText(r, '+' + d, '#3ee0a1');
+  }
+
+  const form = el.querySelector('.sk-guess'), input = form.querySelector('input'), canGuess = player && !isDrawer && v.phase === 'draw' && !v.guessed[me] && !v.over;
+  input.disabled = !canGuess; form.querySelector('button').disabled = !canGuess;
   input.placeholder = canGuess ? 'Type your guess' : isDrawer && v.phase === 'draw' ? 'You are drawing' : v.guessed[me] ? 'You got it!' : 'Wait for the next drawing';
+  form.classList.toggle('can', !!canGuess);
   el.querySelector('canvas').classList.toggle('mine', amDrawer());
+  el.querySelector('.sk-easel').classList.toggle('ready', amDrawer() && !v.strokes.length && !UI.local.length && !UI.drawing);
   paint();
 }
 
@@ -365,48 +481,273 @@ function render(el, v, ctx) {
   draw();
 }
 
+/* Cover art: an art party. One friend draws a cat at the easel, tongue out in concentration,
+   while two others shout their guesses (self-contained ids, prefixed skc-). */
+function coverSVG() {
+  const f = (n) => +n.toFixed(1);
+  const stops = (list) => list.map(([o, c, a = 1]) => `<stop offset="${o}" stop-color="${c}"${a === 1 ? '' : ` stop-opacity="${a}"`}/>`).join('');
+  const lg = (id, list, x2 = 0, y2 = 1) => `<linearGradient id="${id}" x1="0" y1="0" x2="${x2}" y2="${y2}">${stops(list)}</linearGradient>`;
+  const rg = (id, list) => `<radialGradient id="${id}">${stops(list)}</radialGradient>`;
+  const spark = (x, y, s, c = '#fff') => `<path d="M${x} ${y - s}Q${x} ${y} ${x + s} ${y}Q${x} ${y} ${x} ${y + s}Q${x} ${y} ${x - s} ${y}Q${x} ${y} ${x} ${y - s}z" fill="${c}"/>`;
+  const arm = (d, grad, w = 9) => `<path d="${d}" stroke="url(#${grad})" stroke-width="${w}" stroke-linecap="round" fill="none"/>`;
+  // bunting along a sagging string
+  const bz = (t) => [320 * t, (1 - t) ** 2 * 10 + 2 * t * (1 - t) * 46 + t * t * 8];
+  const FLAG = ['#ff6fae', '#ffd166', '#3ee0a1', '#4cb8ff', '#ff9f43', '#b197fc'];
+  const flags = Array.from({ length: 14 }, (_, i) => {
+    const t = (i + 0.5) / 14, [ax, ay] = bz(t - 0.026), [bx, by] = bz(t + 0.026), [mx, my] = bz(t);
+    return `<path d="M${f(ax)} ${f(ay)}L${f(bx)} ${f(by)}L${f(mx)} ${f(my + 15)}z" fill="${FLAG[i % 6]}"/>`;
+  }).join('');
+  const confetti = [[30, 92, '#ffd166', 30], [66, 40, '#4cb8ff', -20], [112, 30, '#ff6fae', 50], [178, 40, '#3ee0a1', -35], [292, 40, '#ff6fae', 60], [300, 128, '#4cb8ff', 25], [18, 128, '#3ee0a1', -15], [140, 26, '#ff9f43', 70], [214, 100, '#b197fc', -50], [252, 136, '#ffd166', 20]]
+    .map(([x, y, c, r]) => `<rect x="${x - 3.5}" y="${y - 1.5}" width="7" height="3" rx="1" fill="${c}" transform="rotate(${r} ${x} ${y})"/>`).join('')
+    + [[50, 30, '#ff6fae'], [96, 50, '#ffd166'], [272, 44, '#ff9f43'], [306, 96, '#b197fc'], [16, 66, '#3ee0a1'], [206, 36, '#4cb8ff']].map(([x, y, c]) => `<circle cx="${x}" cy="${y}" r="2" fill="${c}"/>`).join('');
+  const puffs = [[216, 114, 5.5], [221, 108, 6], [230, 105, 6.5], [239, 108, 6], [244, 114, 5.5]].map(([x, y, r]) => `<circle cx="${x - 6}" cy="${y}" r="${r}" fill="#2b1d16"/>`).join('');
+  const FONT = 'font-family="Fredoka,Nunito,sans-serif" font-weight="700" text-anchor="middle"';
+  return `<svg viewBox="0 0 320 200" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Friends shout guesses while an artist draws a cat on an easel"><defs>` +
+    lg('skc-wall', [[0, '#231a6e'], [0.5, '#4f2fae'], [0.82, '#a8479f'], [1, '#e0628f']]) +
+    lg('skc-floor', [[0, '#33206f'], [1, '#170f45']]) +
+    lg('skc-paper', [[0, '#ffffff'], [1, '#eef0ff']]) +
+    rg('skc-spot', [[0, '#fff3c8', 0.6], [0.5, '#ffb3d9', 0.22], [1, '#ff8ac0', 0]]) +
+    lg('skc-wood', [[0, '#ffc977'], [1, '#f08a3c']], 1, 0) +
+    lg('skc-teal', [[0, '#4ff0b4'], [1, '#17a978']]) +
+    lg('skc-pink', [[0, '#ff86bd'], [1, '#e0458a']]) +
+    lg('skc-blue', [[0, '#62c4ff'], [1, '#3a78e0']]) +
+    `</defs><rect width="320" height="200" fill="url(#skc-wall)"/>` +
+    // pinned doodles on the studio wall
+    `<g transform="rotate(-7 42 62)"><rect x="28" y="46" width="30" height="34" rx="2" fill="#fffaf0"/><circle cx="43" cy="62" r="7" fill="none" stroke="#ff9f43" stroke-width="2.2"/><path d="M43 50.5v-3M43 73.5v3M31.5 62h-3M54.5 62h3" stroke="#ff9f43" stroke-width="2" stroke-linecap="round"/><rect x="38" y="43" width="10" height="5" rx="1" fill="#ff6fae" opacity=".85"/></g>` +
+    `<g transform="rotate(6 280 64)"><rect x="266" y="48" width="28" height="32" rx="2" fill="#fffaf0"/><path d="M280 73c-8-5-10-9-10-12a4.6 4.6 0 0 1 10-2 4.6 4.6 0 0 1 10 2c0 3-2 7-10 12z" fill="#ff5d73"/><rect x="275" y="45" width="10" height="5" rx="1" fill="#3ee0a1" opacity=".85"/></g>` +
+    `<path d="M0 10Q160 46 320 8" fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="1"/>${flags}${confetti}` +
+    // floor, rug and the light on the easel
+    `<path d="M0 164H320V200H0z" fill="url(#skc-floor)"/><ellipse cx="160" cy="187" rx="132" ry="13" fill="#46308f" opacity=".8"/>` +
+    `<circle cx="160" cy="88" r="92" fill="url(#skc-spot)"/>` +
+    // the easel and its paper, with a cat half drawn
+    `<path d="M160 34V190" stroke="#c96a2c" stroke-width="5" stroke-linecap="round"/><path d="M151 32L120 188M169 32L200 188" stroke="url(#skc-wood)" stroke-width="7" stroke-linecap="round"/>` +
+    `<rect x="151" y="29" width="18" height="9" rx="3" fill="#ffb35a"/><rect x="114" y="45" width="96" height="78" rx="4" fill="#120b3a" opacity=".3"/><rect x="112" y="42" width="96" height="78" rx="4" fill="url(#skc-paper)"/>` +
+    `<g fill="none" stroke="#1d1714" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="160" cy="86" r="19"/><path d="M146.5 74L147 59L157 68M163 68L173 59L173.5 74"/>` +
+    `<path d="M154 95q3 3 6 0q3 3 6 0"/><path d="M175 89L193 85M175 94L193 97M145 94L128 97M145 89L138 87.5"/></g>` +
+    `<circle cx="153" cy="83" r="2.6" fill="#1d1714"/><circle cx="167" cy="83" r="2.6" fill="#1d1714"/><path d="M157 89h6l-3 3.4z" fill="#ff6fae"/>` +
+    spark(196, 54, 5, '#ffd166') + `<path d="M120 54q4-6 8 0t8 0" fill="none" stroke="#4cb8ff" stroke-width="2.2" stroke-linecap="round"/>` +
+    `<rect x="108" y="120" width="104" height="7" rx="3" fill="url(#skc-wood)"/><rect x="170" y="115" width="18" height="5" rx="2" fill="#4cb8ff"/><rect x="190" y="116" width="14" height="4" rx="2" fill="#ffd166"/>` +
+    // the artist: smock, beret, palette, tongue out, marker on the paper
+    arm('M68 150Q56 154 50 160', 'skc-teal') + `<circle cx="47" cy="162" r="5" fill="#f5c39e"/>` +
+    `<path d="M24 160C24 148 40 141 55 145C68 149 71 160 62 165C56 168 59 173 52 175C38 179 24 173 24 160z" fill="#ffe4bd"/><circle cx="53" cy="166.5" r="3" fill="#33206f"/>` +
+    `<circle cx="35" cy="155" r="4" fill="#ff5d73"/><circle cx="44" cy="149.5" r="3.6" fill="#ffd166"/><circle cx="54" cy="151.5" r="3.4" fill="#3ee0a1"/><circle cx="33" cy="166" r="3.6" fill="#4cb8ff"/>` +
+    `<path d="M58 200C58 158 70 134 89 134C108 134 119 158 119 200z" fill="url(#skc-teal)"/><path d="M78 140L89 155L100 140" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="2"/>` +
+    `<circle cx="78" cy="174" r="4" fill="#ff6fae"/><circle cx="102" cy="184" r="3" fill="#ffd166"/><circle cx="92" cy="167" r="2.4" fill="#4cb8ff"/>` +
+    `<rect x="83" y="118" width="12" height="18" rx="5" fill="#dba57c"/><circle cx="89" cy="106" r="16" fill="#f5c39e"/>` +
+    `<path d="M73 110C71 94 81 87 91 88C99 89 104 94 105 99C98 95 89 96 83 103C80 107 78 112 76 116z" fill="#3b2418"/>` +
+    `<ellipse cx="87" cy="91" rx="17" ry="6.5" fill="#ff5d73" transform="rotate(-10 87 91)"/><circle cx="84" cy="84" r="2.4" fill="#ff5d73"/>` +
+    `<circle cx="94" cy="105" r="2" fill="#2a1c1a"/><circle cx="101.5" cy="104.5" r="1.8" fill="#2a1c1a"/><circle cx="98" cy="111" r="3" fill="#ff7f8f" opacity=".45"/>` +
+    `<path d="M94 114q4 2.6 8.5-.6" fill="none" stroke="#3a2220" stroke-width="1.6" stroke-linecap="round"/><ellipse cx="101.5" cy="115" rx="2" ry="1.7" fill="#ff7f8f"/>` +
+    arm('M105 144Q123 134 127 104', 'skc-teal') + `<circle cx="128" cy="100" r="5.2" fill="#f5c39e"/>` +
+    `<path d="M127 100L136 90" stroke="#ff6fae" stroke-width="4.6" stroke-linecap="round"/><path d="M136 90L138.2 87.6" stroke="#1d1714" stroke-width="2.6" stroke-linecap="round"/>` + spark(142, 81, 4) +
+    // a friend jumping: "CAT!"
+    arm('M208 152Q194 136 197 114', 'skc-pink', 8.5) + arm('M240 152Q254 136 251 114', 'skc-pink', 8.5) +
+    `<circle cx="197" cy="111" r="5" fill="#9a5d36"/><circle cx="251" cy="111" r="5" fill="#9a5d36"/>` +
+    `<path d="M200 200C200 162 208 144 224 144C240 144 248 162 248 200z" fill="url(#skc-pink)"/><path d="M216 148l8 9 8-9" fill="none" stroke="#fff" stroke-opacity=".5" stroke-width="2"/>` +
+    `<rect x="219" y="130" width="10" height="16" rx="4" fill="#87502d"/><circle cx="224" cy="124" r="15" fill="#9a5d36"/>${puffs}` +
+    `<path d="M215 123q3-3 6 0M227 123q3-3 6 0" fill="none" stroke="#1d1210" stroke-width="1.8" stroke-linecap="round"/>` +
+    `<path d="M218 128.5h12q-1 7.5-6 7.5t-6-7.5z" fill="#5a1e2a"/><ellipse cx="224" cy="133.4" rx="3" ry="1.6" fill="#ff7f8f"/>` +
+    `<circle cx="214.5" cy="129" r="2.6" fill="#ff7f8f" opacity=".4"/><circle cx="233.5" cy="129" r="2.6" fill="#ff7f8f" opacity=".4"/>` +
+    `<path d="M198 52h52a12 12 0 0 1 12 12v2a12 12 0 0 1-12 12h-20l-8 9-1-9h-23a12 12 0 0 1-12-12v-2a12 12 0 0 1 12-12z" fill="#fff"/>` +
+    `<text x="224" y="71" ${FONT} font-size="15" fill="#ff3d7f">CAT!</text>` +
+    // another friend, thinking hard: "FISH?"
+    `<path d="M262 200C262 170 270 156 284 156C298 156 306 170 306 200z" fill="url(#skc-blue)"/><rect x="279" y="142" width="9" height="16" rx="4" fill="#e9c0a4"/>` +
+    `<circle cx="283" cy="138" r="13.5" fill="#ffdbc4"/><path d="M269 142C267 126 276 122 284 122C293 122 299 128 298 142C296 134 292 130 286 130C280 130 274 134 269 142z" fill="#e8c46a"/>` +
+    `<circle cx="277" cy="139" r="1.8" fill="#2a1c1a"/><circle cx="286" cy="139" r="1.8" fill="#2a1c1a"/><path d="M274 134l5-1.5M284 132.5l5 1" stroke="#a07a2a" stroke-width="1.4" stroke-linecap="round"/>` +
+    `<ellipse cx="281" cy="146.5" rx="2.2" ry="2.6" fill="#7a2e35"/>` + arm('M270 184Q261 167 271 153', 'skc-blue', 8) + `<circle cx="272" cy="151" r="4.6" fill="#ffdbc4"/>` +
+    `<path d="M265 80h26a9 9 0 0 1 9 9v2a9 9 0 0 1-9 9h-8l-4 8-2-8h-12a9 9 0 0 1-9-9v-2a9 9 0 0 1 9-9z" fill="#fff" opacity=".95"/>` +
+    `<text x="278" y="94.5" ${FONT} font-size="10.5" fill="#3a78e0">FISH?</text>` +
+    spark(268, 44, 4, '#ffd166') + spark(184, 46, 3) + spark(36, 112, 3, '#ffd166') +
+    `</svg>`;
+}
+
+const svgURL = (s) => `url("data:image/svg+xml,${encodeURIComponent(s)}")`;
+// Studio wallpaper: a scatter of confetti, and a string of bunting along the top.
+const CONFETTI = svgURL(`<svg xmlns='http://www.w3.org/2000/svg' width='260' height='260'><g opacity='.42'>${[[18, 30, '#ff6fae', 20], [70, 12, '#ffd166', -30], [130, 44, '#3ee0a1', 60], [200, 20, '#4cb8ff', 15], [240, 80, '#ff9f43', -45], [30, 110, '#b197fc', 35], [96, 150, '#ffd166', 75], [170, 120, '#ff6fae', -15], [224, 170, '#3ee0a1', 40], [60, 210, '#4cb8ff', -60], [140, 236, '#ff9f43', 10], [250, 236, '#ff6fae', -25]]
+  .map(([x, y, c, r]) => `<rect x='${x}' y='${y}' width='9' height='4' rx='1.5' fill='${c}' transform='rotate(${r} ${x + 4.5} ${y + 2})'/>`).join('')}${[[48, 70, '#ffd166'], [160, 84, '#4cb8ff'], [210, 128, '#ff6fae'], [110, 200, '#3ee0a1'], [16, 176, '#ff9f43'], [186, 222, '#b197fc']]
+  .map(([x, y, c]) => `<circle cx='${x}' cy='${y}' r='2.6' fill='${c}'/>`).join('')}<path d='M112 96q5-7 10 0t10 0' fill='none' stroke='#ff6fae' stroke-width='2.4' stroke-linecap='round'/><path d='M20 236q5-7 10 0t10 0' fill='none' stroke='#4cb8ff' stroke-width='2.4' stroke-linecap='round'/></g></svg>`);
+const BUNTING = svgURL(`<svg xmlns='http://www.w3.org/2000/svg' width='96' height='22'><path d='M0 3H96' stroke='#fff' stroke-opacity='.5' stroke-width='1.2'/>${['#ff6fae', '#ffd166', '#3ee0a1', '#4cb8ff'].map((c, k) => `<path d='M${k * 24 + 2} 3h20l-10 16z' fill='${c}'/><path d='M${k * 24 + 5} 3h7l-3.5 6z' fill='#fff' opacity='.3'/>`).join('')}</svg>`);
+
 const STYLE = `
-.sk-top{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;margin-bottom:10px;padding:8px 14px;border-radius:12px;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.1)}
-.sk-round{font-size:.75rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
-.sk-word{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;text-align:center;min-width:0}
-.sk-word .winner-banner{padding:0;font-size:1.2rem}
-.sk-label{font-size:.75rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+/* Art-party studio: a violet room strung with bunting and confetti. The paper itself stays clean white. */
+.sk-grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:18px;align-items:start}
+.sk-boardcol{min-width:0}
+.sk-side{display:flex;flex-direction:column;gap:14px;min-width:0}
+.sk-felt{padding:28px 16px 16px;border-color:rgba(255,170,220,.25);
+  background:${CONFETTI} 0 0/260px 260px,
+    radial-gradient(60% 45% at 0% 0%,rgba(255,111,174,.3),transparent 70%),
+    radial-gradient(55% 45% at 100% 0%,rgba(76,184,255,.26),transparent 70%),
+    radial-gradient(60% 50% at 100% 100%,rgba(255,207,92,.16),transparent 70%),
+    radial-gradient(55% 50% at 0% 100%,rgba(62,224,161,.16),transparent 70%),
+    linear-gradient(165deg,#3d2a9a 0%,#2c2a8c 45%,#1d2468 100%)}
+.sk-felt::before{content:'';position:absolute;left:24px;right:24px;top:1px;height:22px;background:${BUNTING} 0 0/96px 22px repeat-x;pointer-events:none}
+
+/* top bar */
+.sk-top{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr) auto;gap:12px;align-items:center;margin-bottom:14px;padding:8px 10px 8px 8px;border-radius:18px;background:rgba(14,12,52,.6);border:1px solid rgba(255,255,255,.12);box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
+.sk-who{display:flex;align-items:center;gap:10px;min-width:0;max-width:230px}
+.sk-whotext{display:flex;flex-direction:column;min-width:0;line-height:1.15}
+.sk-whotext b{font:600 .98rem/1.25 var(--font-display);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sk-round{font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;color:#c9c2ff;font-weight:800;white-space:nowrap}
+.sk-face{position:relative;display:block;width:30px;height:30px;flex:none;border-radius:50%;box-shadow:0 0 0 2px var(--pc,#fff),0 2px 6px rgba(0,0,0,.4)}
+.sk-face .portrait{width:100%;height:100%;display:block;border-radius:50%}
+.sk-top .sk-face{width:38px;height:38px;box-shadow:0 0 0 3px var(--pc,#fff),0 3px 8px rgba(0,0,0,.45)}
+.sk-trophy{display:grid;place-items:center;background:linear-gradient(135deg,#ffd166,#ff9f43);color:#3b2400;--pc:#ffe7a0}
+.sk-trophy .ic{width:20px;height:20px}
+.sk-word{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px 10px;text-align:center;min-width:0}
+.sk-word .winner-banner{padding:0;font-size:1.25rem;display:inline-flex;align-items:center;gap:8px}
+.sk-word .winner-banner .ic{width:1em;height:1em}
+.sk-say{font:600 1.02rem/1.25 var(--font-display);color:#fff}
+.sk-label{font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:#c9c2ff;font-weight:800}
 .sk-letters{display:inline-flex;flex-wrap:wrap;gap:4px;justify-content:center}
-.sk-letters b{display:inline-grid;place-items:end center;width:20px;height:28px;border-bottom:3px solid var(--gold);font-family:var(--font-display);font-size:1.2rem;color:var(--text);text-transform:uppercase}
-.sk-letters.mine b{color:var(--gold)}
-.sk-letters i.gap{width:12px}
-.sk-word small{color:var(--muted)}
-.sk-clock .sk-time{display:inline-grid;place-items:center;min-width:48px;height:48px;border-radius:50%;font-family:var(--font-display);font-weight:800;font-size:1.15rem;background:#f4ecd8;color:#1d1714;box-shadow:0 0 0 3px var(--gold),0 4px 10px rgba(0,0,0,.4)}
+.sk-letters b{--tc:#ff6fae;display:inline-grid;place-items:center;width:24px;height:32px;border-radius:8px;background:rgba(255,255,255,.1);box-shadow:inset 0 -3px 0 var(--tc);font:700 1.15rem/1 var(--font-display);color:var(--ink);text-transform:uppercase}
+.sk-letters b:nth-child(4n+2){--tc:#ffd166}.sk-letters b:nth-child(4n+3){--tc:#3ee0a1}.sk-letters b:nth-child(4n){--tc:#4cb8ff}
+.sk-letters b.on{background:#fff;box-shadow:inset 0 -3px 0 var(--tc),0 3px 8px rgba(0,0,0,.3)}
+.sk-letters.mine b{background:linear-gradient(180deg,#fff9e0,#ffe08a)}
+.sk-letters b.pop{animation:sk-letter .5s var(--spring) var(--d,0ms) backwards}
+@keyframes sk-letter{from{transform:translateY(-12px) scale(.4) rotate(-14deg);opacity:0}}
+.sk-letters i.gap{width:10px}
+.sk-word small{color:#c9c2ff;font-weight:700;font-size:.78rem}
+.sk-word small:empty{display:none}
+.sk-clock{--p:1;--ring:#ffd166;position:relative;width:52px;height:52px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(var(--ring) calc(var(--p) * 360deg),rgba(255,255,255,.15) 0);box-shadow:0 4px 12px rgba(0,0,0,.35)}
+.sk-clock.low{--ring:#ff6b81}
+.sk-clock .sk-time{display:grid;place-items:center;width:42px;height:42px;border-radius:50%;background:#fff;color:var(--ink);font:700 1.15rem/1 var(--font-display)}
 .sk-clock .sk-time:empty{visibility:hidden}
-.sk-clock .sk-time.low{background:#ff9a8c;box-shadow:0 0 0 3px var(--bad)}
-.sk-grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;grid-template-areas:"board chat" "board scores";gap:14px;align-items:start}
-.sk-boardcol{grid-area:board;min-width:0}.sk-chat{grid-area:chat}.sk-scores{grid-area:scores}
-.sk-board{position:relative;border-radius:14px;overflow:hidden;border:8px solid #6d4426;box-shadow:0 14px 30px rgba(0,0,0,.5),inset 0 0 0 1px #2a170a;background:#fff}
+.sk-clock .sk-time.low{background:#ffe3e8;color:#c2183c;animation:sk-tick 1s ease-in-out infinite}
+@keyframes sk-tick{50%{transform:scale(1.1)}}
+
+/* the easel: a bright frame, two strips of tape, clean white paper */
+.sk-easel{position:relative;padding:6px;border-radius:24px;background:linear-gradient(135deg,#ff6fae,#b46cff 35%,#7c6cff 62%,#4cb8ff);box-shadow:inset 0 0 0 1px rgba(255,255,255,.25),0 18px 36px rgba(8,6,40,.5)}
+.sk-easel::before,.sk-easel::after{content:'';position:absolute;top:-7px;width:64px;height:17px;border-radius:3px;pointer-events:none;z-index:3;opacity:.9;box-shadow:0 2px 4px rgba(0,0,0,.25)}
+.sk-easel::before{left:24px;transform:rotate(-7deg);background:repeating-linear-gradient(90deg,#ffd166 0 6px,#ffe9a6 6px 12px)}
+.sk-easel::after{right:24px;transform:rotate(6deg);background:repeating-linear-gradient(90deg,#3ee0a1 0 6px,#a6f5d6 6px 12px)}
+.sk-board{position:relative;border-radius:18px;overflow:hidden;background:#fff}
 .sk-board canvas{display:block;width:100%;height:auto;aspect-ratio:4/3;touch-action:none;background:#fff}
 .sk-board canvas.mine{cursor:crosshair}
-.sk-over{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;padding:12px}
+/* Your turn and the paper is still empty: a soft rim breathes around it. */
+.sk-easel.ready .sk-board::after{content:'';position:absolute;inset:0;z-index:1;border-radius:inherit;pointer-events:none;box-shadow:inset 0 0 0 3px rgba(255,207,92,.9),inset 0 0 32px rgba(255,190,80,.45);animation:sk-breathe 2.6s ease-in-out infinite}
+@keyframes sk-breathe{50%{opacity:.3}}
+.sk-over{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;padding:12px;background:radial-gradient(circle at 50% 50%,rgba(40,24,110,.05),rgba(40,24,110,.3))}
 .sk-over:empty{display:none}
-.sk-card{pointer-events:auto;max-width:92%;text-align:center;padding:18px 22px;border-radius:14px;color:var(--ink);background:linear-gradient(170deg,#fbf0d4,#e4cf9f);box-shadow:0 12px 30px rgba(0,0,0,.45)}
-.sk-card p{margin:0 0 10px}
-.sk-big{font-family:var(--font-display);font-size:1.8rem;font-weight:800;text-transform:capitalize}
-.sk-choices{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
-.sk-choices button{text-transform:capitalize}
-.sk-final{font-size:1.05rem;padding:3px 0}.sk-final.win{font-weight:800;color:#7a4c08}
-.sk-tools{margin-top:10px;display:flex;flex-direction:column;gap:8px}
-.sk-colors{display:flex;flex-wrap:wrap;gap:6px}
-.sk-swatch{width:40px;height:40px;min-height:40px;padding:0;border-radius:50%;background:var(--c);border:3px solid #2a170a;box-shadow:0 2px 0 #1f1208;color:#555;font-size:1rem;text-shadow:none}
-.sk-swatch.on{box-shadow:0 0 0 3px var(--gold),0 2px 0 #1f1208;transform:scale(1.08)}
-.sk-size{min-width:44px}.sk-size i{display:inline-block;border-radius:50%;background:currentColor}
-.sk-size.on{box-shadow:inset 0 0 0 2px var(--gold),0 3px 0 #1f1208}
-.sk-tip{margin:0}
-.sk-feed{height:230px;overflow-y:auto;font-size:.88rem;line-height:1.4;padding-right:4px}
-.sk-msg{padding:3px 0;border-bottom:1px dashed rgba(242,200,130,.15);overflow-wrap:anywhere}
-.sk-msg.right{color:var(--good);font-weight:800}.sk-msg.close{color:var(--gold);font-style:italic}.sk-msg.sys{color:var(--muted);font-style:italic}
-.sk-guess{display:flex;gap:6px;margin-top:10px}.sk-guess input{flex:1;min-width:0}
-.sk-scores h3{margin:0 0 6px}
-.sk-player{display:flex;gap:8px;padding:5px 0;font-size:.92rem}.sk-player.drawing{color:var(--gold);font-weight:800}
-@media(max-width:900px){.sk-grid{grid-template-columns:1fr;grid-template-areas:"board" "chat" "scores"}.sk-feed{height:150px}}
-@media(max-width:480px){.sk-top{grid-template-columns:1fr auto;padding:8px 10px}.sk-round{grid-column:1/-1}.sk-letters b{width:16px;font-size:1rem}.sk-board{border-width:5px}.sk-swatch{width:36px;height:36px;min-height:36px}}
+.sk-card{pointer-events:auto;max-width:94%;max-height:100%;overflow-y:auto;text-align:center;padding:16px 20px;border-radius:20px;color:var(--ink);background:linear-gradient(180deg,#ffffff,#eef0ff);box-shadow:0 0 0 1px rgba(27,35,71,.08),0 16px 36px rgba(20,14,70,.4);animation:sk-cardin .4s var(--spring)}
+@keyframes sk-cardin{from{transform:translateY(14px) scale(.92);opacity:0}}
+.sk-card p{margin:0 0 12px;font-weight:700}
+.sk-cardtitle{display:flex;align-items:center;justify-content:center;gap:8px;font:700 1.2rem/1.2 var(--font-display);color:#9a6300;margin-bottom:8px}
+.sk-cardtitle .ic{width:22px;height:22px}
+.sk-revealcard small{font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:#6b7299;font-weight:800}
+.sk-big{margin:2px 0 10px !important;font:700 2rem/1.15 var(--font-display);text-transform:capitalize;background:linear-gradient(90deg,#ff3d7f,#7c4dff 55%,#2f8fff);-webkit-background-clip:text;background-clip:text;color:transparent}
+.sk-choices{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;padding:4px 2px 8px}
+.sk-pick{position:relative;display:inline-flex;align-items:center;gap:8px;min-height:48px;padding:8px 18px 8px 8px;border:0;border-radius:15px;color:var(--ink);background:#fff;font:600 1.08rem/1.1 var(--font-display);text-transform:capitalize;box-shadow:0 0 0 2px var(--t),0 5px 0 rgba(27,35,71,.14),0 10px 18px rgba(20,14,70,.2);transform:rotate(var(--r,0deg));transition:transform .22s var(--spring)}
+.sk-pick .ic{width:30px;height:30px;padding:6px;border-radius:10px;background:var(--t);color:#1b2347}
+.sk-pick::after{content:'';position:absolute;inset:-5px;border-radius:19px;pointer-events:none;box-shadow:0 0 0 2px var(--t),0 0 18px 3px var(--t);opacity:.6;animation:sk-breathe 2.4s ease-in-out infinite}
+.sk-pick:hover:not(:disabled){background-color:#fff}
+@media(hover:hover){.sk-pick:hover:not(:disabled){transform:rotate(0) translateY(-3px)}}
+.sk-pick:active:not(:disabled){transform:rotate(var(--r,0deg)) scale(.97)}
+.sk-pick.sk-chosen,.sk-pick.sk-chosen:active:not(:disabled){transform:translateY(-8px) scale(1.06);z-index:2}
+.sk-pick.sk-chosen::after{animation:none;opacity:1}
+.sk-waitcard{display:flex;flex-direction:column;align-items:center;gap:12px}
+.sk-waitcard p{margin:0}
+.sk-face.big{width:58px;height:58px;box-shadow:0 0 0 3px var(--pc),0 6px 14px rgba(20,14,70,.3);animation:sk-bob 1.8s ease-in-out infinite}
+@keyframes sk-bob{50%{transform:translateY(-5px) rotate(-4deg)}}
+.sk-gotlist{display:flex;flex-direction:column;gap:6px;text-align:left;min-width:min(240px,100%)}
+.sk-gotrow,.sk-final{display:flex;align-items:center;gap:10px;padding:5px 12px 5px 6px;border-radius:12px;background:rgba(124,108,255,.09);font-weight:700}
+.sk-gotrow .sk-face,.sk-final .sk-face{width:28px;height:28px}
+.sk-gotrow b{font:700 1.05rem/1 var(--font-display);color:#139a66}
+.sk-gotrow.artist{background:rgba(255,207,92,.2)}.sk-gotrow.artist b{color:#9a6300}
+.sk-gotrow small{color:#6b7299;font-weight:700}
+.sk-nobody{color:#6b7299;font-weight:700}
+.sk-finalcard{min-width:min(280px,94%)}
+.sk-final{text-align:left;margin-top:6px}
+.sk-final b{font:700 1.05rem/1 var(--font-display);color:#5b4bd6}
+.sk-final.win{background:linear-gradient(90deg,rgba(255,207,92,.4),rgba(255,207,92,.12));box-shadow:0 0 0 2px #ffcf5c}
+.sk-final.win b{color:#8a5600}
+.sk-rank{width:20px;text-align:center;font:700 .95rem/1 var(--font-display);color:#6b7299}
+.sk-final.win .sk-rank{color:#b7832a}
+
+/* the palette */
+.sk-tools{margin-top:14px}
+.sk-palette{display:flex;flex-direction:column;gap:12px;padding:12px;border-radius:20px;background:rgba(14,12,52,.55);border:1px solid rgba(255,255,255,.1)}
+.sk-colors{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+.sk-swatch{position:relative;width:42px;height:42px;min-height:42px;padding:0;border-radius:50%;border:3px solid rgba(255,255,255,.92);background:radial-gradient(circle at 34% 30%,rgba(255,255,255,.55),rgba(255,255,255,0) 42%),var(--c);box-shadow:0 3px 0 rgba(0,0,0,.25),0 6px 12px rgba(0,0,0,.3);color:#5b6390;transition:transform .22s var(--spring),box-shadow .2s}
+.sk-swatch:hover:not(:disabled){background-color:var(--c);border-color:#fff}
+.sk-swatch.eraser{background:repeating-conic-gradient(#ffffff 0 25%,#e3e7f7 0 50%) 0 0/12px 12px}
+.sk-swatch .ic{width:20px;height:20px}
+.sk-swatch.on{transform:translateY(-6px) scale(1.12);box-shadow:0 0 0 3px var(--gold),0 10px 18px rgba(0,0,0,.45);z-index:1}
+.sk-swatch:active:not(:disabled){transform:scale(.94)}
+.sk-swatch.on:active:not(:disabled){transform:translateY(-4px) scale(1.04)}
+.sk-tooldeck{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
+.sk-sizes,.sk-acts{display:flex;gap:8px;align-items:center}
+.sk-size{width:46px;height:46px;min-height:46px;padding:0;display:grid;place-items:center;border:0;border-radius:14px;background:#fff;box-shadow:0 3px 0 rgba(0,0,0,.22);transition:transform .22s var(--spring),box-shadow .2s}
+.sk-size:hover:not(:disabled){background-color:#fff}
+.sk-size i{display:block;border-radius:50%;background:var(--brush,#1d1714);box-shadow:0 0 0 1.5px rgba(27,35,71,.25)}
+.sk-size.on{transform:translateY(-5px);box-shadow:0 0 0 3px var(--gold),0 8px 14px rgba(0,0,0,.4)}
+.sk-size:active:not(:disabled){transform:scale(.94)}
+.sk-size.on:active:not(:disabled){transform:translateY(-3px) scale(.98)}
+.sk-act{min-height:44px;padding:6px 14px;border-radius:14px;font-size:.9rem}
+.sk-act .ic{width:20px;height:20px}
+.sk-tip{display:flex;align-items:center;justify-content:center;gap:8px;margin:0;padding:10px 14px;border-radius:16px;background:rgba(14,12,52,.5);border:1px solid rgba(255,255,255,.08);color:#ddd8ff;font-size:.88rem;text-align:center}
+.sk-tip .ic{width:18px;height:18px;color:var(--gold)}
+
+/* guesses */
+.sk-chat{padding:14px}
+.sk-feed{display:flex;flex-direction:column;justify-content:flex-end;gap:5px;height:128px;overflow:hidden;font-size:.88rem;line-height:1.35;-webkit-mask-image:linear-gradient(transparent,#000 22px);mask-image:linear-gradient(transparent,#000 22px)}
+.sk-msg{flex:none;padding:5px 10px;border-radius:12px;background:rgba(255,255,255,.05);overflow-wrap:anywhere}
+.sk-msg .ic{width:15px;height:15px;margin-right:6px;vertical-align:-.2em}
+.sk-msg b{color:var(--pc,#fff);color:color-mix(in srgb,var(--pc,#fff) 55%,#fff)}
+.sk-msg.right{background:linear-gradient(90deg,rgba(62,224,161,.28),rgba(62,224,161,.08));color:#bff8e0;font-weight:800}
+.sk-msg.close{background:rgba(255,207,92,.14);color:#ffe3a0;font-style:italic;font-weight:700}
+.sk-msg.sys{background:none;color:var(--muted);font-style:italic;padding:2px 10px}
+.sk-feed .sk-msg:last-child{animation:sk-msgin .35s var(--spring)}
+@keyframes sk-msgin{from{transform:translateY(8px);opacity:0}}
+.sk-empty{margin:0;padding:4px 2px}
+.sk-guess{position:relative;display:flex;gap:8px;margin-top:10px}
+.sk-guess input{flex:1;min-width:0}
+.sk-guess.can::after{content:'';position:absolute;inset:-4px;border-radius:16px;pointer-events:none;box-shadow:0 0 0 2px rgba(255,207,92,.6),0 0 16px 2px rgba(255,207,92,.3);animation:sk-breathe 2.6s ease-in-out infinite}
+.sk-guess.can:focus-within::after{display:none}
+.sk-history .drawer-body{padding-top:0}
+.sk-hist{display:flex;flex-direction:column;gap:5px;max-height:240px;overflow-y:auto;font-size:.86rem;line-height:1.35;padding-right:2px}
+
+/* scores */
+.sk-scores{padding:14px}
+.sk-scores h3{display:flex;align-items:center;gap:8px;margin:0 0 8px}
+.sk-scorelist{display:flex;flex-direction:column;gap:4px}
+.sk-player{position:relative;display:flex;align-items:center;gap:9px;min-height:44px;padding:6px 10px 6px 7px;border-radius:14px;font-size:.92rem}
+.sk-player.drawing{background:rgba(255,207,92,.1);box-shadow:inset 0 0 0 1px rgba(255,207,92,.35)}
+.sk-player.me .sk-pname{font-weight:800}
+.sk-pname{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sk-badge{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;flex:none}
+.sk-badge .ic{width:14px;height:14px}
+.sk-badge.draw{background:var(--gold);color:#3b2a00}
+.sk-badge.ok{background:var(--good);color:#05271a}
+.sk-pts{display:inline-block;min-width:2.4em;text-align:right;font:700 1.15rem/1 var(--font-display);color:var(--gold)}
+/* A correct guess: the row flashes and the score pops. */
+.sk-player.sk-scored::after{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:linear-gradient(90deg,rgba(62,224,161,.38),rgba(62,224,161,.06));box-shadow:inset 0 0 0 1.5px rgba(62,224,161,.85);opacity:0;animation:sk-flash 1.3s ease-out}
+@keyframes sk-flash{15%{opacity:1}}
+.sk-player.sk-scored .sk-pts{animation:sk-pop .6s var(--spring)}
+@keyframes sk-pop{40%{transform:scale(1.4);color:#9ff3cf}}
+
+@media(max-width:900px){.sk-grid{grid-template-columns:minmax(0,1fr);gap:14px}.sk-felt{padding:24px 8px 10px}.sk-felt::before{left:16px;right:16px}.sk-feed{height:112px}}
+@media(max-width:560px){
+  .sk-top{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"who clock" "word word";gap:8px 10px;padding:8px}
+  .sk-who{grid-area:who;max-width:none}.sk-word{grid-area:word}.sk-clock{grid-area:clock}
+  .sk-colors{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));justify-items:center;gap:8px 4px}
+  .sk-palette{padding:10px 8px}
+  .sk-sizes,.sk-acts{gap:6px}
+  .sk-act{width:44px;padding:0}.sk-act span{display:none}
+  .sk-easel{padding:5px;border-radius:20px}.sk-board{border-radius:15px}
+  .sk-easel::before,.sk-easel::after{width:46px;height:15px;top:-6px}
+  .sk-big{font-size:1.6rem}
+  .sk-card{padding:12px 14px}
+  .sk-cardtitle{font-size:1.05rem;margin-bottom:4px}
+  .sk-final,.sk-gotrow{padding:3px 10px 3px 4px}.sk-final{margin-top:4px}
+  .sk-gotlist{gap:4px}
+  .sk-final .sk-face,.sk-gotrow .sk-face{width:24px;height:24px}
+}
+@media(max-width:400px){
+  .sk-letters{gap:3px}.sk-letters b{width:19px;height:27px;font-size:1rem;border-radius:6px}
+  .sk-clock{width:46px;height:46px}.sk-clock .sk-time{width:37px;height:37px;font-size:1rem}
+  .sk-size{width:42px;height:42px;min-height:42px}.sk-act{width:42px}
+  .sk-swatch{width:40px;height:40px;min-height:40px}
+}
 `;
 
 export default {
@@ -417,13 +758,7 @@ export default {
     { id: 'rounds', label: '🔁 Rounds', default: '2', choices: [['1', '1 round'], ['2', '2 rounds'], ['3', '3 rounds']] },
     { id: 'time', label: '⏱ Drawing time', default: '80', choices: [['60', '60 seconds'], ['80', '80 seconds'], ['100', '100 seconds']] },
   ],
-  cover: `<svg viewBox="0 0 320 200" role="img" aria-label="A sketchbook with a doodled sun and house"><defs><linearGradient id="sk-cv" x2="0" y2="1"><stop stop-color="#4a2c19"/><stop offset="1" stop-color="#22140a"/></linearGradient></defs>
-    <rect width="320" height="200" fill="url(#sk-cv)"/><g transform="rotate(-4 160 100)"><rect x="52" y="26" width="216" height="150" rx="8" fill="#fffdf6" stroke="#2a170a" stroke-width="3"/>${Array.from({ length: 9 }, (_, i) => `<circle cx="${70 + i * 23}" cy="26" r="5" fill="none" stroke="#777" stroke-width="2.5"/>`).join('')}
-    <circle cx="214" cy="70" r="20" fill="none" stroke="#f2a33c" stroke-width="5"/>${Array.from({ length: 8 }, (_, k) => { const a = (k * Math.PI) / 4; return `<path d="M${(214 + 28 * Math.cos(a)).toFixed(1)} ${(70 + 28 * Math.sin(a)).toFixed(1)}L${(214 + 38 * Math.cos(a)).toFixed(1)} ${(70 + 38 * Math.sin(a)).toFixed(1)}" stroke="#f2a33c" stroke-width="4" stroke-linecap="round"/>`; }).join('')}
-    <path d="M92 150V110h60v40M84 114l38-32 38 32" fill="none" stroke="#8a5a33" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/><path d="M114 150v-22h16v22" fill="none" stroke="#3d7fd9" stroke-width="4"/>
-    <path d="M178 156q20-14 40 0t40 0" fill="none" stroke="#3fa36b" stroke-width="5" stroke-linecap="round"/></g>
-    <g transform="rotate(38 262 150)"><rect x="236" y="144" width="70" height="12" rx="3" fill="#f2c14e" stroke="#6b440c" stroke-width="2"/><path d="M236 144l-14 6 14 6z" fill="#e9c9a0" stroke="#6b440c" stroke-width="2"/><path d="M222 150l5-2v4z" fill="#333"/></g>
-    <g font-family="Georgia" font-weight="700" font-size="14" fill="#f6ead2"><text x="20" y="190">?</text><text x="296" y="40">?</text></g></svg>`,
+  cover: coverSVG(),
   howTo: {
     goal: 'Score the most points over all the rounds by guessing other people’s drawings quickly, and by drawing so well that others guess yours.',
     turn: [

@@ -78,13 +78,31 @@ Avoid animating `filter`, `box-shadow` or `backdrop-filter` on large areas.
 
 ## Visual standards (important)
 
-The site has a **rich tabletop** look: walnut table, green felt, leather panels, brass buttons, parchment.
-Each game should feel like a premium board game app.
+The site is a **playful game lounge**: deep navy foundation, crisp rounded type, bright accents, plenty of
+room, subtle textures. The platform stays calm so each game's own world can stand out.
+**Gem Merchants (`games/gems.js`) is the reference** for everything below.
 
-- Use the shared surfaces: `.felt` (main play area), `.panel` (leather side panels), `.parchment` (log/notes),
-  `.game-layout` (board + 330px side column, stacks on mobile), `.side`, `.pchip`, `.status`, `.winner-banner`,
-  buttons `button.primary` (brass), `.good`, `.bad`, `.small`.
-- Fonts: `var(--font-display)` (Cinzel) for titles and numbers, `var(--font-body)` (Nunito) for text.
+- Use the shared surfaces: `.felt` (the table the game is played on), `.panel` (navy side panels), `.parchment`
+  (light cards for notes), `.game-layout` (board + 320px side column, stacks on phones), `.side`, `.pchip`,
+  `.status`, `.winner-banner`, `.tag` (`t-you`, `t-host`, `t-bot`, `t-good`, `t-warn`), buttons `button.primary`
+  (violet-blue), `.good`, `.bad`, `.ghost`, `.small`, `.icon-btn`.
+- **Give the game its own atmosphere** by restyling its `.felt` (e.g. `.gems-felt` is a night bazaar: indigo
+  velvet, lantern glow, gem glints). Or set `--table-1`, `--table-2`, `--table-3` on it for a simple tint.
+- **The board gets the screen.** Fold secondary information (logs, long rules, settings) into a drawer:
+  `<details class="panel drawer"><summary>${icon('…')}<span>Title</span>${icon('chevron', 'chev')}</summary>
+  <div class="drawer-body">…</div></details>`, folded by default on phones and remembered across redraws.
+- **Icons, not emoji, for controls.** `icon(name)` from `js/icons.js` returns a matching line icon
+  (close, help, trophy, rematch, mic, eye, bot, star…). Emoji may stay inside game content (rules, flavour),
+  never as a button's only label.
+- **Players have faces.** `portrait({ id, bot })` from `js/avatar.js` draws the same portrait the lobby shows
+  (a robot for computer players). Ring it in the player's colour.
+- **Interactions should feel physical:** a card you inspect lifts (`translateY(-8px) scale(1.04)`), pressed
+  items dip (`scale(.97)`), legal targets get a soft rim plus a slow breathing glow (animate `opacity` on a
+  pseudo-element, as `.gems-can` does; `pulse-glow` is the generic fallback), and a successful action gets a short
+  response (a fly-in, a `float` "+3", or a one-off flash like `.gems-scored`).
+- Fonts: `var(--font-display)` (Fredoka) for titles and numbers, `var(--font-body)` (Nunito) for text.
+- **Covers** (`cover`, an SVG 320×200) should sell the experience: characters, a place and some action, not
+  just objects. The home page shows them large, with players, duration and difficulty beneath.
 - Draw real art: **SVG or CSS with gradients, highlights, inner shadows and drop shadows**. Pieces should
   look like physical objects (wood, glazed ceramic, polished gems, embossed cards). Emoji may be used as small
   icons, but never as the main artwork.

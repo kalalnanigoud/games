@@ -17,6 +17,8 @@
 import { esc, log, addFx, uid } from '../js/util.js';
 import { injectCSS } from '../js/fx.js';
 import { sound } from '../js/sound.js';
+import { icon } from '../js/icons.js';
+import { portrait } from '../js/avatar.js';
 
 const browser = typeof document !== 'undefined';
 const own = (o, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
@@ -201,18 +203,22 @@ export function escapeRoom(spec) {
 
   /* ---------------- interface ---------------- */
 
-  // Which close-up is open and how the dials are set: local to this device, kept across redraws.
-  const UI = { gid: null, open: null, dials: {}, close: null };
+  // Local to this device and kept across redraws (an escape room re-renders whenever anyone acts):
+  // which close-up is open and how its dials are set, which drawers are open, and when each item,
+  // clue, solved lock and goal first appeared here (for short one-off success flashes).
+  const UI = { gid: null, open: null, dials: {}, close: null, shown: null, scroll: 0, born: {}, primed: false, journal: wide(), team: wide() };
   if (browser) addEventListener('keydown', (e) => { if (e.key === 'Escape' && UI.close && document.body.contains(document.querySelector(`.esc-${spec.id} .esc-modal`))) UI.close(); });
   const itemTile = (id) => `<div class="esc-flyitem"><svg viewBox="0 0 40 40">${spec.items[id].icon}</svg></div>`;
-  const pawn = (v, p, key = '') => { const [c, m] = PAWNS[p.seat % 4]; return `<span class="esc-pawn" ${key ? `data-k="${key}"` : ''} style="background:${c}" title="${esc(p.name)}">${m}</span>`; };
   const introKey = (v) => 'esc-intro-' + v.gid;
   const introSeen = (v) => { try { return sessionStorage.getItem(introKey(v)) === '1'; } catch { return true; } };
+  // When a lock on this object was opened, or an item used on it, in ms ago (Infinity if long ago or never).
+  const solvedAge = (v, o, age) => Math.min(o.lock && v.flags[o.lock.flag] ? age('f:' + o.lock.flag) : Infinity,
+    ...(o.use || []).filter((u) => v.flags[u.flag]).map((u) => age('f:' + u.flag)));
 
   function draw(el, v, ctx) {
     injectCSS('escape-kit', STYLE);
     if (spec.css) injectCSS(spec.id, spec.css);
-    if (UI.gid !== v.gid) { UI.gid = v.gid; UI.open = !v.over && !introSeen(v) ? 'story:intro' : null; UI.dials = {}; UI.ended = v.over; }
+    if (UI.gid !== v.gid) { UI.gid = v.gid; UI.open = !v.over && !introSeen(v) ? 'story:intro' : null; UI.dials = {}; UI.ended = v.over; UI.born = {}; UI.primed = false; UI.shown = null; }
     if (v.over && !UI.ended) { UI.ended = true; UI.open = null; scrollTo?.({ top: 0, behavior: 'smooth' }); } // show the ending
     const redraw = () => draw(el, v, ctx);
     const me = v.players.find((p) => p.id === ctx.me) || v.players[0];
@@ -226,46 +232,84 @@ export function escapeRoom(spec) {
     const sharedFrags = v.frags.filter((f) => f.shared);
     const hints = ob ? v.hints.filter((h) => h.ob === ob.id) : [];
 
+    // Things that are new since this device last drew get a short flash; whatever was already
+    // there when we arrived does not. Times survive redraws, so a flash continues where it was.
+    const now = Date.now();
+    const age = (key) => { if (!own(UI.born, key)) UI.born[key] = UI.primed ? now : 0; return UI.born[key] ? now - UI.born[key] : Infinity; };
+    const flash = (key, ms = FLASH) => { const a = age(key); return a < ms ? a : null; };
+    Object.keys(v.flags).forEach((f) => v.flags[f] && age('f:' + f));
+    v.inv.forEach((id) => age('i:' + id));
+    v.hints.forEach((h, i) => age('h:' + i));
+    const entries = [...journal.map((o) => ['obj:' + o.id, o.name]), ...sharedFrags.map((f) => ['frag:' + f.id, f.title])];
+    entries.forEach(([k]) => age('j:' + k));
+    const latest = entries.reduce((best, e) => (!best || UI.born['j:' + e[0]] >= UI.born['j:' + best[0]] ? e : best), null);
+    const goalFlash = flash('g:' + (v.over ? 'over' : ob?.id));
+    UI.primed = true;
+
+    const still = !!UI.open && UI.shown === UI.open; // the same close-up as last time: don't pop it in again
+    const face = (p, cls = '', attrs = '', mark = false) => {
+      if (!p) return '';
+      const [c, m] = PAWNS[p.seat % 4];
+      return `<span class="esc-face ${cls}" style="--pc:${c}" ${attrs}>${portrait({ id: p.id, bot: !!ctx.isBot?.(p.id) })}${mark ? `<i class="esc-mark" aria-hidden="true">${m}</i>` : ''}</span>`;
+    };
+    const hotspot = (o, i) => {
+      const [x, y, w, h] = o.hot, fresh = !v.seen.includes(o.id), picked = UI.open === 'obj:' + o.id, sa = solvedAge(v, o, age);
+      const rim = corners(x, y, w, h);
+      return `<g class="esc-hot ${fresh ? 'esc-fresh' : ''} ${picked ? 'esc-picked' : ''}" data-obj="${o.id}" data-a="esc-obj-${o.id}" role="button" tabindex="0" aria-label="${esc(o.name)}"><rect class="esc-hit" x="${x}" y="${y}" width="${w}" height="${h}" rx="9"/>${
+        fresh ? `<path class="esc-aura" d="${rim}" style="animation-delay:${(-i * 0.45).toFixed(2)}s"/>` : ''}${fresh || picked ? `<path class="esc-rim" d="${rim}"/>` : ''}${
+        fresh ? `<path class="esc-spark" d="${sparkle(x + w - 9, y + 9, 6.5)}" style="animation-delay:${(-i * 0.3).toFixed(2)}s"/>` : ''}${
+        sa < FLASH ? `<rect class="esc-burst" x="${x}" y="${y}" width="${w}" height="${h}" rx="12" style="--ago:${sa}ms"/><g class="esc-tick" style="--ago:${sa}ms"><circle cx="${x + w / 2}" cy="${y + h / 2}" r="13"/><path d="M${x + w / 2 - 6} ${y + h / 2 + 0.5}l4.2 4.3 7.8-8.6"/></g>` : ''}</g>`;
+    };
+    const steps = spec.objectives.map((o) => (o.done(v) ? 'on' : o === ob ? 'now' : ''));
+    const stepNo = ob ? spec.objectives.indexOf(ob) + 1 : steps.length;
+    const tier = ob ? v.hintTier[ob.id] || 0 : 0;
+
     el.innerHTML = `<div class="esc-root esc-${spec.id}" style="--accent:${spec.theme.accent};--glow:${spec.theme.glow};--deep:${spec.theme.deep}">
       ${v.over ? ending(v) : ''}
       <div class="esc-bar">
-        <div class="esc-goal"><small>${v.over ? 'Complete' : 'Current goal'}</small><b>${esc(v.over ? spec.doneLabel : ob?.label || '')}</b></div>
-        <div class="esc-stat"><small>Time</small><b class="esc-clock" data-start="${v.started}" data-end="${v.endedAt || ''}">${clock((v.endedAt || Date.now()) - v.started)}</b></div>
-        <div class="esc-stat"><small>Hints</small><b>${v.hintsUsed}</b></div>
-        <button class="small" data-open="story:intro">📜 Story</button>
+        <div class="esc-goal ${v.over ? 'esc-done' : ''} ${goalFlash != null ? 'esc-goalnew' : ''}" ${goalFlash != null ? `style="--ago:${goalFlash}ms"` : ''}>
+          <span class="esc-goal-ic">${v.over ? icon('trophy') : svgIc(IC.goal)}</span>
+          <span class="esc-goal-txt"><small>${v.over ? 'Complete' : `Current goal · step ${stepNo} of ${steps.length}`}</small><b>${esc(v.over ? spec.doneLabel : ob?.label || '')}</b></span>
+          <span class="esc-steps" aria-hidden="true">${steps.map((c) => `<i class="${c}"></i>`).join('')}</span>
+        </div>
+        <div class="esc-stat">${icon('timer')}<span><small>Time</small><b class="esc-clock" data-start="${v.started}" data-end="${v.endedAt || ''}">${clock((v.endedAt || Date.now()) - v.started)}</b></span></div>
+        <button class="esc-stat esc-hintstat" data-jump aria-label="${v.hintsUsed} hint${v.hintsUsed === 1 ? '' : 's'} used. Show the hints">${icon('bulb')}<span><small>Hints</small><b>${v.hintsUsed}</b></span></button>
+        <button class="small esc-storybtn" data-open="story:intro">${icon('book')}Story</button>
       </div>
       <div class="game-layout">
-        <div class="esc-main">
+        <div class="esc-main felt esc-felt">
           <nav class="esc-tabs" aria-label="Rooms">${spec.rooms.map((r) => {
             const open = v.open.includes(r.id);
-            return `<button class="esc-tab ${r.id === room.id ? 'here' : ''}" data-go="${r.id}" ${open && !v.over ? '' : 'disabled'} aria-label="${esc(open ? r.name : r.name + ' (locked)')}">
-              <span>${open ? '' : '🔒 '}${esc(r.name)}</span><span class="esc-dots">${v.players.filter((p) => p.room === r.id).map((p) => pawn(v, p, 'esc-pawn-' + p.id)).join('')}</span></button>`;
+            return `<button class="esc-tab ${r.id === room.id ? 'here' : ''} ${open ? '' : 'locked'}" data-go="${r.id}" ${open && !v.over ? '' : 'disabled'} aria-label="${esc(open ? r.name : r.name + ' (locked)')}">
+              <span>${esc(r.name)}</span><span class="esc-dots">${open ? '' : svgIc(IC.lock, 'esc-lockic')}${v.players.filter((p) => p.room === r.id).map((p) => face(p, 'esc-pawn esc-mini', `data-k="esc-pawn-${p.id}" title="${esc(p.name)}"`)).join('')}</span></button>`;
           }).join('')}</nav>
           <div class="esc-scene" data-a="esc-scene">
             <svg viewBox="0 0 400 250" role="group" aria-label="${esc(room.name)}">${room.art(v)}
-              ${here.map((o) => { const [x, y, w, h] = o.hot; return `<g class="esc-hot" data-obj="${o.id}" data-a="esc-obj-${o.id}" role="button" tabindex="0" aria-label="${esc(o.name)}"><rect class="esc-hit" x="${x}" y="${y}" width="${w}" height="${h}" rx="9"/>${v.seen.includes(o.id) ? '' : `<circle class="esc-spark" cx="${x + w - 7}" cy="${y + 7}" r="5"/>`}</g>`; }).join('')}
-              <g class="esc-folk">${v.players.filter((p) => p.room === room.id).map((p, i) => { const [c, m] = PAWNS[p.seat % 4]; return `<g><circle cx="${18 + i * 22}" cy="232" r="9" fill="${c}" stroke="#fff" stroke-width="2"/><text x="${18 + i * 22}" y="236" text-anchor="middle" font-size="10" fill="#1b1206">${m}</text></g>`; }).join('')}</g>
+              ${here.map(hotspot).join('')}
             </svg>
+            <div class="esc-folk" aria-hidden="true">${v.players.filter((p) => p.room === room.id).map((p) => face(p, '', `title="${esc(p.name)}"`)).join('')}</div>
           </div>
-          <div class="esc-where"><b>${esc(room.name)}</b> · ${esc(room.blurb)}</div>
-          <div class="esc-objs">${here.map((o) => `<button class="small ${v.seen.includes(o.id) ? '' : 'fresh'}" data-obj="${o.id}">${esc(o.name)}</button>`).join('')}</div>
-          <div class="panel esc-invpanel" data-a="esc-inv"><h3 class="gold">Shared inventory</h3><div class="esc-inv">${v.inv.length ? v.inv.map((id) => `<button class="esc-item" data-k="esc-item-${id}" data-open="item:${id}"><svg viewBox="0 0 40 40" aria-hidden="true">${spec.items[id].icon}</svg><span>${esc(spec.items[id].name)}</span></button>`).join('') : '<p class="muted small">Nothing yet. Anything someone picks up appears here for the whole team.</p>'}</div></div>
+          <div class="esc-where">${svgIc(IC.pin)}<span><b>${esc(room.name)}</b> · ${esc(room.blurb)}</span></div>
+          <div class="esc-objs">${here.map((o, i) => { const fresh = !v.seen.includes(o.id); return `<button class="small ${fresh ? 'fresh' : ''} ${UI.open === 'obj:' + o.id ? 'esc-picked' : ''}" data-obj="${o.id}" ${fresh ? `style="--i:${i}"` : ''}>${fresh ? icon('sparkle') : ''}${esc(o.name)}</button>`; }).join('')}</div>
+          <div class="panel esc-invpanel" data-a="esc-inv"><h3 class="gold">${svgIc(IC.bag)}<span>Shared inventory</span>${v.inv.length ? `<span class="esc-count">${v.inv.length}</span>` : ''}</h3><div class="esc-inv">${v.inv.length ? v.inv.map((id) => { const got = flash('i:' + id); return `<button class="esc-item ${got != null ? 'esc-got' : ''} ${UI.open === 'item:' + id ? 'esc-picked' : ''}" data-k="esc-item-${id}" data-open="item:${id}" ${got != null ? `style="--ago:${got}ms"` : ''}><svg viewBox="0 0 40 40" aria-hidden="true">${spec.items[id].icon}</svg><span>${esc(spec.items[id].name)}</span></button>`; }).join('') : '<p class="muted small">Nothing yet. Anything someone picks up appears here for the whole team.</p>'}</div></div>
         </div>
         <div class="side">
-          ${spec.fragments ? `<div class="panel"><h3 class="gold">${esc(spec.fragLabel)}</h3>
+          ${spec.fragments ? `<div class="panel esc-frags"><h3 class="gold">${svgIc(IC.wrist)}<span>${esc(spec.fragLabel)}</span></h3>
             ${myFrags.length ? myFrags.map((f) => `<button class="esc-note ${f.shared ? '' : 'mine'}" data-open="frag:${f.id}"><b>${esc(f.title)}</b><span>${f.shared ? 'Shared with the team' : 'Only you can read this. Tap to open.'}</span></button>`).join('') : '<p class="muted small">Your terminal recovered nothing. Ask your teammates what they see.</p>'}
-            ${theirs.map((f) => `<div class="esc-other">${pawn(v, v.players.find((p) => p.id === f.owner))} <span><b>${esc(v.players.find((p) => p.id === f.owner)?.name)}</b> holds “${esc(f.title)}”</span></div>`).join('')}</div>` : ''}
-          <div class="panel"><div class="row"><h3 class="gold grow" style="margin:0">Hints</h3>${ob && !v.over ? `<button class="small ${stuck ? 'pulse-glow' : ''}" data-hint ${(v.hintTier[ob.id] || 0) >= ob.hints.length ? 'disabled' : ''}>💡 Ask for a hint</button>` : ''}</div>
-            ${hints.length ? `<ol class="esc-hints">${hints.map((h) => `<li>${h.text}</li>`).join('')}</ol>` : `<p class="muted small" style="margin:8px 0 0">${stuck ? 'Feeling stuck? Hints start gentle and get more specific.' : 'Stuck? Hints start gentle and get more specific.'}</p>`}</div>
-          <div class="parchment esc-journal"><h3>Team journal</h3>
-            ${journal.length || sharedFrags.length ? `${journal.map((o) => `<button class="esc-entry" data-open="obj:${o.id}"><b>${esc(o.name)}</b> <i>${esc(rooms[o.room].name)}</i><span>${o.clue(v)}</span></button>`).join('')}
-            ${sharedFrags.map((f) => `<button class="esc-entry" data-open="frag:${f.id}"><b>${esc(f.title)}</b> <i>shared by ${esc(v.players.find((p) => p.id === f.owner)?.name)}</i></button>`).join('')}` : '<p class="small">Clues anyone examines are written here, so the whole team can read them from any room.</p>'}</div>
-          <div class="panel"><h3 class="gold">The team</h3>${v.players.map((p) => `<div class="esc-person">${pawn(v, p)}<span class="grow"><b>${esc(p.name)}</b>${p.id === me.id ? ' · you' : ''}${ctx.isBot?.(p.id) ? ' · computer' : ''}<br><small>${esc(rooms[p.room].name)}</small></span></div>`).join('')}</div>
-          <div class="parchment log">${v.log.slice(0, 8).map((l) => `<div>${esc(l)}</div>`).join('')}</div>
+            ${theirs.map((f) => { const p = v.players.find((q) => q.id === f.owner); return `<div class="esc-other">${face(p, 'esc-sm')}<span><b>${esc(p?.name)}</b> holds “${esc(f.title)}”</span></div>`; }).join('')}</div>` : ''}
+          <div class="panel esc-hintpanel"><div class="row"><h3 class="gold grow" style="margin:0">${icon('help')}<span>Hints</span>${ob && tier ? `<small class="esc-tier">${tier} of ${ob.hints.length}</small>` : ''}</h3>${ob && !v.over ? `<button class="small ${stuck ? 'pulse-glow' : ''}" data-hint ${tier >= ob.hints.length ? 'disabled' : ''}>${icon('bulb')}Ask for a hint</button>` : ''}</div>
+            ${hints.length ? `<ol class="esc-hints">${hints.map((h) => { const n = flash('h:' + v.hints.indexOf(h)); return `<li ${n != null ? `class="esc-newhint" style="--ago:${n}ms"` : ''}>${h.text}</li>`; }).join('')}</ol>` : `<p class="muted small" style="margin:8px 0 0">${stuck ? 'Feeling stuck? Hints start gentle and get more specific.' : 'Stuck? Hints start gentle and get more specific.'}</p>`}</div>
+          <details class="panel drawer esc-journal" ${UI.journal ? 'open' : ''}><summary>${icon('book')}<span>Team journal</span>${entries.length ? `<span class="esc-count">${entries.length}</span>` : ''}<span class="note">${esc(latest ? latest[1] : 'No clues yet')}</span>${icon('chevron', 'chev')}</summary>
+            <div class="drawer-body">${journal.length || sharedFrags.length ? `${journal.map((o) => { const n = flash('j:obj:' + o.id); return `<button class="esc-entry ${n != null ? 'esc-got' : ''}" data-open="obj:${o.id}" ${n != null ? `style="--ago:${n}ms"` : ''}><b>${esc(o.name)}</b> <i>${esc(rooms[o.room].name)}</i><span>${o.clue(v)}</span></button>`; }).join('')}
+              ${sharedFrags.map((f) => { const n = flash('j:frag:' + f.id); return `<button class="esc-entry esc-shared ${n != null ? 'esc-got' : ''}" data-open="frag:${f.id}" ${n != null ? `style="--ago:${n}ms"` : ''}><b>${esc(f.title)}</b> <i>shared by ${esc(v.players.find((p) => p.id === f.owner)?.name)}</i></button>`; }).join('')}` : '<p class="muted small">Clues anyone examines are written here, so the whole team can read them from any room.</p>'}</div></details>
+          <details class="panel drawer esc-team" ${UI.team ? 'open' : ''}><summary>${icon('users')}<span>The team</span><span class="note">${esc(v.log[0] || '')}</span>${icon('chevron', 'chev')}</summary>
+            <div class="drawer-body"><div class="esc-people">${v.players.map((p) => `<div class="esc-person">${face(p, '', '', true)}<span class="grow"><b>${esc(p.name)}</b>${p.id === ctx.me ? '<span class="tag t-you">You</span>' : ''}${ctx.isBot?.(p.id) ? `<span class="tag t-bot">${icon('bot')}Bot</span>` : ''}<small>${svgIc(IC.pin)}${esc(rooms[p.room].name)}</small></span></div>`).join('')}</div>
+              <div class="log esc-log">${v.log.slice(0, 8).map((l) => `<div>${esc(l)}</div>`).join('')}</div></div></details>
         </div>
       </div>
-      ${UI.open ? closeup(v, ctx, me) : ''}
+      ${UI.open ? closeup(v, ctx, me, age, still) : ''}
     </div>`;
+    UI.shown = UI.open;
 
     const open = (key) => {
       UI.open = key;
@@ -281,6 +325,10 @@ export function escapeRoom(spec) {
     el.querySelectorAll('[data-open]').forEach((b) => (b.onclick = () => open(b.dataset.open)));
     el.querySelectorAll('[data-go]').forEach((b) => (b.onclick = () => { UI.open = null; sound('place'); ctx.send({ type: 'go', room: b.dataset.go }); redraw(); }));
     el.querySelector('[data-hint]')?.addEventListener('click', () => ctx.send({ type: 'hint' }));
+    el.querySelector('[data-jump]')?.addEventListener('click', () => el.querySelector('.esc-hintpanel')?.scrollIntoView?.({ behavior: 'smooth', block: 'center' }));
+    // <details> toggle events don't bubble: listen on each drawer after it is drawn.
+    el.querySelector('.esc-journal')?.addEventListener('toggle', (e) => { UI.journal = e.currentTarget.open; });
+    el.querySelector('.esc-team')?.addEventListener('toggle', (e) => { UI.team = e.currentTarget.open; });
     const close = () => {
       if (UI.open === 'story:intro') try { sessionStorage.setItem(introKey(v), '1'); } catch {}
       UI.open = null; redraw();
@@ -288,6 +336,12 @@ export function escapeRoom(spec) {
     UI.close = UI.open ? close : null;
     el.querySelectorAll('[data-close]').forEach((b) => (b.onclick = close));
     el.querySelector('.esc-modal')?.addEventListener('click', (e) => { if (e.target.classList.contains('esc-modal')) close(); });
+    // A long close-up keeps its scroll position when someone else's move redraws the room.
+    const box = el.querySelector('.esc-close');
+    if (box) {
+      if (still) box.scrollTop = UI.scroll; else UI.scroll = 0;
+      box.addEventListener('scroll', () => { UI.scroll = box.scrollTop; }, { passive: true });
+    }
     el.querySelectorAll('[data-dial]').forEach((b) => (b.onclick = () => {
       const [id, i, d] = b.dataset.dial.split(':');
       const n = objects[id].lock.slots[i].length;
@@ -302,55 +356,58 @@ export function escapeRoom(spec) {
     el.querySelectorAll('[data-walk]').forEach((b) => (b.onclick = () => { const [roomId, then] = b.dataset.walk.split('|'); UI.open = then || null; sound('place'); ctx.send({ type: 'go', room: roomId }); redraw(); }));
   }
 
-  function closeup(v, ctx, me) {
+  function closeup(v, ctx, me, age, still) {
     const [kind, id] = UI.open.split(':');
-    let title = '', body = '';
+    let title = '', body = '', ic = '';
     if (kind === 'story') {
-      title = spec.intro.title;
+      title = spec.intro.title; ic = icon('book');
       body = `<div class="esc-closeart">${spec.cover}</div>${spec.intro.text.map((t) => `<p>${t}</p>`).join('')}
         <p class="muted small">Explore at your own pace: everyone can move and act at the same time. Tap anything in a room to look closer.</p>
         <button class="primary" data-close style="width:100%">${v.seen.length || v.inv.length ? 'Back to the investigation' : 'Begin'}</button>`;
     } else if (kind === 'item' && own(spec.items, id) && v.inv.includes(id)) {
       const it = spec.items[id];
-      title = it.name;
+      title = it.name; ic = svgIc(IC.bag);
       body = `<div class="esc-itembig"><svg viewBox="0 0 40 40">${it.icon}</svg></div><p class="esc-text">${it.text}</p><p class="muted small">To use it, open the thing you want to use it on.</p>`;
     } else if (kind === 'frag' && own(frags, id)) {
       const f = v.frags.find((x) => x.id === id);
       if (!f?.text) { UI.open = null; return ''; }
-      title = f.title;
+      title = f.title; ic = svgIc(IC.wrist);
       body = `<div class="esc-wrist">${f.text}</div>${f.owner === me.id && !f.shared
         ? `<p class="muted small">Only you can see this. Read it aloud to your team, or put it in the shared journal.</p><button class="primary" data-share="${f.id}" style="width:100%">Share with the team</button>` : '<p class="muted small">Your whole team can read this in the journal.</p>'}`;
     } else if (kind === 'obj' && own(objects, id) && present(v, objects[id])) {
       const o = objects[id];
       const info = o.look(v, me.id);
       const nearby = o.room === me.room && !v.over;
-      title = o.name;
+      title = o.name; ic = icon('search');
       let act = '';
+      // A short "it worked" note while the success is fresh (the dials or button it replaces are gone).
+      const sa = solvedAge(v, o, age), ta = v.flags['took:' + o.id] ? age('f:took:' + o.id) : Infinity;
+      if (Math.min(sa, ta) < 8000) act += `<div class="esc-win" style="--ago:${Math.min(sa, ta)}ms">${icon('check')}<span>${sa <= ta ? (o.lock && v.flags[o.lock.flag] ? 'Solved!' : 'It worked!') : 'Added to the shared inventory'}</span></div>`;
       if (nearby) {
         if (o.take && !v.flags['took:' + o.id] && (!o.take.when || o.take.when(v))) act += `<button class="primary" data-take="${o.id}" style="width:100%">${esc(o.take.label || 'Take the ' + spec.items[o.take.item].name.toLowerCase())}</button>`;
         const L = o.lock;
         if (L && lockReady(v, L)) {
           const vals = (UI.dials[o.id] ||= L.slots.map(() => 0));
           act += `<div class="esc-dials" data-a="esc-lock-${o.id}">${L.slots.map((opts, i) => `<div class="esc-dial">${L.labels ? `<span>${L.labels[i]}</span>` : ''}
-            <button class="small" data-dial="${o.id}:${i}:1" aria-label="Next value">▲</button><div class="esc-val">${opts[vals[i]]}</div><button class="small" data-dial="${o.id}:${i}:-1" aria-label="Previous value">▼</button></div>`).join('')}</div>
+            <button class="small" data-dial="${o.id}:${i}:1" aria-label="Next value">${icon('up')}</button><div class="esc-val">${opts[vals[i]]}</div><button class="small" data-dial="${o.id}:${i}:-1" aria-label="Previous value">${icon('chevron')}</button></div>`).join('')}</div>
             <button class="primary" data-try="${o.id}" style="width:100%">${esc(L.verb || 'Try it')}</button>`;
-        } else if (L && !v.flags[L.flag] && L.notYet) act += `<p class="esc-note-line">${esc(L.notYet)}</p>`;
+        } else if (L && !v.flags[L.flag] && L.notYet) act += `<p class="esc-note-line">${svgIc(IC.lock)}<span>${esc(L.notYet)}</span></p>`;
         if (v.inv.length) act += `<div class="esc-use"><small>Use an item here</small><div class="row">${v.inv.map((it) => `<button class="small" data-use="${o.id}:${it}"><svg viewBox="0 0 40 40" aria-hidden="true">${spec.items[it].icon}</svg>${esc(spec.items[it].name)}</button>`).join('')}</div></div>`;
-        if (o.go && v.open.includes(o.go)) act += `<button data-walk="${o.go}" style="width:100%">${esc(o.goLabel || 'Go to the ' + rooms[o.go].name)}</button>`;
+        if (o.go && v.open.includes(o.go)) act += `<button class="esc-walk" data-walk="${o.go}" style="width:100%">${icon('door')}${esc(o.goLabel || 'Go to the ' + rooms[o.go].name)}</button>`;
       } else if (!v.over) {
-        act = `<p class="muted small">This is in the ${esc(rooms[o.room].name)}. Go there to touch it.</p><button data-walk="${o.room}|obj:${o.id}" style="width:100%">Go to the ${esc(rooms[o.room].name)}</button>`;
+        act += `<p class="muted small">This is in the ${esc(rooms[o.room].name)}. Go there to touch it.</p><button class="esc-walk" data-walk="${o.room}|obj:${o.id}" style="width:100%">${icon('door')}Go to the ${esc(rooms[o.room].name)}</button>`;
       }
       body = `${info.art ? `<div class="esc-closeart">${info.art}</div>` : ''}<div class="esc-text">${info.text}</div>${act}`;
     } else { UI.open = null; return ''; }
-    return `<div class="modal-bg esc-modal"><div class="modal panel esc-close" role="dialog" aria-label="${esc(title)}">
-      <button class="small icon esc-x" data-close aria-label="Close">✕</button><h3 class="gold">${esc(title)}</h3>${body}</div></div>`;
+    return `<div class="modal-bg esc-modal ${still ? 'esc-still' : ''}"><div class="modal panel esc-close" role="dialog" aria-label="${esc(title)}">
+      <button class="icon-btn esc-x" data-close aria-label="Close">${icon('close')}</button><h3 class="gold">${ic}<span>${esc(title)}</span></h3>${body}</div></div>`;
   }
 
   function ending(v) {
     const e = spec.ending(v);
     return `<div class="esc-ending" role="status"><div class="esc-closeart">${e.art || spec.cover}</div><div>
-      <div class="winner-banner">${esc(e.title)}</div>${e.text.map((t) => `<p>${t}</p>`).join('')}
-      <div class="esc-endstats"><span>⏱ ${clock(v.endedAt - v.started)}</span><span>💡 ${v.hintsUsed} hint${v.hintsUsed === 1 ? '' : 's'}</span><span>🔐 ${v.attempts} wrong tr${v.attempts === 1 ? 'y' : 'ies'}</span></div>
+      <div class="winner-banner">${icon('trophy')} ${esc(e.title)}</div>${e.text.map((t) => `<p>${t}</p>`).join('')}
+      <div class="esc-endstats"><span>${icon('timer')}${clock(v.endedAt - v.started)}</span><span>${icon('bulb')}${v.hintsUsed} hint${v.hintsUsed === 1 ? '' : 's'}</span><span>${svgIc(IC.lock)}${v.attempts} wrong tr${v.attempts === 1 ? 'y' : 'ies'}</span></div>
       <p class="muted small">Every player shares the escape. Start a new game for a fresh set of codes.</p></div></div>`;
   }
 
@@ -362,95 +419,250 @@ if (browser) setInterval(() => document.querySelectorAll('.esc-clock').forEach((
   if (!c.dataset.end) c.textContent = clock(Date.now() - Number(c.dataset.start));
 }), 1000);
 
+/* ---------------- drawing helpers ---------------- */
+
+const FLASH = 2600; // how long a success flash may still be playing after a redraw (ms)
+// Side panels open on wide screens and fold away on phones, so the room picture gets the screen.
+function wide() { return typeof matchMedia === 'function' ? matchMedia('(min-width: 901px)').matches : true; }
+// A few line icons the shared set doesn't have, drawn the same way as js/icons.js.
+const IC = {
+  lock: '<rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>',
+  goal: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1.1" fill="currentColor"/>',
+  bag: '<path d="M4.5 9h15l-1.3 10.3a1.5 1.5 0 0 1-1.5 1.2H7.3a1.5 1.5 0 0 1-1.5-1.2z"/><path d="M8.8 9V7.2a3.2 3.2 0 0 1 6.4 0V9"/>',
+  pin: '<path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/>',
+  wrist: '<rect x="6.5" y="6.5" width="11" height="11" rx="3"/><path d="M9 6.5l.6-3.5h4.8l.6 3.5M9 17.5l.6 3.5h4.8l.6-3.5M9.5 12h1.5l1-2 1.5 4 1-2h1"/>',
+};
+const svgIc = (body, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${body}</svg>`;
+// Viewfinder corners just inside a hotspot, and a four-point glint.
+function corners(x, y, w, h) {
+  x += 2.5; y += 2.5; w -= 5; h -= 5;
+  const c = Math.round(Math.max(6, Math.min(14, w / 4, h / 4)));
+  return `M${x} ${y + c}V${y}H${x + c}M${x + w - c} ${y}H${x + w}V${y + c}M${x + w} ${y + h - c}V${y + h}H${x + w - c}M${x + c} ${y + h}H${x}V${y + h - c}`;
+}
+const sparkle = (x, y, r) => `M${x} ${y - r}Q${x} ${y} ${x + r} ${y}Q${x} ${y} ${x} ${y + r}Q${x} ${y} ${x - r} ${y}Q${x} ${y} ${x} ${y - r}Z`;
+
+// Each game sets --accent/--glow/--deep inline, and its own atmosphere (felt, glass tint) in spec.css.
 const STYLE = `
-.esc-root{--accent:#e8c27a;--glow:#ffe3a3;--deep:#120c08}
+.esc-root{--accent:#e8c27a;--glow:#ffe3a3;--deep:#120c08;--accent-2:#ff9f5a;--win:#3ee0a1;--ink-on:#1b1206;
+  --acc-soft:rgba(232,194,122,.12);--acc-line:rgba(232,194,122,.38);--acc-line-2:rgba(232,194,122,.2);--acc-glow:rgba(232,194,122,.5);
+  --glass-1:rgba(31,44,92,.8);--glass-2:rgba(19,28,62,.88);--item-1:#2b3b78;--item-2:#121a3d}
+.esc-root h3.gold{color:var(--accent)}
+.esc-root button.small{min-height:40px}
+
+/* status bar: goal, clock, hints */
 .esc-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin-bottom:12px}
-.esc-goal,.esc-stat{padding:8px 14px;border-radius:12px;background:rgba(0,0,0,.38);border:1px solid rgba(255,255,255,.12);box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
-.esc-goal{flex:1;min-width:190px}
-.esc-goal small,.esc-stat small{display:block;font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
-.esc-goal b{font-family:var(--font-display);color:var(--accent);font-size:1rem}
-.esc-stat b{font-family:var(--font-display);font-size:1.05rem}
-.esc-bar>button{align-self:center}
-.esc-tabs{display:flex;gap:6px;margin-bottom:8px}
-.esc-tab{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 6px;font-size:.78rem;line-height:1.15}
+.esc-goal,.esc-stat{position:relative;display:flex;align-items:center;gap:10px;padding:8px 14px;border-radius:16px;
+  background:linear-gradient(180deg,var(--glass-1),var(--glass-2));border:1px solid var(--line);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 6px 16px rgba(2,4,16,.3)}
+.esc-goal{flex:1;min-width:190px;border-color:var(--acc-line);background:radial-gradient(120% 140% at 0% 0%,var(--acc-soft),transparent 60%),linear-gradient(180deg,var(--glass-1),var(--glass-2))}
+.esc-goal-txt,.esc-stat>span{display:flex;flex-direction:column;min-width:0}
+.esc-goal-txt{flex:1}
+.esc-goal small,.esc-stat small{font-size:.64rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);line-height:1.35}
+.esc-goal b{font-family:var(--font-display);font-weight:600;color:var(--accent);font-size:1.04rem;line-height:1.25}
+.esc-stat b{font-family:var(--font-display);font-weight:600;font-size:1.08rem;line-height:1.25}
+.esc-stat>.ic{width:20px;height:20px;color:var(--accent)}
+.esc-goal-ic{flex:none;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;color:var(--ink-on);
+  background:radial-gradient(circle at 35% 30%,var(--glow),var(--accent) 70%);box-shadow:0 0 0 3px var(--acc-soft),0 4px 12px rgba(0,0,0,.35)}
+.esc-goal-ic .ic{width:21px;height:21px}
+.esc-steps{display:flex;gap:4px;flex:none;align-self:center}
+.esc-steps i{width:12px;height:5px;border-radius:3px;background:rgba(255,255,255,.14)}
+.esc-steps i.on{background:var(--accent)}
+.esc-steps i.now{background:var(--glow);box-shadow:0 0 0 1px var(--acc-line)}
+.esc-goalnew::after{content:'';position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;box-shadow:0 0 0 2px var(--glow),0 0 26px var(--acc-glow);
+  opacity:0;animation:escFlash 1.8s ease-out both;animation-delay:calc(.15s - var(--ago,0ms))}
+.esc-goalnew b{animation:escRise .5s var(--ease) both;animation-delay:calc(.15s - var(--ago,0ms))}
+.esc-goalnew .esc-goal-ic{animation:escPop .7s var(--spring) both;animation-delay:calc(.15s - var(--ago,0ms))}
+.esc-bar button.esc-stat{min-height:0;justify-content:flex-start;gap:10px;font:inherit;color:inherit;text-align:left;cursor:pointer}
+.esc-bar button.esc-stat:hover:not(:disabled){background:linear-gradient(180deg,var(--glass-1),var(--glass-2));border-color:var(--acc-line)}
+.esc-bar>.esc-storybtn{align-self:center}
+@keyframes escFlash{15%{opacity:1}100%{opacity:0}}
+@keyframes escRise{from{opacity:0;transform:translateY(6px)}}
+@keyframes escPop{40%{transform:scale(1.25) rotate(-8deg)}}
+
+/* the stage: room tabs, picture, objects and inventory on the game's own felt */
+.esc-felt{padding:12px;min-width:0}
+.esc-tabs{display:flex;gap:6px;margin-bottom:10px}
+.esc-tab{flex:1 1 0;min-width:0;min-height:54px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:6px;
+  font-family:var(--font-display);font-weight:600;font-size:.84rem;line-height:1.15;background:rgba(8,14,38,.55);border-color:var(--line);border-radius:14px}
 .esc-tab>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
-.esc-tab.here{color:#2a1804;text-shadow:none;background:linear-gradient(180deg,#fbe39c,#e2b14d 60%,#b07b1c);border-color:#6b440c}
-.esc-dots{display:flex;gap:3px;min-height:16px}
-.esc-pawn{width:16px;height:16px;border-radius:50%;display:inline-grid;place-items:center;font-size:8px;color:#1b1206;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.6);flex:none;text-shadow:none}
-.esc-scene{position:relative;border-radius:16px;overflow:hidden;border:3px solid #1a1009;background:var(--deep);box-shadow:0 16px 34px rgba(0,0,0,.6),0 0 0 1px rgba(255,220,160,.18)}
+.esc-tab.here{color:#fff;text-shadow:none;background:linear-gradient(135deg,var(--brand),var(--brand-2));border-color:transparent;box-shadow:var(--glow-brand)}
+.esc-tab.locked{background:rgba(4,8,24,.5);border-style:dashed}
+.esc-dots{display:flex;align-items:center;justify-content:center;min-height:20px}
+.esc-lockic{width:15px;height:15px;color:var(--accent-2)}
+.esc-face{position:relative;display:inline-block;flex:none;width:30px;height:30px;border-radius:50%;background:#1c2853;box-shadow:0 0 0 2px var(--pc,#fff),0 2px 6px rgba(0,0,0,.45)}
+.esc-face .portrait{display:block;width:100%;height:100%;border-radius:50%}
+.esc-face.esc-mini{width:20px;height:20px;box-shadow:0 0 0 1.5px var(--pc,#fff),0 1px 3px rgba(0,0,0,.55)}
+.esc-face.esc-mini+.esc-face.esc-mini{margin-left:-4px}
+.esc-face.esc-sm{width:24px;height:24px}
+.esc-mark{position:absolute;right:-5px;bottom:-4px;width:15px;height:15px;border-radius:50%;display:grid;place-items:center;font:700 8px/1 var(--font-body);font-style:normal;
+  color:#1b1206;background:var(--pc);box-shadow:0 0 0 2px #17214a}
+.esc-scene{position:relative;border-radius:16px;overflow:hidden;border:2px solid var(--acc-line);background:var(--deep);
+  box-shadow:0 14px 30px rgba(2,4,16,.55),0 0 0 4px rgba(4,8,24,.4),0 0 32px var(--acc-soft)}
 .esc-scene svg{display:block;width:100%;height:auto;touch-action:manipulation;user-select:none;-webkit-user-select:none}
-.esc-hot{cursor:pointer;outline:none}
-.esc-hit{fill:transparent;stroke:transparent;stroke-width:2.5}
-.esc-hot:hover .esc-hit,.esc-hot:focus-visible .esc-hit{stroke:var(--glow);stroke-dasharray:7 5;fill:rgba(255,236,180,.08)}
-.esc-spark{fill:var(--glow);stroke:rgba(0,0,0,.6);stroke-width:1.5;pointer-events:none;animation:escTwinkle 1.8s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
-@keyframes escTwinkle{50%{opacity:.35;transform:scale(.7)}}
-.esc-where{margin:8px 2px 0;font-size:.88rem;color:var(--muted)}
-.esc-where b{color:var(--text);font-family:var(--font-display)}
-.esc-objs{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 12px}
-.esc-objs button{min-height:40px;font-size:.8rem}
-.esc-objs button.fresh{box-shadow:inset 0 0 0 2px var(--accent),0 3px 0 #1f1208}
-.esc-objs button.fresh::after{content:' ✦';color:var(--accent)}
-.esc-invpanel h3{margin:0 0 8px}
-.esc-inv{display:flex;flex-wrap:wrap;gap:8px}
-.esc-item{width:76px;min-height:76px;padding:6px 4px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:.66rem;line-height:1.1;background:radial-gradient(circle at 50% 35%,#3c2a1a,#1d130b);border-radius:12px}
+.esc-hot{cursor:pointer;outline:none;transform-box:fill-box;transform-origin:center;transition:transform .12s var(--ease);-webkit-tap-highlight-color:transparent}
+.esc-hit{fill:transparent;stroke:transparent;stroke-width:2.5;transition:fill .15s}
+@media (hover:hover){.esc-hot:hover .esc-hit{stroke:var(--glow);stroke-dasharray:7 5;fill:rgba(255,244,214,.07)}}
+.esc-hot:focus-visible .esc-hit{stroke:var(--glow);stroke-dasharray:7 5;fill:rgba(255,244,214,.07)}
+.esc-hot:active{transform:scale(.97)}
+.esc-hot:active .esc-hit{fill:rgba(255,255,255,.12)}
+/* Not examined yet: viewfinder corners, a slow breathing halo (opacity only) and a glint. */
+.esc-rim,.esc-aura{fill:none;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+.esc-rim{stroke:var(--accent);stroke-width:2.2;opacity:.85}
+.esc-aura{stroke:var(--glow);stroke-width:6;opacity:.08;animation:escBreathe 2.8s ease-in-out infinite}
+@keyframes escBreathe{50%{opacity:.38}}
+.esc-spark{fill:var(--glow);stroke:rgba(0,0,0,.45);stroke-width:1;pointer-events:none;transform-box:fill-box;transform-origin:center;animation:escTwinkle 2.4s ease-in-out infinite}
+@keyframes escTwinkle{50%{opacity:.45;transform:scale(.7) rotate(25deg)}}
+.esc-picked .esc-hit{stroke:var(--glow);fill:rgba(255,255,255,.08)}
+.esc-picked .esc-rim{stroke:var(--glow);opacity:1}
+/* Just solved: a ring bursts outwards and a tick pops up, once. */
+.esc-burst{fill:none;stroke:var(--win);stroke-width:4;opacity:0;pointer-events:none;transform-box:fill-box;transform-origin:center;
+  animation:escBurst 1.3s ease-out both;animation-delay:calc(.1s - var(--ago,0ms))}
+@keyframes escBurst{0%{opacity:0;transform:scale(.94)}20%{opacity:1}100%{opacity:0;transform:scale(1.07)}}
+.esc-tick{pointer-events:none;transform-box:fill-box;transform-origin:center;animation:escTick 2.5s ease-out both;animation-delay:calc(.1s - var(--ago,0ms))}
+.esc-tick circle{fill:var(--win);stroke:#fff;stroke-width:2}
+.esc-tick path{fill:none;stroke:var(--ink-on);stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+@keyframes escTick{0%{opacity:0;transform:scale(.3)}12%{opacity:1;transform:scale(1.15)}22%{transform:scale(1)}75%{opacity:1}100%{opacity:0}}
+.esc-folk{position:absolute;left:8px;bottom:8px;display:flex;gap:6px;pointer-events:none}
+.esc-folk .esc-face{width:28px;height:28px;box-shadow:0 0 0 2px var(--pc),0 3px 8px rgba(0,0,0,.65)}
+.esc-where{display:flex;gap:8px;align-items:flex-start;margin:10px 2px 0;font-size:.88rem;line-height:1.4;color:var(--muted)}
+.esc-where>.ic{color:var(--accent);margin-top:1px;width:17px;height:17px}
+.esc-where b{color:var(--text);font-family:var(--font-display);font-weight:600}
+.esc-objs{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 12px}
+.esc-objs button{position:relative;min-height:40px;padding:6px 14px;font-size:.82rem;border-radius:999px;background:rgba(10,16,42,.7);border-color:var(--line-2);
+  transition:transform .2s var(--ease),background-color .15s,border-color .15s,box-shadow .2s}
+.esc-objs button .ic{width:15px;height:15px;color:var(--accent)}
+.esc-objs button.fresh{border-color:var(--acc-line);box-shadow:inset 0 0 0 1px var(--acc-soft),0 2px 6px rgba(2,4,16,.25)}
+.esc-objs button.fresh::after{content:'';position:absolute;inset:-3px;border-radius:inherit;pointer-events:none;box-shadow:0 0 12px 2px var(--acc-glow);opacity:.15;
+  animation:escBreathe2 2.8s ease-in-out infinite;animation-delay:calc(var(--i,0) * -.45s)}
+@keyframes escBreathe2{50%{opacity:.8}}
+.esc-objs button.esc-picked{transform:translateY(-4px) scale(1.04);background:var(--surface-3);border-color:var(--glow);box-shadow:0 0 0 1px var(--glow),0 10px 20px rgba(2,4,16,.45)}
+.esc-invpanel{padding:12px 14px 14px;background:rgba(6,10,30,.5);border-color:var(--acc-line-2);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+.esc-root h3{display:flex;align-items:center;gap:8px;font-size:1rem}
+.esc-root h3 .ic{width:20px;height:20px}
+.esc-invpanel h3{margin:0 0 10px}
+.esc-count{display:inline-grid;place-items:center;min-width:22px;height:22px;padding:0 6px;border-radius:11px;font:700 .74rem/1 var(--font-display);color:var(--ink-on);background:var(--accent)}
+.esc-inv{display:flex;flex-wrap:wrap;gap:10px}
+.esc-item{position:relative;width:80px;min-height:82px;padding:8px 4px 6px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+  font-size:.68rem;line-height:1.1;background:radial-gradient(circle at 50% 30%,var(--item-1),var(--item-2));border:1px solid var(--acc-line);border-radius:16px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 4px 10px rgba(2,4,16,.35);transition:transform .2s var(--ease),box-shadow .2s}
 .esc-item svg{width:40px;height:40px;filter:drop-shadow(0 2px 2px rgba(0,0,0,.6))}
-.esc-flyitem{width:100%;height:100%;display:grid;place-items:center;background:radial-gradient(circle,#4b3520,#1d130b);border-radius:12px;border:2px solid var(--accent)}
+.esc-item.esc-picked{transform:translateY(-6px) scale(1.05);box-shadow:0 0 0 2px var(--glow),0 12px 22px rgba(2,4,16,.55)}
+.esc-item.esc-got::after,.esc-entry.esc-got::after{content:'';position:absolute;inset:-4px;border-radius:19px;pointer-events:none;box-shadow:0 0 0 2px var(--glow),0 0 22px 6px var(--acc-glow);
+  opacity:0;animation:escFlash 1.8s ease-out both;animation-delay:calc(.8s - var(--ago,0ms))}
+.esc-item.esc-got svg{animation:escPop .7s var(--spring) both;animation-delay:calc(.8s - var(--ago,0ms))}
+.esc-entry.esc-got::after{inset:-1px;border-radius:inherit;animation-delay:calc(.1s - var(--ago,0ms))}
+.esc-flyitem{width:100%;height:100%;display:grid;place-items:center;background:radial-gradient(circle at 50% 35%,#2f3f80,#111a3e);border-radius:14px;border:2px solid #ffe3a3;box-shadow:0 0 18px rgba(255,214,120,.55)}
+:root:has(.esc-signal) .esc-flyitem{border-color:#9ff6ff;box-shadow:0 0 18px rgba(110,230,240,.55)}
 .esc-flyitem svg{width:80%;height:80%}
-.esc-note,.esc-entry{display:block;width:100%;text-align:left;margin-top:8px;font-weight:600;font-size:.82rem;line-height:1.35;padding:8px 12px}
-.esc-note b,.esc-entry b{font-weight:800}
-.esc-note span,.esc-entry span{display:block;font-weight:600;opacity:.85}
-.esc-note.mine{box-shadow:inset 0 0 0 2px var(--accent),0 3px 0 #1f1208}
-.esc-other{display:flex;gap:8px;align-items:center;margin-top:8px;font-size:.8rem;color:var(--muted)}
-.esc-journal h3{margin:0 0 4px;color:var(--ink)}
-.esc-journal .esc-entry{color:var(--ink);text-shadow:none;background:rgba(255,255,255,.35);border:1px solid rgba(80,50,20,.3);box-shadow:none;min-height:40px}
-.esc-journal .esc-entry i{font-weight:600;opacity:.7;font-size:.75rem}
-.esc-hints{margin:8px 0 0;padding-left:20px;font-size:.86rem;line-height:1.45}
-.esc-hints li{margin-bottom:6px}
-.esc-person{display:flex;gap:8px;align-items:center;margin-top:8px;font-size:.88rem}
-.esc-person small{color:var(--muted)}
+
+/* side column: navy glass with the game's accent */
+.esc-root .side>.panel{padding:14px 16px;border-color:var(--acc-line-2);
+  background:radial-gradient(130% 70% at 50% -10%,var(--acc-soft),transparent 60%),linear-gradient(180deg,var(--glass-1),var(--glass-2))}
+.esc-root .side>.drawer{padding:0}
+.esc-root .drawer>summary{min-height:52px;padding:10px 14px;gap:10px}
+.esc-root .drawer>summary>.ic:first-child{color:var(--accent)}
+.esc-root .drawer>summary>span:not(.note){flex:none}
+.esc-root .drawer>summary .note{min-width:0;flex:0 1 auto;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.esc-root .drawer-body{padding:0 14px 14px;gap:8px}
+.esc-note,.esc-entry{position:relative;display:block;width:100%;min-height:44px;text-align:left;margin-top:8px;padding:9px 12px;font-weight:600;font-size:.84rem;line-height:1.4;
+  border-radius:12px;background:rgba(8,12,34,.5);border:1px solid var(--line);box-shadow:none}
+.esc-note b,.esc-entry b{font-weight:800;color:var(--text)}
+.esc-note span,.esc-entry span{display:block;font-weight:600;color:#c3cbee;margin-top:2px}
+.esc-note.mine{border-color:var(--acc-line);box-shadow:inset 0 0 0 1px var(--acc-soft),0 0 18px var(--acc-soft)}
+.esc-note.mine b::before{content:'';display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;vertical-align:1px;background:var(--accent-2);box-shadow:0 0 8px var(--accent-2)}
+.esc-entry{margin-top:0;border-left:3px solid var(--accent)}
+.esc-entry.esc-shared{border-left-color:var(--accent-2)}
+.esc-entry i{font-style:normal;font-weight:800;font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-left:4px}
+.esc-other{display:flex;gap:9px;align-items:center;margin-top:10px;font-size:.82rem;color:var(--muted)}
+.esc-other b{color:var(--text)}
+.esc-tier{margin-left:4px;font:700 .7rem var(--font-body);color:var(--muted);letter-spacing:.04em}
+.esc-hints{list-style:none;counter-reset:hint;display:grid;gap:8px;margin:10px 0 0;padding:0;font-size:.88rem;line-height:1.45}
+.esc-hints li{counter-increment:hint;position:relative;padding:8px 12px 8px 40px;border-radius:12px;background:rgba(8,12,34,.5);border:1px solid var(--line)}
+.esc-hints li::before{content:counter(hint);position:absolute;left:10px;top:8px;width:21px;height:21px;border-radius:50%;display:grid;place-items:center;
+  font:700 .72rem/1 var(--font-display);color:var(--ink-on);background:var(--accent)}
+.esc-hints li b{color:var(--glow)}
+.esc-newhint{animation:escRise .5s var(--ease) both;animation-delay:calc(0ms - var(--ago,0ms))}
+.esc-people{display:grid;gap:12px}
+.esc-person{display:flex;gap:11px;align-items:center;font-size:.9rem}
+.esc-person .grow{display:flex;flex-wrap:wrap;align-items:center;gap:2px 6px;line-height:1.3}
+.esc-person small{flex-basis:100%;display:flex;align-items:center;gap:4px;color:var(--muted);font-size:.78rem}
+.esc-person small .ic{width:13px;height:13px;color:var(--accent)}
+.esc-log{max-height:160px;padding:6px 12px;border-radius:12px;font-size:.8rem;color:#c3cbee;background:rgba(4,8,26,.45);border:1px solid var(--line)}
+.esc-log div{border-bottom:1px solid rgba(150,172,255,.1)}
+.esc-log div:last-child{border-bottom:0}
+.esc-log div:first-child{color:var(--text)}
+
+/* close-ups */
 .esc-modal{z-index:120}
-.esc-close{max-width:560px;position:relative}
-.esc-close h3{margin:0 44px 10px 0}
-.esc-x{position:absolute;top:10px;right:10px;min-width:40px;min-height:40px}
-.esc-closeart{border-radius:12px;overflow:hidden;box-shadow:0 8px 18px rgba(0,0,0,.5);margin-bottom:10px}
+.esc-modal.esc-still,.esc-modal.esc-still>.modal{animation:none}
+.esc-root .modal.esc-close{max-width:560px;position:relative;border-color:var(--acc-line);
+  background:radial-gradient(120% 45% at 50% 0%,var(--acc-soft),transparent 70%),linear-gradient(180deg,#1a2552,#141d44)}
+.esc-close h3{margin:0 46px 12px 0;color:var(--accent);font-size:1.15rem}
+.esc-close h3 .ic{opacity:.9;flex:none}
+.esc-x{position:absolute;top:10px;right:10px}
+.esc-closeart{position:relative;border-radius:14px;overflow:hidden;box-shadow:0 10px 22px rgba(0,0,0,.5),0 0 0 1px var(--acc-line);margin-bottom:12px}
+.esc-close .esc-closeart{animation:escLift .5s var(--spring) both .04s}
+.esc-still .esc-closeart{animation:none}
+@keyframes escLift{from{opacity:.3;transform:translateY(12px) scale(.96)}}
 .esc-closeart svg{display:block;width:100%;height:auto}
 .esc-text{line-height:1.55;margin:4px 0 12px}
 .esc-text p{margin:.4em 0}
-.esc-paper{display:block;color:var(--ink);background:linear-gradient(170deg,#f6ead0,#e4cf9f);border-radius:8px;padding:12px 14px;font-style:italic;box-shadow:inset 0 0 14px rgba(120,80,30,.35);margin:6px 0}
+.esc-paper{display:block;color:var(--ink);background:linear-gradient(170deg,#f6ead0,#e4cf9f);border-radius:10px;padding:12px 14px;font-style:italic;box-shadow:inset 0 0 14px rgba(120,80,30,.35),0 4px 10px rgba(0,0,0,.25);margin:6px 0}
 .esc-wrist{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.88rem;line-height:1.55;color:#bff7ef;background:linear-gradient(180deg,#06222a,#031216);border:2px solid #2b7c86;border-radius:12px;padding:12px 14px;box-shadow:inset 0 0 22px rgba(60,220,220,.18);margin-bottom:10px}
 .esc-wrist b{color:#ffe39a}
-.esc-dials{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;margin:8px 0 12px}
-.esc-dial{display:flex;flex-direction:column;align-items:center;gap:5px;min-width:56px}
-.esc-dial>span{font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-align:center;max-width:84px;line-height:1.1}
-.esc-dial button{min-width:52px;min-height:40px;padding:0}
-.esc-val{min-width:58px;min-height:52px;padding:4px 8px;display:grid;place-items:center;font-family:var(--font-display);font-size:1.35rem;font-weight:800;color:var(--accent);background:linear-gradient(180deg,#0d0906,#2a1d12);border:2px solid #7a5530;border-radius:10px;box-shadow:inset 0 4px 10px #000,0 1px 0 rgba(255,220,160,.2)}
+.esc-win{display:flex;align-items:center;justify-content:center;gap:10px;margin:2px 0 12px;padding:10px 14px;border-radius:14px;font:600 1.02rem/1.2 var(--font-display);
+  color:var(--text);background:radial-gradient(120% 160% at 50% 0%,rgba(255,255,255,.1),transparent 60%),rgba(8,12,34,.55);border:1px solid var(--win);
+  box-shadow:0 0 20px rgba(0,0,0,.25);animation:escWin .55s var(--spring) both;animation-delay:calc(0ms - var(--ago,0ms))}
+.esc-win .ic{width:26px;height:26px;padding:4px;border-radius:50%;color:var(--ink-on);background:var(--win)}
+@keyframes escWin{from{opacity:0;transform:scale(.85)}}
+.esc-dials{display:flex;justify-content:center;align-items:flex-end;flex-wrap:wrap;gap:8px;margin:8px 0 14px;padding:12px 8px;border-radius:16px;background:rgba(4,8,26,.45);border:1px solid var(--line)}
+.esc-dial{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:56px}
+.esc-dial>span{font-size:.66rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-align:center;max-width:84px;line-height:1.15}
+.esc-dial button{min-width:52px;min-height:40px;padding:0;border-radius:12px}
+.esc-dial button .ic{width:20px;height:20px}
+.esc-val{min-width:58px;min-height:54px;padding:4px 8px;display:grid;place-items:center;font-family:var(--font-display);font-size:1.4rem;font-weight:700;color:var(--accent);
+  background:linear-gradient(180deg,#060a20,#141d48);border:2px solid var(--acc-line);border-radius:12px;box-shadow:inset 0 4px 10px rgba(0,0,0,.7),0 1px 0 rgba(255,255,255,.08)}
 .esc-val svg{width:34px;height:34px;display:block}
 .esc-use{margin:12px 0}
-.esc-use small{display:block;color:var(--muted);margin-bottom:6px;font-size:.72rem;letter-spacing:.1em;text-transform:uppercase}
+.esc-use small{display:block;color:var(--muted);margin-bottom:6px;font-size:.7rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase}
 .esc-use button{display:inline-flex;align-items:center;gap:6px;min-height:40px}
 .esc-use svg{width:22px;height:22px}
-.esc-note-line{padding:10px 12px;border-radius:10px;background:rgba(0,0,0,.3);border-left:3px solid var(--accent);font-size:.9rem}
+.esc-note-line{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:12px;background:rgba(4,8,26,.45);border:1px solid var(--line);border-left:3px solid var(--accent-2);font-size:.9rem}
+.esc-note-line .ic{color:var(--accent-2);margin-top:1px}
 .esc-close>button+button{margin-top:8px}
-.esc-itembig{display:grid;place-items:center;padding:16px;background:radial-gradient(circle,#4b3520,#140d07);border-radius:14px}
+.esc-itembig{display:grid;place-items:center;padding:18px;background:radial-gradient(circle at 50% 40%,var(--item-1),var(--item-2));border:1px solid var(--acc-line);border-radius:18px;box-shadow:inset 0 0 30px rgba(0,0,0,.35)}
 .esc-itembig svg{width:120px;height:120px;filter:drop-shadow(0 6px 8px rgba(0,0,0,.7))}
-.esc-ending{display:grid;grid-template-columns:minmax(0,260px) 1fr;gap:18px;align-items:center;padding:18px;margin-bottom:14px;border-radius:18px;border:2px solid var(--accent);background:linear-gradient(135deg,rgba(0,0,0,.55),rgba(0,0,0,.25));box-shadow:0 14px 30px rgba(0,0,0,.5)}
-.esc-ending .winner-banner{text-align:left;padding:0 0 6px}
+
+/* the ending */
+.esc-ending{display:grid;grid-template-columns:minmax(0,280px) 1fr;gap:20px;align-items:center;padding:18px;margin-bottom:14px;border-radius:22px;border:1px solid var(--acc-line);
+  background:radial-gradient(90% 120% at 0% 0%,var(--acc-soft),transparent 60%),linear-gradient(180deg,var(--glass-1),var(--glass-2));box-shadow:var(--shadow-lg),0 0 40px var(--acc-soft)}
+.esc-ending .winner-banner{display:flex;align-items:center;gap:10px;text-align:left;padding:0 0 6px}
+.esc-ending .winner-banner .ic{width:1em;height:1em}
 .esc-ending p{line-height:1.6;margin:.5em 0}
 .esc-endstats{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
-.esc-endstats span{padding:6px 12px;border-radius:20px;background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.15);font-weight:800}
+.esc-endstats span{display:inline-flex;align-items:center;gap:7px;padding:6px 13px;border-radius:999px;background:rgba(4,8,26,.5);border:1px solid var(--acc-line-2);font-weight:800}
+.esc-endstats .ic{width:17px;height:17px;color:var(--accent)}
+
+@media (max-width:900px){
+  .esc-felt{padding:8px}
+}
 @media (max-width:640px){
   .esc-ending{grid-template-columns:1fr;padding:14px}
-  .esc-tab{font-size:.7rem;padding:5px 3px}
+  .esc-tab{font-size:.72rem;padding:5px 3px;min-height:50px;border-radius:12px}
   .esc-goal{min-width:100%}
-  .esc-stat{flex:1}
+  .esc-stat{flex:1;padding:6px 10px}
+  .esc-scene{border-radius:12px}
+  .esc-folk{left:6px;bottom:6px;gap:4px}
+  .esc-folk .esc-face{width:22px;height:22px}
   .esc-val{min-width:50px;font-size:1.15rem}
   .esc-dial{min-width:50px}
   .esc-dial button{min-width:46px}
+  .esc-item{width:74px;min-height:78px}
 }
 @media (max-width:420px){
-  .esc-dials{gap:5px}
+  .esc-dials{gap:5px;padding:10px 4px}
   .esc-dial,.esc-dial button{min-width:44px}
   .esc-val{min-width:44px;padding:4px 3px;font-size:1rem}
   .esc-dial>span{font-size:.6rem;max-width:52px}
+  .esc-steps{display:none}
 }
 `;

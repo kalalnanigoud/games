@@ -3,6 +3,8 @@
 import { esc, rand, shuffle, log, addFx, PLAYER_COLORS } from '../js/util.js';
 import { injectCSS } from '../js/fx.js';
 import { sound } from '../js/sound.js';
+import { icon as uiIcon } from '../js/icons.js';
+import { portrait } from '../js/avatar.js';
 
 /* ============================================================
    Rules data
@@ -854,79 +856,135 @@ const CRACK = `<div class="bluff-lost"><svg viewBox="0 0 200 280" preserveAspect
 </g></svg><span class="bluff-lost-x">LOST</span></div>`;
 
 /* ============================================================
-   Cover art (16:10)
+   Cover art: a candlelit throne room. The Duchess whispers behind her fan, the Chancellor
+   flashes a role card with a smirk, and a masked Shadow points at him ("Liar!") while he
+   hides a dagger behind his back. Self-contained ids (cwc-…): covers appear several times.
    ============================================================ */
-const COVER = `<svg viewBox="0 0 320 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Masked courtiers around a candle">
-<defs>
-<linearGradient id="bwc-sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#12060f"/><stop offset="1" stop-color="#2e0c1b"/></linearGradient>
-<linearGradient id="bwc-win" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5272b8"/><stop offset=".6" stop-color="#1e2c5e"/><stop offset="1" stop-color="#0e1430"/></linearGradient>
-<radialGradient id="bwc-glow" cx="160" cy="96" r="170" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ffd27a" stop-opacity=".62"/><stop offset=".22" stop-color="#ff9e40" stop-opacity=".26"/><stop offset=".7" stop-color="#ff7a20" stop-opacity="0"/></radialGradient>
-<radialGradient id="bwc-felt" cx="160" cy="150" r="200" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#a02c40"/><stop offset=".55" stop-color="#5a1020"/><stop offset="1" stop-color="#26040c"/></radialGradient>
-<linearGradient id="bwc-gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff2c0"/><stop offset=".45" stop-color="#e2ac3e"/><stop offset="1" stop-color="#7a4c0e"/></linearGradient>
-<radialGradient id="bwc-flame" cx=".5" cy=".72" r=".7"><stop offset="0" stop-color="#fffbe6"/><stop offset=".35" stop-color="#ffd760"/><stop offset=".75" stop-color="#ff8a20"/><stop offset="1" stop-color="#ff5a10" stop-opacity="0"/></radialGradient>
-<radialGradient id="bwc-halo" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#ffe7a0" stop-opacity=".7"/><stop offset="1" stop-color="#ff9a30" stop-opacity="0"/></radialGradient>
-<linearGradient id="bwc-wax" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#cdb894"/><stop offset=".4" stop-color="#fff6e2"/><stop offset="1" stop-color="#a88e68"/></linearGradient>
-<linearGradient id="bwc-curt" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2e040c"/><stop offset=".3" stop-color="#7a1424"/><stop offset=".55" stop-color="#420914"/><stop offset=".8" stop-color="#8a1a2c"/><stop offset="1" stop-color="#2e040c"/></linearGradient>
-<pattern id="bwc-lat" width="6" height="6" patternUnits="userSpaceOnUse"><path d="M0 3L3 0L6 3L3 6Z" fill="none" stroke="#e9bf55" stroke-opacity=".5" stroke-width=".5"/></pattern>
-<radialGradient id="bwc-mask" cx=".4" cy=".3" r=".8"><stop offset="0" stop-color="#fffdf6"/><stop offset=".7" stop-color="#eadcc0"/><stop offset="1" stop-color="#b8a47e"/></radialGradient>
-<radialGradient id="bwc-vig" cx=".5" cy=".45" r=".75"><stop offset=".6" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".6"/></radialGradient>
-<linearGradient id="bwc-purple" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a476e0"/><stop offset="1" stop-color="#3a1a66"/></linearGradient>
-</defs>
-<rect width="320" height="200" fill="url(#bwc-sky)"/>
-<path d="M112 128V60A48 44 0 0 1 208 60V128Z" fill="url(#bwc-win)" opacity=".9"/>
-<circle cx="186" cy="44" r="9" fill="#f4f0dc" opacity=".9"/>
-<path d="M160 16V128M112 74H208M118 44Q160 32 202 44M136 20V128M184 20V128" stroke="#12060f" stroke-width="2.4" fill="none"/>
-<path d="M112 128V60A48 44 0 0 1 208 60V128" fill="none" stroke="#5a3a1a" stroke-width="4"/>
-<path d="M40 126V74A20 20 0 0 1 80 74V126Z" fill="url(#bwc-win)" opacity=".45"/><path d="M240 126V74A20 20 0 0 1 280 74V126Z" fill="url(#bwc-win)" opacity=".45"/>
-<g fill="#22101a"><rect x="88" y="0" width="16" height="150"/><rect x="216" y="0" width="16" height="150"/></g>
-<g fill="#3a1c26"><rect x="84" y="8" width="24" height="7"/><rect x="212" y="8" width="24" height="7"/></g>
-<path d="M0 0H36C30 40 42 92 22 152H0Z" fill="url(#bwc-curt)"/><path d="M320 0H284C290 40 278 92 298 152H320Z" fill="url(#bwc-curt)"/>
-<path d="M0 0H320V10C260 22 60 22 0 10Z" fill="url(#bwc-curt)"/>
-<rect width="320" height="200" fill="url(#bwc-glow)"/>
-<g>
-<path d="M6 200C8 150 32 128 64 124C96 128 116 150 120 200Z" fill="#14060d"/>
-<path d="M98 140C110 152 116 172 118 200" fill="none" stroke="#ff9a40" stroke-width="2" opacity=".45"/>
-<path d="M56 128V108H74V128Z" fill="#1c0a12"/>
-<path d="M44 86C34 52 48 30 58 16C60 38 66 56 72 76Z" fill="#3a0a22"/><path d="M58 78C62 44 82 26 98 22C86 38 80 58 76 82Z" fill="#5a1030"/><path d="M60 76C60 50 68 36 78 28C76 46 74 60 72 78Z" fill="#c9a14a" opacity=".55"/>
-<ellipse cx="65" cy="94" rx="19" ry="23" fill="#1e0c14"/>
-<path d="M79 80C88 90 88 106 79 116" stroke="#ffb860" stroke-width="2.2" fill="none" opacity=".75"/>
-<path d="M45 90C51 80 61 82 65 88C69 82 79 80 86 90C84 101 72 104 65 97C58 104 47 101 45 90Z" fill="url(#bwc-mask)" stroke="url(#bwc-gold)" stroke-width="1.3"/>
-<path d="M51 91Q56 86 61 91Q56 94 51 91ZM69 91Q74 86 79 91Q74 94 69 91Z" fill="#14060d"/>
-<path d="M86 90C92 86 98 88 100 92" fill="none" stroke="url(#bwc-gold)" stroke-width="1.4"/>
-<path d="M44 132C54 142 76 142 86 132" fill="none" stroke="url(#bwc-gold)" stroke-width="2.4" stroke-dasharray="1 3" stroke-linecap="round"/>
-</g>
-<g>
-<path d="M200 200C204 152 228 130 258 126C290 130 312 152 316 200Z" fill="#0c0810"/>
-<path d="M214 150C206 164 202 182 202 200" fill="none" stroke="#ff9a40" stroke-width="2" opacity=".4"/>
-<path d="M248 128V108H266V128Z" fill="#160c14"/>
-<ellipse cx="257" cy="94" rx="19" ry="23" fill="#1a0e16"/>
-<path d="M243 80C235 90 235 106 243 116" stroke="#ffb860" stroke-width="2.2" fill="none" opacity=".75"/>
-<path d="M232 76C232 54 282 54 282 76Z" fill="#0e0a12"/>
-<path d="M214 76C226 60 244 70 257 66C270 70 288 60 300 76C288 86 272 82 257 88C242 82 226 86 214 76Z" fill="#160f1a" stroke="url(#bwc-gold)" stroke-width="1.6"/>
-<path d="M237 92C243 82 253 84 257 90C261 84 271 82 277 92C275 102 264 105 257 98C250 105 239 102 237 92Z" fill="#141016" stroke="url(#bwc-gold)" stroke-width="1.6"/>
-<path d="M243 93Q248 88 253 93Q248 96 243 93ZM261 93Q266 88 271 93Q266 96 261 93Z" fill="#ffcf70" opacity=".85"/>
-<path d="M240 110C246 120 268 120 274 110L276 124C266 132 248 132 238 124Z" fill="#0a070c"/>
-</g>
-<path d="M0 148C70 138 250 138 320 148V200H0Z" fill="url(#bwc-felt)"/>
-<path d="M0 148C70 138 250 138 320 148" fill="none" stroke="url(#bwc-gold)" stroke-width="2"/>
-<circle cx="160" cy="90" r="40" fill="url(#bwc-halo)"/>
-<ellipse cx="160" cy="151" rx="24" ry="5" fill="#000" opacity=".45"/>
-<path d="M140 150C140 143 180 143 180 150C180 155 140 155 140 150Z" fill="url(#bwc-gold)"/>
-<path d="M150 146C150 142 170 142 170 146" fill="none" stroke="#7a4c0e" stroke-width="1"/>
-<rect x="154" y="102" width="12" height="44" fill="url(#bwc-wax)"/>
-<path d="M154 104C152 112 156 115 155 124H158V104Z" fill="#f3e8cc"/><path d="M165 104C167 110 164 112 166 118H163V104Z" fill="#e8dcc0"/>
-<ellipse cx="160" cy="102" rx="6" ry="2" fill="#fff6e2"/>
-<path d="M160 102V96" stroke="#2a1a0a" stroke-width="1.2"/>
-<circle cx="160" cy="88" r="16" fill="url(#bwc-flame)" opacity=".55"/>
-<path d="M160 70C167 81 168 90 160 98C152 90 153 81 160 70Z" fill="url(#bwc-flame)"/>
-<path d="M160 82C162.6 87 162.6 92 160 96C157.4 92 157.4 87 160 82Z" fill="#fffef0"/>
-<g transform="translate(92 168) rotate(-22)"><rect x="-15" y="-21" width="30" height="42" rx="3" fill="#5a0f1c" stroke="url(#bwc-gold)" stroke-width="1.6"/><rect x="-12" y="-18" width="24" height="36" fill="url(#bwc-lat)"/><circle r="6.5" fill="#a3121f" stroke="#4a0610"/><circle r="4" fill="none" stroke="#5a0610"/></g>
-<g transform="translate(118 170) rotate(-6)"><rect x="-15" y="-21" width="30" height="42" rx="3" fill="url(#bwc-purple)" stroke="url(#bwc-gold)" stroke-width="1.6"/><path d="M-9 2L-10-12L-4.5-6L0-15L4.5-6L10-12L9 2Z" fill="url(#bwc-gold)"/><rect x="-14" y="8" width="28" height="7" fill="#5a2f94" stroke="url(#bwc-gold)" stroke-width=".8"/></g>
-<g transform="translate(206 172) rotate(16)"><rect x="-15" y="-21" width="30" height="42" rx="3" fill="#5a0f1c" stroke="url(#bwc-gold)" stroke-width="1.6"/><rect x="-12" y="-18" width="24" height="36" fill="url(#bwc-lat)"/><circle r="6.5" fill="#a3121f" stroke="#4a0610"/><circle r="4" fill="none" stroke="#5a0610"/></g>
-<g transform="translate(232 178) rotate(-30)"><path d="M0-26L2.5-20V6H-2.5V-20Z" fill="#d8dde4" stroke="#3a3e46" stroke-width=".6"/><rect x="-8" y="6" width="16" height="3" rx="1.4" fill="url(#bwc-gold)"/><rect x="-1.8" y="9" width="3.6" height="9" fill="#5a1220"/><circle cy="20" r="2.4" fill="url(#bwc-gold)"/></g>
-<g fill="url(#bwc-gold)" stroke="#6a420c" stroke-width=".7"><ellipse cx="146" cy="186" rx="8" ry="4"/><ellipse cx="146" cy="183" rx="8" ry="4"/><ellipse cx="146" cy="180" rx="8" ry="4"/><ellipse cx="164" cy="190" rx="8" ry="4"/><ellipse cx="180" cy="184" rx="8" ry="4"/><ellipse cx="180" cy="181" rx="8" ry="4"/></g>
-<rect width="320" height="200" fill="url(#bwc-vig)"/>
-</svg>`;
+function coverSVG() {
+  const stop = ([o, c, a = 1]) => `<stop offset="${o}" stop-color="${c}"${a < 1 ? ` stop-opacity="${a}"` : ''}/>`;
+  const lg = (id, stops, x2 = 0, y2 = 1) => `<linearGradient id="${id}" x1="0" y1="0" x2="${x2}" y2="${y2}">${stops.map(stop).join('')}</linearGradient>`;
+  const rg = (id, stops, cx = 0.5, cy = 0.5, r = 0.5) => `<radialGradient id="${id}" cx="${cx}" cy="${cy}" r="${r}">${stops.map(stop).join('')}</radialGradient>`;
+  const glow = (x, y, r, col, o) => `<circle cx="${x}" cy="${y}" r="${r}" fill="${col}" opacity="${o}" filter="url(#cwc-blur)"/>`;
+  const spark = (x, y, s, col = '#fff3c8') => `<path d="M${x} ${f1(y - s)}L${f1(x + s * 0.26)} ${f1(y - s * 0.26)}L${f1(x + s)} ${y}L${f1(x + s * 0.26)} ${f1(y + s * 0.26)}L${x} ${f1(y + s)}L${f1(x - s * 0.26)} ${f1(y + s * 0.26)}L${f1(x - s)} ${y}L${f1(x - s * 0.26)} ${f1(y - s * 0.26)}Z" fill="${col}"/>`;
+  const edgeY = (x) => 148 - 20 * (x / 320) * (1 - x / 320); // the table's front edge
+  const coin = (x, y) => `<ellipse cx="${x}" cy="${y + 1.8}" rx="7" ry="2.8" fill="#7a4c0a"/><ellipse cx="${x}" cy="${y}" rx="7" ry="2.8" fill="url(#cwc-gold)" stroke="#9a6410" stroke-width=".5"/>`;
+  const stack = (x, y, n) => Array.from({ length: n }, (_, i) => coin(x + (i % 2 ? 0.6 : -0.4), y - i * 2.6)).join('');
+  const sconce = (x) => `${glow(x, 50, 12, '#ffc860', 0.6)}<path d="M${x - 6} 66h12l-3 4h-6z" fill="url(#cwc-gold)"/><rect x="${x - 2}" y="55" width="4" height="11" rx="1" fill="#f3e6c8"/>` +
+    `<path d="M${x} 46c2.6 3.4 2.8 6 0 8.4c-2.8-2.4-2.6-5 0-8.4z" fill="url(#cwc-flame)"/>`;
+  // the Duchess's pearls follow her neckline
+  const pearls = Array.from({ length: 6 }, (_, i) => {
+    const t = 0.15 + i * 0.14, x = (1 - t) ** 2 * 51 + 2 * t * (1 - t) * 66 + t * t * 81, y = (1 - t) ** 2 * 122 + 2 * t * (1 - t) * 133 + t * t * 122;
+    return `<circle cx="${f1(x)}" cy="${f1(y)}" r="1.5" fill="#fffaf0"/>`;
+  }).join('');
+  // her fan: a half-open sector pivoting in her hand, ribs fanning out
+  const fanR = 17, fx = 70, fy = 115, at = (deg, r = fanR) => [f1(fx + r * Math.cos((deg * Math.PI) / 180)), f1(fy - r * Math.sin((deg * Math.PI) / 180))];
+  const [ax, ay] = at(20), [bx, by] = at(160);
+  const ribs = Array.from({ length: 8 }, (_, i) => { const [x, y] = at(20 + i * 20); return `M${fx} ${fy}L${x} ${y}`; }).join('');
+  const fringe = Array.from({ length: 20 }, (_, i) => { const x = 8 + i * 16, y = f1(edgeY(x) + 1.5); return `<path d="M${x - 3} ${y}l3 6l3-6z" fill="#f0bf56" opacity=".85"/>`; }).join('');
+  const stars = [[130, 48], [150, 34], [172, 60], [194, 74], [128, 92], [146, 70], [188, 30]].map(([x, y], i) => `<circle cx="${x}" cy="${y}" r="${i % 3 ? 0.8 : 1.1}" fill="#fff" opacity=".8"/>`).join('');
+  const scallops = Array.from({ length: 8 }, (_, i) => `Q${300 - i * 40} 27 ${280 - i * 40} 13`).join('');
+  return `<svg viewBox="0 0 320 200" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice" role="img" aria-label="A masked courtier points at a smirking Chancellor while a Duchess whispers behind her fan"><defs>` +
+    lg('cwc-wall', [[0, '#170d33'], [0.55, '#2a1038'], [1, '#3e0f24']]) +
+    lg('cwc-win', [[0, '#4d68c0'], [0.6, '#1f2c6a'], [1, '#101739']]) +
+    lg('cwc-curt', [[0, '#3a0610'], [0.3, '#8f1a2e'], [0.55, '#4e0b18'], [0.8, '#a2223a'], [1, '#3a0610']], 1, 0) +
+    lg('cwc-val', [[0, '#a3223a'], [1, '#560b1a']]) +
+    lg('cwc-gold', [[0, '#fff2c0'], [0.45, '#efbe52'], [1, '#a8741d']], 1, 1) +
+    lg('cwc-wax', [[0, '#d8c6a2'], [0.4, '#fff8e8'], [1, '#b49a72']], 1, 0) +
+    lg('cwc-gown', [[0, '#ff5d72'], [1, '#9c1030']]) +
+    lg('cwc-robe', [[0, '#a476ea'], [1, '#3a1a70']]) +
+    lg('cwc-cloak', [[0, '#3c4260'], [1, '#0e1020']]) +
+    lg('cwc-hair', [[0, '#ffffff'], [1, '#d4cbe8']]) +
+    lg('cwc-fan', [[0, '#fff0f5'], [1, '#f59ab8']]) +
+    lg('cwc-steel', [[0, '#8a93a2'], [0.45, '#f6f8fc'], [1, '#5d6574']], 1, 0) +
+    lg('cwc-card', [[0, '#9d6ee6'], [1, '#3e1b78']]) +
+    lg('cwc-back', [[0, '#8a1f34'], [1, '#3e0714']]) +
+    lg('cwc-mask', [[0, '#fffdf6'], [1, '#d8cbb0']]) +
+    rg('cwc-glow', [[0, '#ffd27a', 0.55], [0.3, '#ff9e40', 0.2], [0.75, '#ff7a20', 0]], 0.5, 0.62, 0.62) +
+    rg('cwc-velvet', [[0, '#b3304b'], [0.55, '#62102a'], [1, '#2a0612']], 0.5, 0.1, 0.85) +
+    rg('cwc-flame', [[0, '#fffbe6'], [0.35, '#ffd760'], [0.75, '#ff8a20'], [1, '#ff5a10', 0]], 0.5, 0.72, 0.7) +
+    rg('cwc-halo', [[0, '#ffe7a0', 0.75], [1, '#ff9a30', 0]]) +
+    rg('cwc-skin', [[0, '#fbe0c8'], [1, '#e0a983']], 0.4, 0.35, 0.75) +
+    rg('cwc-skin2', [[0, '#f0c39c'], [1, '#c08158']], 0.4, 0.35, 0.75) +
+    rg('cwc-vig', [[0.6, '#000', 0], [1, '#000', 0.55]], 0.5, 0.45, 0.75) +
+    `<filter id="cwc-blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="5"/></filter></defs>` +
+    // the hall: night window with moon and stars, pilasters with sconces, crimson drapes
+    `<rect width="320" height="200" fill="url(#cwc-wall)"/>` +
+    `<path d="M118 120V60A42 40 0 0 1 202 60V120Z" fill="url(#cwc-win)"/>${stars}<circle cx="184" cy="46" r="7.5" fill="#f6f1dc"/><circle cx="187" cy="44" r="6.5" fill="#2a3a80" opacity=".45"/>` +
+    `<path d="M160 20V120M118 78H202M139 26V120M181 26V120" stroke="#170d33" stroke-width="2.2" fill="none"/>` +
+    `<path d="M118 120V60A42 40 0 0 1 202 60V120" fill="none" stroke="#e8c46a" stroke-width="2.4" opacity=".55"/>` +
+    `<rect x="94" y="0" width="14" height="150" fill="#251238"/><rect x="212" y="0" width="14" height="150" fill="#251238"/>` +
+    `<path d="M96 0V150M214 0V150" stroke="#ffffff" stroke-opacity=".06" stroke-width="2"/>` +
+    sconce(101) + sconce(219) +
+    `<path d="M0 0H42C35 46 48 96 26 150H0Z" fill="url(#cwc-curt)"/><path d="M320 0H278C285 46 272 96 294 150H320Z" fill="url(#cwc-curt)"/>` +
+    `<path d="M0 92Q20 100 40 90M320 92Q300 100 280 90" fill="none" stroke="url(#cwc-gold)" stroke-width="2.2"/><circle cx="36" cy="92" r="3" fill="url(#cwc-gold)"/><circle cx="284" cy="92" r="3" fill="url(#cwc-gold)"/>` +
+    `<path d="M0 0H320V13${scallops}Z" fill="url(#cwc-val)"/><path d="M320 13${scallops}" fill="none" stroke="url(#cwc-gold)" stroke-width="1.6"/>` +
+    `<rect width="320" height="200" fill="url(#cwc-glow)"/>` +
+    // the Duchess (left): powdered hair, a plume, eyes sliding toward the Chancellor, fan over her lips
+    `<path d="M28 152C28 128 44 116 66 116C88 116 102 128 104 152Z" fill="url(#cwc-gown)"/>` +
+    `<path d="M50 119Q66 133 82 119" fill="none" stroke="#ffe3ec" stroke-width="3" stroke-linecap="round"/>${pearls}` +
+    `<path d="M70 58C74 44 84 38 93 35C87 44 81 52 75 60Z" fill="#ffc9d8"/><path d="M72 57C77 48 84 42 90 38" fill="none" stroke="#ff8fb0" stroke-width=".8"/>` +
+    `<ellipse cx="66" cy="76" rx="18" ry="21" fill="url(#cwc-hair)"/><circle cx="66" cy="56" r="7" fill="url(#cwc-hair)"/>` +
+    `<circle cx="50" cy="94" r="6" fill="#e6e0f2"/><circle cx="82" cy="94" r="6" fill="#e6e0f2"/>` +
+    `<path d="M76 64l7-4v8zM76 64l-6-4v8z" fill="#ff4d6d"/><circle cx="76" cy="64" r="1.8" fill="#c8223e"/>` +
+    `<rect x="61" y="104" width="10" height="14" rx="4" fill="#e9b892"/><circle cx="66" cy="95" r="14" fill="url(#cwc-skin)"/>` +
+    `<path d="M52 90Q55 77 66 79Q77 77 80 90Q74 84 66 85Q58 84 52 90Z" fill="url(#cwc-hair)"/>` +
+    `<path d="M59 88.4q3.5-2.4 7-.4M69 88q3.5-2 7 .4" fill="none" stroke="#7a5a4a" stroke-width="1.1" stroke-linecap="round"/>` +
+    `<ellipse cx="63.3" cy="94.2" rx="1.7" ry="2.1" fill="#2a1c1a"/><ellipse cx="73.3" cy="94.2" rx="1.7" ry="2.1" fill="#2a1c1a"/>` +
+    `<path d="M59.5 92.2q3.4-2.3 6.8 0M69.5 92.2q3.4-2.3 6.8 0" fill="none" stroke="#2a1c1a" stroke-width="1.2" stroke-linecap="round"/>` +
+    `<circle cx="58" cy="99" r="2.8" fill="#ff7f8f" opacity=".38"/><circle cx="77.5" cy="97.5" r=".8" fill="#3a2220"/>` +
+    `<path d="M88 129C84 123 79 119 73 117" fill="none" stroke="#c8223e" stroke-width="6.5" stroke-linecap="round"/>` +
+    `<path d="M${fx} ${fy}L${ax} ${ay}A${fanR} ${fanR} 0 0 0 ${bx} ${by}Z" fill="url(#cwc-fan)"/><path d="${ribs}" stroke="#e0789a" stroke-width=".7" opacity=".75"/>` +
+    `<path d="M${ax} ${ay}A${fanR} ${fanR} 0 0 0 ${bx} ${by}" fill="none" stroke="#fff" stroke-width="1.2" stroke-dasharray="2 1.4" opacity=".8"/><circle cx="${fx}" cy="${fy + 1}" r="3.6" fill="#e9b892"/>` +
+    // her whisper drifts toward the Chancellor's ear
+    `<g fill="none" stroke="#ffe7a8" stroke-width="1.5" stroke-linecap="round"><path d="M91 102q3-4 6 0t6 0" opacity=".9"/><path d="M107 97q3-4 6 0t6 0" opacity=".7"/><path d="M123 92q3-4 6 0t6 0" opacity=".5"/></g>` +
+    `<circle cx="102" cy="94" r="1" fill="#ffe7a8" opacity=".7"/><circle cx="118" cy="88" r=".9" fill="#ffe7a8" opacity=".5"/>` +
+    // the Chancellor (centre): ermine collar, crown, sly lidded eyes, flashing his card
+    `<path d="M124 152C124 128 140 116 160 116C180 116 196 128 196 152Z" fill="url(#cwc-robe)"/><path d="M160 130V152" stroke="#efbe52" stroke-width="1.6" opacity=".6"/>` +
+    `<rect x="154" y="104" width="12" height="14" rx="4" fill="#c98a5e"/>` +
+    `<path d="M137 121Q160 137 183 121Q178 114 160 116Q142 114 137 121Z" fill="#f6f2ea"/><path d="M149 122.5v3M160 126v3M171 122.5v3" stroke="#1d1a24" stroke-width="1.6" stroke-linecap="round"/>` +
+    `<ellipse cx="145.5" cy="97" rx="2.6" ry="4" fill="#d9a074"/><ellipse cx="174.5" cy="97" rx="2.6" ry="4" fill="#d9a074"/><circle cx="160" cy="95" r="15" fill="url(#cwc-skin2)"/>` +
+    `<path d="M146 81L147 70L153 76L160 66L167 76L173 70L174 81Z" fill="url(#cwc-gold)"/><rect x="146" y="80" width="28" height="6" rx="2" fill="url(#cwc-gold)"/>` +
+    `<circle cx="160" cy="83" r="2" fill="#e8304a"/><circle cx="151" cy="83" r="1.4" fill="#4cb8ff"/><circle cx="169" cy="83" r="1.4" fill="#4cb8ff"/>` +
+    `<path d="M150 89.5q4-2.6 8-.6M163 88q4-3 8 .4" fill="none" stroke="#3b2418" stroke-width="1.6" stroke-linecap="round"/>` +
+    `<circle cx="155.6" cy="94" r="1.6" fill="#2a1c1a"/><circle cx="167.6" cy="94" r="1.6" fill="#2a1c1a"/><path d="M151.5 92.6h7M163.5 92.6h7" stroke="#3b2418" stroke-width="1.7" stroke-linecap="round"/>` +
+    `<circle cx="150" cy="99.5" r="3" fill="#ff7f8f" opacity=".3"/><circle cx="170" cy="99.5" r="3" fill="#ff7f8f" opacity=".3"/>` +
+    `<path d="M150 102q5-3.5 10-.5q5-3 10 .5q-5 3.5-10 1.2q-5 2.3-10-1.2z" fill="#3b2418"/><path d="M156 106.4q5 2.6 9-1.4" fill="none" stroke="#7a2e35" stroke-width="1.5" stroke-linecap="round"/>` +
+    `<path d="M155 108.5Q160 120 165 108.5Q160 111 155 108.5Z" fill="#3b2418"/>` +
+    `<path d="M182 124C192 116 196 102 197 88L207 89C207 104 200 120 190 132Z" fill="url(#cwc-robe)"/><path d="M196.5 90L207.5 91" stroke="#f6f2ea" stroke-width="4" stroke-linecap="round"/>` +
+    `<circle cx="204" cy="64" r="27" fill="url(#cwc-halo)"/>` +
+    `<g transform="translate(204 64) rotate(10)"><rect x="-12" y="-17" width="24" height="34" rx="2.6" fill="url(#cwc-card)" stroke="url(#cwc-gold)" stroke-width="1.4"/>` +
+    `<path d="M-8 9V-5A8 7 0 0 1 8-5V9Z" fill="#d7bcff" opacity=".3"/><path d="M-6.5 3L-7-7L-3-3.5L0-9.5L3-3.5L7-7L6.5 3Z" fill="url(#cwc-gold)"/>` +
+    `<rect x="-10" y="9.5" width="20" height="5" rx="1" fill="#3a1a6e" stroke="url(#cwc-gold)" stroke-width=".6"/></g>` +
+    `<circle cx="201.5" cy="85" r="5.6" fill="#d9a074"/><path d="M197.5 82.5q2-3 5.5-2.4" fill="none" stroke="#b07a52" stroke-width="1.2" stroke-linecap="round"/>` +
+    spark(223, 48, 4.5) + spark(187, 44, 3) + spark(225, 78, 2.6) +
+    // the Shadow (right): hooded, masked, eyes aglow, pointing at the card, a dagger hidden behind him
+    `<path d="M226 152C226 126 242 114 264 114C286 114 300 128 302 152Z" fill="url(#cwc-cloak)"/>` +
+    `<g transform="translate(290 138) rotate(-10)"><path d="M0-30L2.8-24V-2H-2.8V-24Z" fill="url(#cwc-steel)" stroke="#3a3e46" stroke-width=".5"/><rect x="-7" y="-2.5" width="14" height="3" rx="1.4" fill="url(#cwc-gold)"/><rect x="-1.6" y=".5" width="3.2" height="7" fill="#5a1220"/></g>` +
+    `<circle cx="290" cy="144" r="4.4" fill="#d6b49a"/>` + spark(286, 108, 3, '#ffffff') +
+    `<path d="M246 106C243 82 252 70 264 70C276 70 285 82 282 106C280 117 272 121 264 121C256 121 248 117 246 106Z" fill="#2b2f47"/>` +
+    `<path d="M249.5 100C248.5 84 255 75 264 75" fill="none" stroke="#7a80a6" stroke-width="1" opacity=".6"/>` +
+    `<ellipse cx="264" cy="99" rx="12" ry="14" fill="#0d0e1a"/>` +
+    `<path d="M252 95C256 89 262 90 264 93C266 90 272 89 276 95C274 101 267 102 264 99C261 102 254 101 252 95Z" fill="url(#cwc-mask)" stroke="#e8c46a" stroke-width=".8"/>` +
+    `<path d="M254.8 95.4q3.7-3.2 7.4 0q-3.7 2.2-7.4 0zM265.8 95.4q3.7-3.2 7.4 0q-3.7 2.2-7.4 0z" fill="#0d0e1a"/>` +
+    glow(257.6, 95, 2.6, '#ffb840', 0.85) + glow(268.6, 95, 2.6, '#ffb840', 0.85) +
+    `<circle cx="257.6" cy="95" r="1.15" fill="#ffe7a8"/><circle cx="268.6" cy="95" r="1.15" fill="#ffe7a8"/>` +
+    `<path d="M259 108.5q5 3 10 0" fill="none" stroke="#c9a0a0" stroke-width="1.2" stroke-linecap="round" opacity=".7"/>` +
+    `<path d="M244 124C236 120 231 112 229 104L221 107C223 117 230 127 240 134Z" fill="url(#cwc-cloak)"/>` +
+    `<circle cx="225" cy="101" r="4.6" fill="#d6b49a"/><path d="M223 98.5L216.5 92" stroke="#d6b49a" stroke-width="3.2" stroke-linecap="round"/>` +
+    `<circle cx="285" cy="70" r="8" fill="#ff4d5e" stroke="#fff" stroke-width="1.2"/><rect x="283.9" y="64.6" width="2.2" height="6.6" rx="1.1" fill="#fff"/><circle cx="285" cy="74.4" r="1.3" fill="#fff"/>` +
+    // the velvet table with gold fringe, cards, coins and a candle in front
+    `<path d="M0 148Q160 138 320 148V200H0Z" fill="url(#cwc-velvet)"/>${fringe}<path d="M0 148Q160 138 320 148" fill="none" stroke="url(#cwc-gold)" stroke-width="2.4"/>` +
+    `<g transform="translate(102 174) rotate(-18)"><rect x="-13" y="-18" width="26" height="36" rx="2.6" fill="url(#cwc-back)" stroke="url(#cwc-gold)" stroke-width="1.2"/><circle r="5" fill="#c8223e" stroke="#5a0610"/></g>` +
+    `<g transform="translate(126 178) rotate(-4)"><rect x="-13" y="-18" width="26" height="36" rx="2.6" fill="url(#cwc-back)" stroke="url(#cwc-gold)" stroke-width="1.2"/><circle r="5" fill="#c8223e" stroke="#5a0610"/></g>` +
+    `<g transform="translate(214 176) rotate(14)"><rect x="-13" y="-18" width="26" height="36" rx="2.6" fill="#b81e3a" stroke="url(#cwc-gold)" stroke-width="1.2"/><path d="M0 6L-9-3A9 9 0 0 1 9-3Z" fill="#ffd1dc"/><path d="M0 6V12" stroke="url(#cwc-gold)" stroke-width="1.6"/></g>` +
+    stack(244, 184, 4) + stack(260, 189, 2) + coin(84, 190) +
+    `<ellipse cx="160" cy="183" rx="21" ry="5" fill="#000" opacity=".35"/><path d="M142 180C142 173 178 173 178 180C178 185 142 185 142 180Z" fill="url(#cwc-gold)"/>` +
+    `<circle cx="160" cy="138" r="30" fill="url(#cwc-halo)"/>` +
+    `<rect x="154" y="150" width="12" height="28" fill="url(#cwc-wax)"/><path d="M154 152C152 160 156 163 155 170H158V152Z" fill="#fff3dc"/><ellipse cx="160" cy="150" rx="6" ry="2" fill="#fff8ea"/>` +
+    `<path d="M160 150V145" stroke="#2a1a0a" stroke-width="1.2"/><path d="M160 123C167 133 168 141 160 148C152 141 153 133 160 123Z" fill="url(#cwc-flame)"/><path d="M160 134C162.4 138 162.4 142 160 145C157.6 142 157.6 138 160 134Z" fill="#fffef0"/>` +
+    `<rect width="320" height="200" fill="url(#cwc-vig)"/></svg>`;
+}
+const COVER = coverSVG();
 
 /* ============================================================
    CSS
@@ -936,30 +994,42 @@ const CROWN_URI = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000
 const INK = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='i'%3E%3CfeTurbulence baseFrequency='.8' numOctaves='2' seed='3'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -2.4 2.05'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23i)'/%3E%3C/svg%3E\")";
 
 const STYLE = `
-.bluff { --bl-gold: #f2c14e; }
+.bluff { --bl-gold: #f2c14e; --glass: linear-gradient(180deg, rgba(26,20,56,.74), rgba(12,9,30,.64)); }
 .bluff .bluff-board { min-width: 0; }
+/* A candlelit court: crimson velvet with a faint damask, warm light pooling around the stage. */
 .bluff-table.felt {
   background:
-    var(--grain) padding-box,
-    radial-gradient(ellipse at 50% 46%, rgba(255,170,110,.16), transparent 58%) padding-box,
-    radial-gradient(ellipse at 50% 45%, #7e1a2d 0%, #561020 46%, #26050e 100%) padding-box,
-    linear-gradient(135deg, #8a5a33, #5a361d 30%, #7a4c2a 55%, #4a2c17 80%, #6d4426) border-box;
-  background-blend-mode: soft-light, normal, normal, normal;
-  padding: 16px 16px 14px;
+    var(--grain),
+    radial-gradient(58% 44% at 50% 46%, rgba(255,176,110,.2), transparent 72%),
+    radial-gradient(125% 95% at 50% 38%, #8c1e35 0%, #60102a 45%, #2e0717 100%);
+  background-blend-mode: soft-light, normal, normal;
+  border: 1px solid rgba(255,196,160,.2);
+  box-shadow: inset 0 1px 0 rgba(255,225,200,.12), inset 0 0 80px rgba(14,0,10,.55), var(--shadow-lg);
+  padding: 18px 16px 14px;
 }
-.bluff-table::before { content: ''; position: absolute; inset: 0; border-radius: 10px; pointer-events: none; opacity: .07; background-image: ${DAMASK}; background-size: 72px 72px; }
-.bluff-table::after { content: ''; position: absolute; inset: 6px; border-radius: 12px; pointer-events: none; border: 1px solid rgba(242,193,78,.3); box-shadow: inset 0 0 0 3px rgba(0,0,0,.18), inset 0 0 60px rgba(0,0,0,.35); }
+.bluff-table::before { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: .07; background-image: ${DAMASK}; background-size: 72px 72px; }
+.bluff-table::after { content: ''; position: absolute; inset: 7px; border-radius: 17px; pointer-events: none; border: 1px solid rgba(255,214,170,.14); }
 .bluff-table > * { position: relative; z-index: 1; }
-.bluff-refbtn { position: absolute !important; z-index: 4 !important; top: 6px; right: 6px; min-height: 40px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-display); font-size: .78rem; }
-.bluff-refbtn .bluff-ic { width: 18px; height: 18px; color: #f2c14e; }
+/* candlelight: three warm pools that flicker slowly (opacity only) */
+.bluff-table > .bluff-glow { position: absolute; z-index: 0; inset: 0; border-radius: inherit; pointer-events: none;
+  background:
+    radial-gradient(40% 28% at 50% 44%, rgba(255,186,110,.2), transparent 72%),
+    radial-gradient(34% 26% at 6% 0%, rgba(255,196,120,.16), transparent 72%),
+    radial-gradient(34% 26% at 94% 0%, rgba(255,196,120,.16), transparent 72%);
+  animation: bluff-candle 5s ease-in-out infinite alternate; }
+@keyframes bluff-candle { 0% { opacity: .68; } 35% { opacity: 1; } 60% { opacity: .82; } 100% { opacity: .96; } }
+.bluff-refbtn { position: absolute !important; z-index: 4 !important; top: 10px; right: 10px; min-height: 40px; padding: 4px 13px 4px 11px; gap: 6px; border-radius: 999px;
+  font-family: var(--font-display); font-weight: 600; font-size: .84rem; color: #fff; background: rgba(14,10,34,.58); border-color: rgba(255,255,255,.2); box-shadow: 0 4px 12px rgba(0,0,0,.35); }
+.bluff-refbtn:hover:not(:disabled) { background: rgba(14,10,34,.85); }
+.bluff-refbtn .ic { width: 18px; height: 18px; color: var(--gold); }
 .bluff-ic { display: block; }
 
 /* ---- cards ---- */
-.bluff-card { position: relative; width: var(--cw, 60px); aspect-ratio: 5 / 7; flex: none; perspective: 900px; }
+.bluff-card { position: relative; width: var(--cw, 60px); aspect-ratio: 5 / 7; flex: none; perspective: 900px; transition: translate .25s var(--ease), scale .25s var(--ease); }
 .bluff-card-in { position: absolute; inset: 0; transform-style: preserve-3d; }
 .bluff-card.down .bluff-card-in { transform: rotateY(180deg); }
 .bluff-face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 7% / 5%; overflow: hidden;
-  box-shadow: 0 calc(var(--cw, 60px) * .05) calc(var(--cw, 60px) * .12) rgba(0,0,0,.55), 0 1px 2px rgba(0,0,0,.6); }
+  box-shadow: 0 calc(var(--cw, 60px) * .05) calc(var(--cw, 60px) * .12) rgba(0,0,0,.55), 0 1px 2px rgba(0,0,0,.6); transition: box-shadow .25s; }
 .bluff-face.back { transform: rotateY(180deg); }
 .bluff-face > svg { width: 100%; height: 100%; display: block; }
 .bluff-card.flipin .bluff-card-in { animation: bluff-flip .85s var(--fd, 0ms) cubic-bezier(.3,.7,.3,1.1) both; }
@@ -967,8 +1037,8 @@ const STYLE = `
 .bluff-lost { position: absolute; inset: 0; pointer-events: none; overflow: hidden; background: radial-gradient(ellipse at 50% 42%, rgba(30,0,4,0), rgba(14,0,2,.42)); }
 .bluff-lost svg { position: absolute; inset: 0; width: 100%; height: 100%; }
 .bluff-lost .ck path { fill: none; stroke-linejoin: round; stroke-linecap: round; }
-.bluff-lost-x { position: absolute; left: -26%; top: 9%; width: 84%; text-align: center; transform: rotate(-38deg); font: 800 calc(var(--cw, 60px) * .1)/1.5 var(--font-display); letter-spacing: .16em; color: #ffe6dc;
-  background: linear-gradient(180deg, #d0303e, #8a0c18); border-top: 1px solid #ff9a9a; border-bottom: 1px solid #3a0408; box-shadow: 0 2px 6px rgba(0,0,0,.6); text-shadow: 0 1px 1px #000; white-space: nowrap; }
+.bluff-lost-x { position: absolute; left: -26%; top: 9%; width: 84%; text-align: center; transform: rotate(-38deg); font: 700 calc(var(--cw, 60px) * .1)/1.5 var(--font-display); letter-spacing: .16em; color: #fff0f2;
+  background: linear-gradient(180deg, #ff5a70, #b3163a); border-top: 1px solid #ffb3c0; border-bottom: 1px solid #4a0618; box-shadow: 0 2px 6px rgba(0,0,0,.6); text-shadow: 0 1px 1px rgba(0,0,0,.6); white-space: nowrap; }
 .bluff-card.mini .bluff-lost-x { display: none; }
 .bluff-card.lost .bluff-face.front > svg { filter: grayscale(.5) brightness(.76) sepia(.25); }
 .bluff-card.lostnew .bluff-face.front > svg { animation: bluff-dim .7s var(--cd, 0ms) both; }
@@ -979,59 +1049,83 @@ const STYLE = `
 @keyframes bluff-fadein { from { opacity: 0; } }
 @keyframes bluff-crack { from { stroke-dashoffset: 420; } to { stroke-dashoffset: 0; } }
 @keyframes bluff-lostx { from { opacity: 0; transform: translate(-40%, -40%) rotate(-38deg); } }
-.bluff-banished { position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%) rotate(-8deg); z-index: 3; font: 800 11px var(--font-display); letter-spacing: .14em; text-transform: uppercase; white-space: nowrap;
-  color: #ffd9cf; padding: 2px 10px; border-radius: 5px; background: linear-gradient(180deg, #5a0c16, #240308); border: 1px solid #c4462e; box-shadow: 0 4px 10px rgba(0,0,0,.6); pointer-events: none; }
+.bluff-banished { position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%) rotate(-8deg); z-index: 3; font: 700 11px var(--font-display); letter-spacing: .14em; text-transform: uppercase; white-space: nowrap;
+  color: #ffe2e7; padding: 3px 10px; border-radius: 8px; background: linear-gradient(180deg, #7a1230, #320616); border: 1px solid rgba(255,107,129,.75); box-shadow: 0 4px 10px rgba(0,0,0,.6); pointer-events: none; }
 .bluff-banished.new { animation: bluff-badge .5s var(--bd, 0ms) cubic-bezier(.3,1.5,.5,1) both; }
 @keyframes bluff-badge { from { opacity: 0; transform: translate(-50%, -50%) rotate(-8deg) scale(2.4); } }
-.bluff-seat.win, .bluff-mine.win { border-color: #f2c14e; box-shadow: 0 0 0 2px #f2c14e, 0 0 34px rgba(242,193,78,.6), inset 0 0 24px rgba(242,193,78,.18); animation: bluff-wing 2s ease-in-out infinite; }
-@keyframes bluff-wing { 50% { box-shadow: 0 0 0 3px #ffe08a, 0 0 46px rgba(255,214,110,.85), inset 0 0 30px rgba(242,193,78,.25); } }
-.bluff-ribbon { position: absolute; left: -6%; right: -6%; bottom: 10%; z-index: 3; text-align: center; font: 800 calc(var(--cw) * .1) var(--font-display); letter-spacing: .1em; padding: 2px 0;
-  color: #3a2405; background: linear-gradient(180deg, #fff0b8, #e2ac3e 60%, #a8741a); box-shadow: 0 3px 8px rgba(0,0,0,.5); border-top: 1px solid #fff6d0; border-bottom: 1px solid #6a420c; pointer-events: none; }
-.bluff-ribbon.red { color: #ffe9e2; background: linear-gradient(180deg, #e8505c, #a0141f 60%, #6a0a12); border-top-color: #ff9a9a; border-bottom-color: #3a0408; text-shadow: 0 1px 1px #000; }
-.bluff-newtag { position: absolute; top: -8px; left: 50%; transform: translateX(-50%); z-index: 3; font: 800 10px var(--font-body); letter-spacing: .08em; text-transform: uppercase; padding: 1px 7px; border-radius: 8px; background: #2f9a5e; color: #eafff0; box-shadow: 0 2px 5px rgba(0,0,0,.5); white-space: nowrap; }
+/* the last courtier standing: a gold rim and a slow breathing halo */
+.bluff-seat.win, .bluff-mine.win { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold), 0 0 28px rgba(255,207,92,.45); }
+.bluff-seat.win::before, .bluff-mine.win::before { content: ''; position: absolute; inset: -3px; border-radius: inherit; pointer-events: none; box-shadow: 0 0 40px 8px rgba(255,214,110,.5); animation: bluff-breathe 2.6s ease-in-out infinite; }
+@keyframes bluff-breathe { 50% { opacity: .3; } }
+.bluff-ribbon { position: absolute; left: -6%; right: -6%; bottom: 10%; z-index: 3; text-align: center; font: 700 calc(var(--cw) * .1) var(--font-display); letter-spacing: .1em; padding: 2px 0;
+  color: #3a2405; background: linear-gradient(180deg, #fff0b8, #ffcf5c 60%, #e0a23a); box-shadow: 0 3px 8px rgba(0,0,0,.5); border-top: 1px solid #fff6d0; border-bottom: 1px solid #9a6a14; pointer-events: none; }
+.bluff-ribbon.red { color: #fff0f2; background: linear-gradient(180deg, #ff6b81, #d0304a 60%, #8f1028); border-top-color: #ffb3c0; border-bottom-color: #4a0618; text-shadow: 0 1px 1px rgba(0,0,0,.6); }
+.bluff-newtag { position: absolute; top: -8px; left: 50%; transform: translateX(-50%); z-index: 3; font: 800 10px var(--font-body); letter-spacing: .08em; text-transform: uppercase; padding: 1px 8px; border-radius: 999px; background: var(--good); color: #05271a; box-shadow: 0 2px 5px rgba(0,0,0,.5); white-space: nowrap; }
+/* cards you can pick: a warm rim; the card you choose lifts off the table; pressing dips it */
 .bluff-card.pick { cursor: pointer; }
-.bluff-card.pick .bluff-face { box-shadow: 0 0 0 2px rgba(255,224,138,.7), 0 0 16px rgba(255,210,110,.55), 0 6px 14px rgba(0,0,0,.5); }
-.bluff-card.pick.glow .bluff-face { animation: bluff-cardglow 1.4s ease-in-out infinite; }
-@keyframes bluff-cardglow { 50% { box-shadow: 0 0 0 3px rgba(255,150,120,.95), 0 0 28px rgba(255,120,90,.85), 0 6px 14px rgba(0,0,0,.5); } }
-.bluff-card.chosen { translate: 0 -12px; }
-.bluff-card.chosen .bluff-face { box-shadow: 0 0 0 3px #ffe08a, 0 0 26px rgba(255,210,110,.95), 0 10px 20px rgba(0,0,0,.55); }
-.bluff-card.doomed { translate: 0 -12px; }
-.bluff-card.doomed .bluff-face { box-shadow: 0 0 0 3px #ff8a7a, 0 0 26px rgba(255,90,70,.9), 0 10px 20px rgba(0,0,0,.55); }
+.bluff-card.pick .bluff-face { box-shadow: 0 0 0 2px rgba(255,224,138,.8), 0 6px 14px rgba(0,0,0,.5); }
+.bluff-card.pick:active { scale: .97; }
+.bluff-card.pick.glow::after { content: ''; position: absolute; inset: -3px; z-index: 2; border-radius: 9% / 6.5%; pointer-events: none;
+  box-shadow: 0 0 0 2px rgba(255,170,140,.9), 0 0 22px 4px rgba(255,120,90,.6); animation: bluff-breathe 2.6s ease-in-out infinite; }
+.bluff-card.chosen, .bluff-card.doomed { translate: 0 -10px; scale: 1.04; }
+.bluff-card.chosen:active, .bluff-card.doomed:active { scale: 1.01; }
+.bluff-card.chosen .bluff-face { box-shadow: 0 0 0 3px #ffe08a, 0 0 22px rgba(255,210,110,.8), 0 16px 24px rgba(0,0,0,.55); }
+.bluff-card.doomed .bluff-face { box-shadow: 0 0 0 3px #ff8a7a, 0 0 22px rgba(255,90,70,.8), 0 16px 24px rgba(0,0,0,.55); }
+.bluff-card.doomed::after { display: none; }
+.bluff-card.tapped.chosen, .bluff-card.tapped.doomed { animation: bluff-lift .32s var(--spring); }
+.bluff-card.tapped.dropped { animation: bluff-drop .28s var(--ease); }
+@keyframes bluff-lift { from { translate: 0 0; scale: .97; } }
+@keyframes bluff-drop { from { translate: 0 -10px; scale: 1.04; } }
 .bluff-card.dropped .bluff-face > svg { filter: saturate(.5) brightness(.58); }
 
-/* ---- seats ---- */
-.bluff-opps { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 12px; padding: 10px 0 0; --scw: 50px; }
-.bluff-seat { position: relative; width: 156px; padding: 12px 8px 8px; border-radius: 14px; display: flex; flex-direction: column; align-items: center; gap: 7px;
-  background: linear-gradient(180deg, rgba(34,8,16,.7), rgba(16,3,8,.5)); border: 1px solid rgba(242,193,78,.24);
-  box-shadow: inset 0 1px 0 rgba(255,220,170,.1), 0 8px 18px rgba(0,0,0,.38); transition: box-shadow .3s, opacity .4s, filter .4s; }
-.bluff-seat.turn { border-color: rgba(242,193,78,.85); box-shadow: 0 0 0 2px rgba(242,193,78,.8), 0 0 26px rgba(242,193,78,.42), inset 0 0 20px rgba(242,193,78,.12); }
-.bluff-seat.out { background: linear-gradient(180deg, rgba(14,4,8,.8), rgba(8,2,4,.62)); border-color: rgba(140,100,80,.22); box-shadow: none; }
+/* ---- seats: glass plaques with the player's colour along the top ---- */
+.bluff-opps { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 12px; padding: 12px 0 0; --scw: 50px; }
+.bluff-seat { position: relative; width: 156px; padding: 13px 8px 8px; border-radius: 16px; display: flex; flex-direction: column; align-items: center; gap: 7px;
+  background: linear-gradient(var(--pc), var(--pc)) top / 100% 3px no-repeat, var(--glass); border: 1px solid rgba(255,255,255,.1);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 8px 18px rgba(0,0,0,.38); transition: box-shadow .3s, opacity .4s, filter .4s, transform .15s var(--ease); }
+.bluff-seat.turn { border-color: rgba(255,207,92,.75); box-shadow: 0 0 0 2px var(--gold), 0 0 24px rgba(255,207,92,.35), 0 8px 18px rgba(0,0,0,.38); }
+.bluff-seat.out { background: rgba(10,8,24,.5); border-color: rgba(255,255,255,.06); box-shadow: none; }
 .bluff-seat.out .bluff-seat-head, .bluff-seat.out .bluff-seat-foot { opacity: .55; }
-.bluff-seat.pickable { cursor: pointer; border-color: #ffb08a; box-shadow: 0 0 0 2px #ff9a6a, 0 0 24px rgba(255,120,80,.75), inset 0 0 20px rgba(255,120,80,.15); }
-.bluff-seat.pickable.pulse-glow { animation: bluff-seatglow 1.4s ease-in-out infinite; }
-@keyframes bluff-seatglow { 50% { box-shadow: 0 0 0 3px #ffb08a, 0 0 34px rgba(255,140,90,.95), inset 0 0 26px rgba(255,140,90,.25); } }
-.bluff-seat.pickable::after { content: 'Tap to target'; position: absolute; top: -10px; left: 50%; transform: translateX(-50%); font: 800 10px var(--font-body); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; padding: 2px 8px; border-radius: 8px; background: #c4462e; color: #fff2ea; box-shadow: 0 2px 6px rgba(0,0,0,.5); }
+.bluff-seat.out .bluff-av .portrait { filter: grayscale(.85) brightness(.75); }
+/* A rival you can target: a soft coral rim plus a slow breathing glow (opacity only). */
+.bluff-seat.pickable { cursor: pointer; border-color: rgba(255,190,160,.9); box-shadow: 0 0 0 2px #ff9f7f, 0 8px 18px rgba(0,0,0,.38); }
+.bluff-seat.pickable::before { content: ''; position: absolute; inset: -2px; border-radius: inherit; pointer-events: none; box-shadow: 0 0 22px 5px rgba(255,130,95,.6); animation: bluff-breathe 2.6s ease-in-out infinite; }
+.bluff-seat.pickable:active { transform: scale(.97); }
+.bluff-seat.pickable::after { content: 'Tap to target'; position: absolute; top: -11px; left: 50%; transform: translateX(-50%); font: 800 10px var(--font-body); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; padding: 2px 9px; border-radius: 999px;
+  background: linear-gradient(135deg, #ff9a76, #e8486a); color: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.5); }
+/* coins just landed in this purse: one warm flash */
+.bluff-seat.gain, .bluff-mine.gain { animation: bluff-gain 1.2s ease-out .75s; }
+@keyframes bluff-gain { 20% { box-shadow: 0 0 0 2px #fff3b0, 0 0 30px 6px rgba(255,214,90,.6); } }
+.bluff-seat.gain .bluff-ccount, .bluff-mine.gain .bluff-ccount { display: inline-block; animation: bluff-pop .5s var(--spring) .85s; }
+@keyframes bluff-pop { 40% { transform: scale(1.4); } }
 .bluff-seat-head { display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; }
-.bluff-av { width: 30px; height: 30px; border-radius: 50%; flex: none; display: grid; place-items: center; font: 800 14px var(--font-display); color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.85);
-  background: radial-gradient(circle at 35% 28%, rgba(255,255,255,.5), transparent 46%), radial-gradient(circle at 50% 120%, rgba(0,0,0,.5), transparent 60%), var(--pc);
-  box-shadow: 0 0 0 2px #e9bf55, 0 0 0 3.5px #4a2c06, 0 3px 7px rgba(0,0,0,.55); }
-.bluff-seat-name { font: 700 13px var(--font-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #f6e6c8; min-width: 0; }
+.bluff-av { position: relative; width: 30px; height: 30px; border-radius: 50%; flex: none; box-shadow: 0 0 0 2px var(--pc, #fff), 0 2px 6px rgba(0,0,0,.45); }
+.bluff-av .portrait { width: 100%; height: 100%; display: block; border-radius: 50%; }
+.bluff-seat-name { font: 600 13.5px var(--font-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); min-width: 0; }
 .bluff-seat-cards { position: relative; display: flex; gap: 6px; justify-content: center; --cw: var(--scw); min-height: calc(var(--scw) * 1.4); }
 .bluff-seat-cards .bluff-card.extra { margin-left: -4px; }
 .bluff-seat-foot { display: flex; align-items: flex-end; justify-content: space-between; width: 100%; gap: 4px; min-height: 26px; }
-.bluff-flag { position: absolute; top: -10px; right: -8px; z-index: 3; min-width: 26px; height: 26px; padding: 0 5px; border-radius: 13px; display: grid; place-items: center; font: 900 14px var(--font-body); box-shadow: 0 2px 6px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.5); }
-.bluff-flag.ok { background: linear-gradient(#c6f6cf, #3f9a55); color: #06240f; }
-.bluff-flag.wait { background: linear-gradient(#ffeeb8, #c98f22); color: #3a2405; }
-.bluff-flag.wait span { display: inline-block; animation: bluff-bob 1.1s ease-in-out infinite; }
-.bluff-flag.bad { background: linear-gradient(#ffc8bf, #c44a36); color: #2c0703; }
-.bluff-flag.win { background: linear-gradient(#fff0b8, #d9a032); color: #3a2405; }
+/* response badges: allowed, deciding, losing a card, exchanging, winner */
+.bluff-flag { position: absolute; top: -11px; right: -9px; z-index: 3; min-width: 28px; height: 28px; padding: 0 6px; border-radius: 14px; display: inline-flex; align-items: center; justify-content: center; gap: 3px;
+  font: 700 15px/1 var(--font-display); border: 2px solid #1a1236; box-shadow: 0 3px 8px rgba(0,0,0,.5); }
+.bluff-flag .ic { width: 15px; height: 15px; stroke-width: 2.6; }
+.bluff-flag.ok { background: var(--good); color: #05271a; }
+.bluff-flag.wait { background: #2b3772; color: #fff; }
+.bluff-flag.wait i { width: 4px; height: 4px; border-radius: 50%; background: #dfe4ff; animation: bluff-dot 1.2s ease-in-out infinite; }
+.bluff-flag.wait i:nth-child(2) { animation-delay: .15s; }
+.bluff-flag.wait i:nth-child(3) { animation-delay: .3s; }
+@keyframes bluff-dot { 0%, 60%, 100% { transform: translateY(0); opacity: .55; } 30% { transform: translateY(-3px); opacity: 1; } }
+.bluff-flag.swap .ic { animation: bluff-spin 2.4s linear infinite; }
+.bluff-flag.bad { background: var(--bad); color: #fff; }
+.bluff-flag.bad b { display: inline-block; animation: bluff-bob 1.1s ease-in-out infinite; }
+.bluff-flag.win { background: linear-gradient(135deg, #fff0b8, var(--gold)); color: #3b2a00; }
 .bluff-flag.bluff-flag-inline { position: static; margin-left: 2px; }
 @keyframes bluff-bob { 50% { transform: translateY(-2px) scale(1.15); } }
-.bluff-says { position: absolute; top: -13px; left: 50%; transform: translateX(-50%); z-index: 2; display: flex; align-items: center; gap: 4px; padding: 2px 9px 2px 3px; border-radius: 20px; white-space: nowrap;
-  font: 800 11px var(--font-display); color: #fff6dc; text-shadow: 0 1px 1px rgba(0,0,0,.7);
-  background: linear-gradient(180deg, rgba(255,255,255,.22), rgba(0,0,0,.25)), var(--rc); border: 1px solid #e9bf55; box-shadow: 0 3px 8px rgba(0,0,0,.5); animation: bluff-says .4s cubic-bezier(.3,1.5,.5,1); }
-.bluff-says .bluff-ic { width: 16px; height: 16px; padding: 2px; border-radius: 50%; background: rgba(0,0,0,.3); }
-.bluff-says.blk { background: linear-gradient(180deg, rgba(255,255,255,.22), rgba(0,0,0,.25)), var(--rc); border-color: #fff; }
+.bluff-says { position: absolute; top: -13px; left: 50%; transform: translateX(-50%); z-index: 2; display: flex; align-items: center; gap: 4px; padding: 2px 10px 2px 3px; border-radius: 20px; white-space: nowrap;
+  font: 600 11.5px var(--font-display); color: #fff; text-shadow: 0 1px 1px rgba(0,0,0,.55);
+  background: linear-gradient(180deg, rgba(255,255,255,.24), rgba(0,0,0,.16)), var(--rc); border: 1.5px solid rgba(255,255,255,.5); box-shadow: 0 4px 10px rgba(0,0,0,.45); animation: bluff-says .4s cubic-bezier(.3,1.5,.5,1); }
+.bluff-says .bluff-ic { width: 16px; height: 16px; padding: 2px; border-radius: 50%; background: rgba(0,0,0,.25); }
+.bluff-says.blk { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.22), 0 4px 10px rgba(0,0,0,.45); }
 @keyframes bluff-says { from { transform: translateX(-50%) scale(.4); opacity: 0; } }
 
 /* ---- coins ---- */
@@ -1043,144 +1137,158 @@ const STYLE = `
 .bluff-stacks { display: flex; gap: 2px; align-items: flex-end; }
 .bluff-stack { position: relative; width: var(--cs); height: calc(var(--cs) * .72 + 4 * var(--co) + 3px); }
 .bluff-stack.empty { width: var(--cs); opacity: .35; }
-.bluff-stack.empty::before { content: ''; position: absolute; left: 0; bottom: 0; width: var(--cs); height: calc(var(--cs) * .72); border-radius: 50%; border: 1.5px dashed rgba(242,193,78,.7); }
+.bluff-stack.empty::before { content: ''; position: absolute; left: 0; bottom: 0; width: var(--cs); height: calc(var(--cs) * .72); border-radius: 50%; border: 1.5px dashed rgba(255,214,140,.7); }
 .bluff-sc { position: absolute; left: 0; width: var(--cs); height: calc(var(--cs) * .72); border-radius: 50%;
   background: radial-gradient(ellipse at 40% 35%, #fff6c8 0 10%, #f5d36a 30%, #d39b2c 70%, #a8741a 100%);
   box-shadow: inset 0 0 0 1px #8a5a12, inset 0 0 0 2.5px rgba(255,240,190,.45), 0 1.5px 0 #b07818, 0 3px 0 #5a3a08, 0 4px 3px rgba(0,0,0,.45); }
 .bluff-sc:nth-child(1) { bottom: 0; } .bluff-sc:nth-child(2) { bottom: var(--co); } .bluff-sc:nth-child(3) { bottom: calc(var(--co) * 2); }
 .bluff-sc:nth-child(4) { bottom: calc(var(--co) * 3); } .bluff-sc:nth-child(5) { bottom: calc(var(--co) * 4); }
-.bluff-ccount { font: 800 16px/1 var(--font-display); color: #ffe39a; text-shadow: 0 1px 0 #000, 0 0 8px rgba(242,193,78,.5); padding-bottom: 1px; }
+.bluff-ccount { font: 700 16px/1 var(--font-display); color: var(--gold); text-shadow: 0 1px 0 rgba(0,0,0,.7), 0 0 8px rgba(255,207,92,.45); padding-bottom: 1px; }
 .bluff-purse.big { --cs: 26px; --co: 4px; gap: 8px; }
 .bluff-purse.big .bluff-ccount { font-size: 24px; }
 .bluff-claims { display: flex; gap: 3px; align-items: center; }
-.bluff-medal { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; color: #fff4d6; flex: none;
-  background: radial-gradient(circle at 35% 28%, rgba(255,255,255,.4), transparent 50%), var(--rc); box-shadow: 0 0 0 1.5px #e9bf55, 0 2px 4px rgba(0,0,0,.5); }
+.bluff-medal { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; color: #fff; flex: none;
+  background: radial-gradient(circle at 35% 28%, rgba(255,255,255,.42), transparent 52%), var(--rc); box-shadow: inset 0 0 0 1px rgba(255,255,255,.35), 0 2px 4px rgba(0,0,0,.45); }
 .bluff-medal .bluff-ic { width: 13px; height: 13px; }
 
 /* ---- centre ---- */
 .bluff-center { display: grid; grid-template-columns: 120px minmax(0, 1fr) 120px; align-items: center; gap: 14px; margin: 18px 0 12px; }
 .bluff-treasury, .bluff-deck { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .bluff-tray { position: relative; width: 108px; height: 70px; border-radius: 50%;
-  background: radial-gradient(ellipse at 50% 38%, #4a0c1a, #1a0408 72%);
-  box-shadow: inset 0 8px 16px rgba(0,0,0,.85), inset 0 -2px 6px rgba(255,180,120,.12), 0 0 0 3px #c9963a, 0 0 0 5px #4a2c06, 0 10px 18px rgba(0,0,0,.55); }
+  background: radial-gradient(ellipse at 50% 38%, #4a0c1e, #1a040c 72%);
+  box-shadow: inset 0 8px 16px rgba(0,0,0,.85), inset 0 -2px 6px rgba(255,180,120,.14), 0 0 0 2px rgba(255,214,150,.5), 0 0 0 5px rgba(14,8,28,.5), 0 10px 18px rgba(0,0,0,.55); }
 .bluff-tray .bluff-coin { position: absolute; width: 24px; height: 24px; }
-.bluff-lbl { font: 700 10.5px var(--font-display); letter-spacing: .12em; text-transform: uppercase; color: rgba(246,230,200,.78); text-align: center; text-shadow: 0 1px 2px #000; }
+.bluff-lbl { font: 600 10.5px var(--font-display); letter-spacing: .12em; text-transform: uppercase; color: rgba(255,236,226,.75); text-align: center; text-shadow: 0 1px 2px rgba(0,0,0,.8); }
 .bluff-pile { position: relative; width: var(--pw); height: calc(var(--pw) * 1.4 + 10px); --pw: 56px; }
 .bluff-pile .bluff-card { position: absolute; left: 0; --cw: var(--pw); }
 .bluff-stage { display: flex; flex-direction: column; align-items: center; gap: 9px; min-height: 112px; justify-content: center; min-width: 0; }
-.bluff-plate { display: flex; align-items: center; gap: 10px; padding: 8px 14px 8px 8px; border-radius: 14px; max-width: 100%; flex-wrap: wrap; justify-content: center;
-  background: linear-gradient(180deg, rgba(24,6,12,.82), rgba(10,2,5,.66)); border: 1px solid rgba(242,193,78,.45);
-  box-shadow: inset 0 1px 0 rgba(255,220,170,.16), 0 10px 22px rgba(0,0,0,.42); }
+.bluff-plate { display: flex; align-items: center; gap: 10px; padding: 8px 14px 8px 8px; border-radius: 16px; max-width: 100%; flex-wrap: wrap; justify-content: center;
+  background: var(--glass); border: 1px solid rgba(255,255,255,.12); box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 10px 22px rgba(0,0,0,.42); }
 .bluff-plate .bluff-card { --cw: 44px; }
 .bluff-pl-row { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .bluff-pl-txt { min-width: 0; }
-.bluff-pl-txt b { display: block; font: 800 15px/1.2 var(--font-display); color: #f6e6c8; }
+.bluff-pl-txt b { display: block; font: 600 15px/1.2 var(--font-display); color: var(--text); }
 .bluff-pl-txt b em { font-style: normal; }
 .bluff-pl-txt small { display: block; color: var(--muted); font-size: 12px; font-weight: 700; line-height: 1.3; }
-.bluff-pl-ic { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; flex: none; color: #fff6dc;
-  background: radial-gradient(circle at 35% 28%, rgba(255,255,255,.4), transparent 50%), var(--rc, #8a5a20); box-shadow: 0 0 0 2px #e9bf55, 0 0 0 3.5px #4a2c06, 0 4px 8px rgba(0,0,0,.5); }
-.bluff-pl-ic .bluff-ic { width: 26px; height: 26px; }
-.bluff-vs { font: 800 12px var(--font-display); color: #ffb3a8; padding: 2px 8px; border-radius: 8px; background: rgba(160,20,30,.45); border: 1px solid rgba(255,140,120,.5); }
+.bluff-pl-ic { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; flex: none; color: #fff;
+  background: radial-gradient(circle at 30% 22%, rgba(255,255,255,.42), transparent 55%), var(--rc, #e2a232); box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.28), 0 4px 10px rgba(0,0,0,.45); }
+.bluff-pl-ic .bluff-ic { width: 26px; height: 26px; filter: drop-shadow(0 1px 1px rgba(0,0,0,.45)); }
+.bluff-vs { font: 700 12px var(--font-display); letter-spacing: .06em; color: #ffd0d8; padding: 2px 9px; border-radius: 999px; background: rgba(255,107,129,.2); border: 1px solid rgba(255,107,129,.5); }
 .bluff-candle { width: 38px; height: 54px; flex: none; }
 .bluff-candle .fl { transform-origin: 50% 90%; animation: bluff-flicker 1.6s ease-in-out infinite; }
 @keyframes bluff-flicker { 0%,100% { transform: scale(1) rotate(0); } 30% { transform: scale(1.06,.94) rotate(-3deg); } 60% { transform: scale(.95,1.07) rotate(2deg); } }
 .bluff-track { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; align-items: center; }
-.bluff-track-lbl { font: 700 10px var(--font-display); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-right: 2px; }
-.bluff-tk { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px 2px 3px; border-radius: 20px; font-size: 12px; font-weight: 800; background: rgba(0,0,0,.4); border: 1px solid rgba(242,193,78,.25); color: #f6e6c8; transition: background .3s; }
-.bluff-tk i { width: 17px; height: 17px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 11px; box-sizing: border-box; }
-.bluff-tk.ok { background: rgba(40,110,60,.45); border-color: rgba(123,216,143,.6); }
-.bluff-tk.ok i { background: linear-gradient(#c6f6cf, #3f9a55); color: #06240f; animation: bluff-tick .35s cubic-bezier(.3,1.6,.5,1); }
-.bluff-tk.wait i { border: 2px solid rgba(242,193,78,.75); border-top-color: transparent; animation: bluff-spin 1s linear infinite; }
+.bluff-track-lbl { font: 800 10px var(--font-body); letter-spacing: .12em; text-transform: uppercase; color: rgba(255,236,226,.7); margin-right: 2px; }
+.bluff-tk { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px 2px 3px; border-radius: 20px; font-size: 12px; font-weight: 800; background: rgba(12,9,30,.55); border: 1px solid rgba(255,255,255,.12); color: var(--text); transition: background .3s; }
+.bluff-tk i { width: 17px; height: 17px; border-radius: 50%; display: grid; place-items: center; font-style: normal; box-sizing: border-box; }
+.bluff-tk i .ic { width: 11px; height: 11px; stroke-width: 3; }
+.bluff-tkface { width: 18px; height: 18px; flex: none; border-radius: 50%; box-shadow: 0 0 0 1.5px var(--pc, #fff); }
+.bluff-tkface .portrait { width: 100%; height: 100%; display: block; border-radius: 50%; }
+.bluff-tk.ok { background: rgba(62,224,161,.16); border-color: rgba(62,224,161,.5); }
+.bluff-tk.ok i { background: var(--good); color: #05271a; animation: bluff-tick .35s cubic-bezier(.3,1.6,.5,1); }
+.bluff-tk.wait i { border: 2px solid rgba(255,207,92,.8); border-top-color: transparent; animation: bluff-spin 1s linear infinite; }
 @keyframes bluff-spin { to { transform: rotate(360deg); } }
 @keyframes bluff-tick { from { transform: scale(0); } }
 
 /* ---- my seat ---- */
-.bluff-mine { display: flex; align-items: center; justify-content: center; gap: 22px; padding: 14px 16px 12px; border-radius: 18px; margin-top: 6px;
-  background: linear-gradient(180deg, rgba(0,0,0,.1), rgba(0,0,0,.34)); border: 1px solid rgba(242,193,78,.26); transition: box-shadow .3s; }
-.bluff-mine.turn { box-shadow: 0 0 0 2px rgba(242,193,78,.8), 0 0 28px rgba(242,193,78,.32); }
+.bluff-mine { display: flex; align-items: center; justify-content: center; gap: 22px; padding: 16px 16px 12px; border-radius: 20px; margin-top: 6px;
+  background: linear-gradient(var(--pc, #7c6cff), var(--pc, #7c6cff)) top / 100% 3px no-repeat, linear-gradient(180deg, rgba(26,20,56,.58), rgba(12,9,30,.52));
+  border: 1px solid rgba(255,255,255,.1); transition: box-shadow .3s; }
+.bluff-mine.turn { border-color: rgba(255,207,92,.75); box-shadow: 0 0 0 2px var(--gold), 0 0 26px rgba(255,207,92,.3); }
 .bluff-mine.out .bluff-mine-info { opacity: .6; }
 .bluff-mine-info { display: flex; flex-direction: column; gap: 9px; align-items: flex-start; min-width: 130px; }
-.bluff-mine-name { display: flex; align-items: center; gap: 8px; font: 800 16px var(--font-display); color: #f6e6c8; }
-.bluff-mine-name small { font: 800 10px var(--font-body); letter-spacing: .1em; text-transform: uppercase; color: #3a2405; background: linear-gradient(#fff0b8, #d9a032); padding: 1px 6px; border-radius: 6px; }
+.bluff-mine-name { display: flex; align-items: center; gap: 8px; font: 600 16px var(--font-display); color: var(--text); }
+.bluff-mine-name .bluff-av { width: 32px; height: 32px; }
 .bluff-secret { font-size: 11px; color: var(--muted); font-weight: 700; display: flex; align-items: center; gap: 5px; }
+.bluff-secret .ic { width: 14px; height: 14px; }
 .bluff-hand { display: flex; gap: 14px; --cw: 130px; align-items: flex-end; }
 .bluff-hand.ex { gap: 10px; --cw: 112px; }
 
 /* ---- controls ---- */
 .bluff-ctrl { margin-top: 12px; display: flex; flex-direction: column; justify-content: center; gap: 10px; min-height: 96px; }
-.bluff-hint { text-align: center; font: 800 16px/1.3 var(--font-display); color: #ffe6a8; text-shadow: 0 1px 0 #000, 0 0 14px rgba(242,193,78,.35); }
-.bluff-hint small { display: block; font: 700 12.5px var(--font-body); color: var(--muted); text-shadow: none; margin-top: 2px; }
-.bluff-hint.wait { color: #e9d8b8; font-weight: 700; }
+.bluff-hint { text-align: center; font: 600 16px/1.3 var(--font-display); color: var(--gold); text-shadow: 0 1px 0 rgba(0,0,0,.6), 0 0 14px rgba(255,207,92,.3); }
+.bluff-hint small { display: block; font: 700 12.5px var(--font-body); color: #ddd3ec; text-shadow: none; margin-top: 2px; }
+.bluff-hint.wait { color: #f1e6f6; }
 .bluff-groups { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 4fr); gap: 10px; }
-.bluff-group { padding: 8px; border-radius: 14px; background: rgba(10,2,5,.38); border: 1px solid rgba(242,193,78,.2); min-width: 0; }
-.bluff-glabel { font: 700 10.5px var(--font-display); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 0 0 11px 4px; }
+.bluff-group { padding: 10px 8px 8px; border-radius: 16px; background: rgba(12,9,30,.42); border: 1px solid rgba(255,255,255,.08); min-width: 0; }
+.bluff-glabel { font: 800 10.5px var(--font-body); letter-spacing: .14em; text-transform: uppercase; color: rgba(255,236,226,.7); margin: 0 0 11px 4px; }
 .bluff-btns { display: grid; gap: 11px 7px; grid-template-columns: 1fr; }
 .bluff-group.claims .bluff-btns { grid-template-columns: 1fr 1fr; }
-button.bluff-act { position: relative; display: flex; align-items: center; gap: 9px; padding: 6px 10px 6px 6px; min-height: 54px; text-align: left; border-radius: 12px; width: 100%; }
-.bluff-act-ic { width: 38px; height: 38px; flex: none; border-radius: 50%; display: grid; place-items: center; color: #fff8e6;
-  background: radial-gradient(circle at 35% 28%, rgba(255,255,255,.38), transparent 52%), var(--rc);
-  box-shadow: inset 0 0 0 2px rgba(0,0,0,.3), 0 0 0 2px #e9bf55, 0 0 0 3.5px #4a2c06, 0 3px 6px rgba(0,0,0,.4); }
-.bluff-act-ic .bluff-ic { width: 22px; height: 22px; filter: drop-shadow(0 1px 1px rgba(0,0,0,.6)); }
+button.bluff-act { position: relative; display: flex; align-items: center; gap: 10px; padding: 6px 10px 6px 6px; min-height: 56px; text-align: left; border-radius: 14px; width: 100%; }
+/* role tiles: rounded, glossy, in the role's colour (no more gold rings) */
+.bluff-act-ic { width: 40px; height: 40px; flex: none; border-radius: 12px; display: grid; place-items: center; color: #fff;
+  background: radial-gradient(circle at 30% 22%, rgba(255,255,255,.4), transparent 55%), var(--rc);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.26), inset 0 -6px 10px rgba(0,0,0,.18), 0 3px 8px rgba(0,0,0,.35); }
+.bluff-act-ic .bluff-ic { width: 22px; height: 22px; filter: drop-shadow(0 1px 1px rgba(0,0,0,.5)); }
 .bluff-act-l { min-width: 0; }
-.bluff-act-l b { display: block; font-family: var(--font-display); font-size: 14px; line-height: 1.15; }
-.bluff-act-l small { display: block; font-size: 11px; font-weight: 700; opacity: .8; line-height: 1.2; }
-.bluff-tag { position: absolute; top: -7px; right: 8px; z-index: 2; font: 900 9px/1.5 var(--font-body); letter-spacing: .08em; text-transform: uppercase; padding: 0 6px; border-radius: 8px; text-shadow: none; box-shadow: 0 2px 4px rgba(0,0,0,.5); }
-.bluff-tag.held { background: linear-gradient(#2c7a42, #1a4f2a); color: #c8f8d2; border: 1px solid #6fd08a; }
-.bluff-tag.bluff { background: linear-gradient(#8a2a20, #561510); color: #ffd0c6; border: 1px solid #e0705e; }
+.bluff-act-l b { display: block; font: 600 14px/1.15 var(--font-display); }
+.bluff-act-l small { display: block; font-size: 11px; font-weight: 700; color: var(--muted); line-height: 1.2; }
+.bluff-tag { position: absolute; top: -8px; right: 8px; z-index: 2; font: 800 9px/1.6 var(--font-body); letter-spacing: .08em; text-transform: uppercase; padding: 0 7px; border-radius: 999px; text-shadow: none; box-shadow: 0 2px 5px rgba(0,0,0,.45); }
+.bluff-tag.held { background: #0f3d31; color: #9ff3cf; border: 1px solid rgba(62,224,161,.6); }
+.bluff-tag.bluff { background: #4a1530; color: #ffc2cc; border: 1px solid rgba(255,107,129,.6); }
 button:disabled .bluff-tag { opacity: .75; }
 .bluff-resp { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
-.bluff-resp button { min-height: 58px; min-width: 150px; font-family: var(--font-display); font-size: 17px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 20px; }
-.bluff-resp button .bluff-ic { width: 24px; height: 24px; }
-.bluff-resp button.blockbtn { color: #fff6dc; text-shadow: 0 1px 1px rgba(0,0,0,.7); border-color: #2a1606;
-  background: linear-gradient(180deg, rgba(255,255,255,.25), rgba(0,0,0,.28)), var(--rc); box-shadow: inset 0 1px 0 rgba(255,255,255,.4), 0 0 0 2px #e9bf55, 0 3px 0 #2a1606, 0 6px 14px rgba(0,0,0,.45); }
+.bluff-resp button { min-height: 56px; min-width: 150px; font-family: var(--font-display); font-weight: 600; font-size: 17px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 20px; border-radius: 16px; }
+.bluff-resp button .ic, .bluff-resp button .bluff-ic { width: 22px; height: 22px; }
+.bluff-resp button.blockbtn, .bluff-resp button.blockbtn:hover:not(:disabled) { color: #fff; text-shadow: 0 1px 1px rgba(0,0,0,.55); border-color: rgba(255,255,255,.32);
+  background: linear-gradient(180deg, rgba(255,255,255,.22), rgba(0,0,0,.18)), var(--rc); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 6px 16px rgba(0,0,0,.4); }
+.bluff-resp button.blockbtn:hover:not(:disabled) { filter: brightness(1.08); }
 .bluff-resp button .bluff-tag { position: static; margin-left: 2px; }
 .bluff-winner { text-align: center; padding: 6px 0 2px; }
 .bluff-winner .winner-banner { padding: 6px; }
+.bluff-winner .winner-banner .ic { width: 1em; height: 1em; vertical-align: -.12em; }
 
 /* ---- side ---- */
 .bluff-side .status { line-height: 1.3; }
-.bluff-statusrow { display: flex; align-items: center; gap: 10px; }
+.bluff-round { margin: 4px 0 12px; }
+.bluff-refside { min-height: 40px; }
 .bluff-ledger { display: flex; flex-direction: column; gap: 6px; }
-.bluff-lrow { display: flex; align-items: center; gap: 9px; padding: 4px 8px 4px 4px; border-radius: 10px; background: rgba(0,0,0,.22); }
-.bluff-lrow .nm { flex: 1; font: 700 13px var(--font-display); color: #f6e6c8; }
+.bluff-lrow { display: flex; align-items: center; gap: 10px; padding: 6px 10px 6px 6px; border-radius: 12px; background: rgba(255,255,255,.04); border: 1px solid var(--line); }
+.bluff-lrow .bluff-medal { border-radius: 9px; }
+.bluff-lrow .bluff-medal .bluff-ic { width: 16px; height: 16px; }
+.bluff-lrow .nm { flex: 1; min-width: 0; font: 600 13.5px var(--font-display); color: var(--text); }
 .bluff-lrow .ab { display: block; font: 600 11px var(--font-body); color: var(--muted); }
 .bluff-pips { display: flex; gap: 4px; }
-.bluff-pips i { width: 14px; height: 19px; border-radius: 3px; border: 1.5px dashed rgba(242,193,78,.45); }
-.bluff-pips i.rev { border: 1.5px solid #ff8a7a; background: linear-gradient(135deg, transparent 44%, #ff8a7a 44% 56%, transparent 56%), rgba(120,10,20,.6); }
-.bluff-pips i.mine { border: 1.5px solid #f2c14e; background: radial-gradient(circle, #f2c14e 0 3px, transparent 3.5px), rgba(242,193,78,.18); }
-.bluff-legend { display: flex; gap: 12px; font-size: 11px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
+.bluff-pips i { width: 14px; height: 19px; border-radius: 4px; border: 1.5px dashed var(--line-2); }
+.bluff-pips i.rev { border: 1.5px solid var(--bad); background: linear-gradient(135deg, transparent 44%, var(--bad) 44% 56%, transparent 56%), rgba(255,107,129,.18); }
+.bluff-pips i.mine { border: 1.5px solid var(--gold); background: radial-gradient(circle, var(--gold) 0 3px, transparent 3.5px), rgba(255,207,92,.16); }
+.bluff-legend { display: flex; gap: 12px; font-size: 11px; color: var(--muted); margin-top: 2px; flex-wrap: wrap; }
 .bluff-legend span { display: inline-flex; align-items: center; gap: 4px; }
 .bluff-legend .bluff-pips i { width: 10px; height: 13px; }
-.bluff-log { max-height: 260px; }
+.bluff-side .drawer > summary .note { min-width: 0; max-width: 55%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bluff-chronicle[open] > summary .note { visibility: hidden; }
+.bluff-log { max-height: 260px; color: var(--muted); }
+.bluff-log div { border-bottom-color: var(--line); }
+.bluff-log div:first-child { color: var(--text); }
 .bluff-log b { font-weight: 800; }
 
 /* ---- overlays ---- */
 .bluff-ov { position: fixed; left: 0; top: 0; z-index: 126; pointer-events: none; }
 .bluff-bannerwrap { position: fixed; transform: translate(-50%, -50%); filter: drop-shadow(0 12px 24px rgba(0,0,0,.65)); animation: bluff-banner 2.1s cubic-bezier(.2,.8,.2,1) both; }
 .bluff-banner { width: min(540px, 92vw); display: flex; align-items: center; gap: 14px; padding: 12px 40px 12px 30px;
-  background: linear-gradient(180deg, rgba(255,255,255,.16), rgba(0,0,0,.3)), linear-gradient(90deg, var(--rd), var(--rc) 50%, var(--rd));
+  background: linear-gradient(180deg, rgba(255,255,255,.18), rgba(0,0,0,.28)), linear-gradient(90deg, var(--rd), var(--rc) 50%, var(--rd));
   clip-path: polygon(0 0, 100% 0, 95% 50%, 100% 100%, 0 100%, 5% 50%);
-  border-top: 2px solid #f2cf6d; border-bottom: 2px solid #f2cf6d; }
-.bluff-banner .bb-medal { width: 62px; height: 62px; flex: none; border-radius: 50%; display: grid; place-items: center; color: #fff6dc;
-  background: radial-gradient(circle at 35% 28%, rgba(255,255,255,.45), transparent 52%), var(--rc); box-shadow: 0 0 0 3px #e9bf55, 0 0 0 5px #3a2406, 0 0 22px rgba(255,220,140,.5); }
+  border-top: 2px solid rgba(255,236,190,.85); border-bottom: 2px solid rgba(255,236,190,.85); }
+.bluff-banner .bb-medal { width: 62px; height: 62px; flex: none; border-radius: 18px; display: grid; place-items: center; color: #fff;
+  background: radial-gradient(circle at 30% 22%, rgba(255,255,255,.45), transparent 55%), var(--rc); box-shadow: inset 0 0 0 2px rgba(255,255,255,.35), 0 0 22px rgba(255,220,140,.45); }
 .bluff-banner .bb-medal .bluff-ic { width: 36px; height: 36px; filter: drop-shadow(0 2px 2px rgba(0,0,0,.6)); }
 .bluff-banner .bb-t { min-width: 0; }
-.bluff-banner .bb-who { font: 800 13px var(--font-body); letter-spacing: .14em; text-transform: uppercase; color: #ffeccc; text-shadow: 0 1px 2px #000; }
-.bluff-banner .bb-big { font: 800 clamp(24px, 6.4vw, 36px)/1.05 var(--font-display); letter-spacing: .06em; text-transform: uppercase;
-  background: linear-gradient(180deg, #fff8dc, #f2c14e 58%, #b27a1c); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 2px 0 rgba(0,0,0,.55)); }
-.bluff-banner .bb-sub { font: 700 13.5px var(--font-body); color: #fff0d8; text-shadow: 0 1px 2px #000; }
+.bluff-banner .bb-who { font: 800 13px var(--font-body); letter-spacing: .14em; text-transform: uppercase; color: #fff4e6; text-shadow: 0 1px 2px #000; }
+.bluff-banner .bb-big { font: 700 clamp(24px, 6.4vw, 36px)/1.05 var(--font-display); letter-spacing: .06em; text-transform: uppercase;
+  background: linear-gradient(180deg, #fffbe8, #ffcf5c 60%, #f0a63a); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 2px 0 rgba(0,0,0,.55)); }
+.bluff-banner .bb-sub { font: 700 13.5px var(--font-body); color: #fff4e6; text-shadow: 0 1px 2px #000; }
 @keyframes bluff-banner { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.55) rotateX(70deg); } 13% { opacity: 1; transform: translate(-50%, -50%) scale(1.06); } 20% { transform: translate(-50%, -50%) scale(1); } 82% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 100% { opacity: 0; transform: translate(-50%, -78%) scale(.96); } }
 .bluff-stamp { position: fixed; transform: translate(-50%, -50%); text-align: center; animation: bluff-stamp 1.5s cubic-bezier(.2,.8,.2,1) both; }
-.bluff-stamp b { display: block; font: 800 clamp(40px, 11vw, 84px)/1.08 var(--font-display); letter-spacing: .04em; padding: 0 .28em; color: var(--ink, #e02a2e);
+.bluff-stamp b { display: block; font: 700 clamp(40px, 11vw, 84px)/1.08 var(--font-display); letter-spacing: .04em; padding: 0 .28em; color: var(--ink, #e02a2e);
   border: 7px double currentColor; border-radius: 14px; transform: rotate(-9deg); background: rgba(255,240,220,.07);
   -webkit-mask-image: ${INK}; mask-image: ${INK}; -webkit-mask-size: 160px; mask-size: 160px; text-shadow: 0 0 2px currentColor; }
-.bluff-stamp small { display: inline-block; margin-top: 16px; font: 800 15px var(--font-body); color: #fff0e6; text-shadow: 0 2px 4px #000; background: rgba(12,2,4,.72); padding: 4px 12px; border-radius: 10px; border: 1px solid rgba(255,140,120,.4); }
+.bluff-stamp small { display: inline-block; margin-top: 16px; font: 800 15px var(--font-body); color: #fff; text-shadow: 0 2px 4px #000; background: rgba(14,10,34,.82); padding: 5px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,.18); }
 @keyframes bluff-stamp { 0% { opacity: 0; transform: translate(-50%, -50%) scale(2.8); } 13% { opacity: 1; transform: translate(-50%, -50%) scale(.9); } 20% { transform: translate(-50%, -50%) scale(1.05); } 27% { transform: translate(-50%, -50%) scale(1); } 82% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.04); } }
 .bluff-proof { position: fixed; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .bluff-proof .bluff-card { --cw: min(150px, 34vw); }
 .bluff-proof .bluff-card-in { animation: bluff-flip .9s .2s cubic-bezier(.3,.7,.3,1.1) both; }
 .bluff-proof::before { content: ''; position: absolute; left: 50%; top: 42%; width: 340px; height: 340px; transform: translate(-50%, -50%); border-radius: 50%; background: radial-gradient(circle, rgba(255,220,140,.55), transparent 62%); animation: bluff-fadein .5s both; z-index: -1; }
-.bluff-proof-cap { font: 800 17px var(--font-display); color: #ffe6a8; text-shadow: 0 2px 6px #000; background: rgba(12,2,5,.82); padding: 6px 16px; border-radius: 12px; border: 1px solid rgba(242,193,78,.55); white-space: nowrap; animation: bluff-fadein .4s .5s both; }
+.bluff-proof-cap { font: 600 17px var(--font-display); color: var(--gold); text-shadow: 0 2px 6px #000; background: rgba(14,10,34,.88); padding: 6px 16px; border-radius: 14px; border: 1px solid rgba(255,207,92,.5); white-space: nowrap; animation: bluff-fadein .4s .5s both; }
 .bluff-slash { position: fixed; transform: translate(-50%, -50%); }
 .bluff-slash svg { width: 100%; height: 100%; overflow: visible; display: block; }
 .bluff-slash .sl { fill: none; stroke-linecap: round; stroke-dasharray: 320; stroke-dashoffset: 320; animation: bluff-slashline .3s .12s ease-out forwards, bluff-out .5s .8s forwards; }
@@ -1193,20 +1301,21 @@ button:disabled .bluff-tag { opacity: .75; }
 .bluff-seal { position: fixed; transform: translate(-50%, -50%); width: 120px; height: 120px; animation: bluff-seal 1.6s cubic-bezier(.2,.8,.2,1) both; filter: drop-shadow(0 8px 14px rgba(0,0,0,.7)); }
 .bluff-seal svg { width: 100%; height: 100%; display: block; }
 @keyframes bluff-seal { 0% { opacity: 0; transform: translate(-50%, -50%) scale(3) rotate(-30deg); } 16% { opacity: 1; transform: translate(-50%, -50%) scale(.9) rotate(-8deg); } 24% { transform: translate(-50%, -50%) scale(1.04) rotate(-8deg); } 80% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(-8deg); } 100% { opacity: 0; transform: translate(-50%, -50%) scale(.9) rotate(-8deg); } }
-.bluff-tagov { position: fixed; transform: translate(-50%, -50%) rotate(-8deg); font: 800 18px var(--font-display); letter-spacing: .14em; color: #ffd9cf; padding: 4px 16px; border-radius: 6px; white-space: nowrap;
-  background: linear-gradient(180deg, #3a0a12, #14030a); border: 2px solid #c4462e; box-shadow: 0 8px 20px rgba(0,0,0,.7); animation: bluff-stamp 2s cubic-bezier(.2,.8,.2,1) both; }
-.bluff-tagov.good { color: #e8ffe8; border-color: #4fbf6a; background: linear-gradient(180deg, #123a1e, #06180c); }
+.bluff-tagov { position: fixed; transform: translate(-50%, -50%) rotate(-8deg); font: 700 18px var(--font-display); letter-spacing: .14em; color: #ffe2e7; padding: 5px 16px; border-radius: 10px; white-space: nowrap;
+  background: linear-gradient(180deg, #5a0c22, #1e0410); border: 2px solid var(--bad); box-shadow: 0 8px 20px rgba(0,0,0,.7); animation: bluff-stamp 2s cubic-bezier(.2,.8,.2,1) both; }
+.bluff-tagov.good { color: #e8fff4; border-color: var(--good); background: linear-gradient(180deg, #0f3d31, #06180f); }
 
 /* ---- reference modal ---- */
-.bluff-ref { max-width: 560px; }
-.bluff-ref h2 { color: var(--gold); margin: 0; }
+.bluff-ref { max-width: 560px; position: relative; }
+.bluff-ref h2 { margin: 0; padding-right: 48px; }
+.bluff-refx { position: absolute; top: 12px; right: 12px; z-index: 2; }
 .bluff-ref-grid { display: grid; gap: 10px; margin: 12px 0; }
-.bluff-ref-role { display: flex; gap: 12px; align-items: center; padding: 8px; border-radius: 12px; background: rgba(0,0,0,.25); }
+.bluff-ref-role { display: flex; gap: 12px; align-items: center; padding: 8px 10px 8px 8px; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid var(--line); box-shadow: inset 3px 0 0 var(--rc, transparent); }
 .bluff-ref-role .bluff-card { --cw: 76px; }
 .bluff-ref-role h3 { margin: 0 0 2px; font-size: 1.05rem; }
-.bluff-ref-role p { margin: 0; font-size: .88rem; color: #f0e0c4; }
+.bluff-ref-role p { margin: 0; font-size: .88rem; color: var(--text); }
 .bluff-ref-role p.b { color: var(--muted); }
-.bluff-ref ul { margin: 6px 0 10px; padding-left: 18px; font-size: .9rem; color: #f0e0c4; }
+.bluff-ref ul { margin: 6px 0 10px; padding-left: 18px; font-size: .9rem; color: var(--text); }
 .bluff-ref li { margin: 3px 0; }
 
 /* ---- responsive ---- */
@@ -1222,28 +1331,32 @@ button:disabled .bluff-tag { opacity: .75; }
   .bluff-center { grid-template-columns: 96px minmax(0, 1fr) 96px; }
   .bluff-groups { grid-template-columns: 1fr; }
 }
+@media (max-width: 900px) {
+  .bluff-table::after { border-radius: 11px; }
+}
 @media (max-width: 639px) {
   .bluff-table.felt { padding: 10px 8px 10px; }
-  .bluff-refbtn { top: 4px; right: 4px; padding: 2px 8px; }
+  .bluff-refbtn { top: 4px; right: 4px; width: 36px; height: 36px; min-height: 36px; padding: 0; }
   .bluff-refbtn span { display: none; }
-  .bluff-opps { --scw: 32px; gap: 6px; padding-top: 34px; }
-  .bluff-seat { width: calc((100% - 12px) / 3); padding: 11px 4px 5px; gap: 5px; border-radius: 11px; }
+  .bluff-opps { --scw: 32px; gap: 6px; padding-top: 42px; }
+  .bluff-seat { width: calc((100% - 12px) / 3); padding: 12px 4px 5px; gap: 5px; border-radius: 12px; }
   .bluff-opps.n1 .bluff-seat, .bluff-opps.n2 .bluff-seat { width: calc((100% - 6px) / 2); --scw: 44px; }
   .bluff-opps.n4 .bluff-seat { width: calc((100% - 6px) / 2); }
   .bluff-seat-head { gap: 5px; }
-  .bluff-av { width: 22px; height: 22px; font-size: 11px; box-shadow: 0 0 0 1.5px #e9bf55, 0 0 0 2.5px #4a2c06, 0 2px 4px rgba(0,0,0,.55); }
-  .bluff-seat-name { font-size: 11px; }
+  .bluff-av { width: 26px; height: 26px; box-shadow: 0 0 0 2px var(--pc, #fff), 0 2px 4px rgba(0,0,0,.45); }
+  .bluff-seat-name { font-size: 11.5px; }
   .bluff-seat-cards { gap: 4px; }
   .bluff-seat-foot { min-height: 20px; }
   .bluff-purse { --cs: 13px; --co: 2px; gap: 3px; }
   .bluff-ccount { font-size: 13px; }
   .bluff-medal { width: 15px; height: 15px; } .bluff-medal .bluff-ic { width: 10px; height: 10px; }
   .bluff-claims { gap: 2px; }
-  .bluff-flag { top: -9px; right: -5px; min-width: 22px; height: 22px; font-size: 12px; }
+  .bluff-flag { top: -10px; right: -6px; min-width: 24px; height: 24px; padding: 0 5px; font-size: 13px; }
+  .bluff-flag .ic { width: 13px; height: 13px; }
   .bluff-says { top: -11px; font-size: 9.5px; padding: 1px 7px 1px 2px; } .bluff-says .bluff-ic { width: 13px; height: 13px; }
   .bluff-seat.pickable::after { font-size: 9px; padding: 1px 6px; }
   .bluff-center { grid-template-columns: 62px minmax(0, 1fr) 62px; gap: 6px; margin: 14px 0 8px; }
-  .bluff-tray { width: 58px; height: 40px; box-shadow: inset 0 5px 10px rgba(0,0,0,.85), 0 0 0 2px #c9963a, 0 0 0 3.5px #4a2c06, 0 6px 12px rgba(0,0,0,.55); }
+  .bluff-tray { width: 58px; height: 40px; box-shadow: inset 0 5px 10px rgba(0,0,0,.85), 0 0 0 1.5px rgba(255,214,150,.5), 0 0 0 3.5px rgba(14,8,28,.5), 0 6px 12px rgba(0,0,0,.55); }
   .bluff-tray .bluff-coin { width: 15px; height: 15px; }
   .bluff-lbl { font-size: 8.5px; letter-spacing: .08em; }
   .bluff-pile { --pw: 38px; }
@@ -1252,13 +1365,14 @@ button:disabled .bluff-tag { opacity: .75; }
   .bluff-plate .bluff-card { --cw: 32px; }
   .bluff-pl-row { gap: 7px; }
   .bluff-pl-txt b { font-size: 12.5px; } .bluff-pl-txt small { font-size: 11px; }
-  .bluff-pl-ic { width: 32px; height: 32px; } .bluff-pl-ic .bluff-ic { width: 19px; height: 19px; }
+  .bluff-pl-ic { width: 32px; height: 32px; border-radius: 10px; } .bluff-pl-ic .bluff-ic { width: 19px; height: 19px; }
   .bluff-candle { width: 26px; height: 38px; }
-  .bluff-tk { font-size: 10.5px; padding: 1px 6px 1px 2px; } .bluff-tk i { width: 14px; height: 14px; font-size: 9px; }
+  .bluff-tk { font-size: 10.5px; padding: 1px 6px 1px 2px; gap: 3px; } .bluff-tk i { width: 14px; height: 14px; } .bluff-tk i .ic { width: 9px; height: 9px; } .bluff-tkface { width: 15px; height: 15px; }
   .bluff-track-lbl { width: 100%; text-align: center; margin: 0; }
-  .bluff-mine { flex-direction: column; gap: 10px; padding: 10px 8px; }
+  .bluff-mine { flex-direction: column; gap: 10px; padding: 12px 8px 10px; }
   .bluff-mine-info { flex-direction: row; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px 14px; min-width: 0; width: 100%; }
   .bluff-mine-name { font-size: 14px; }
+  .bluff-mine-name .bluff-av { width: 30px; height: 30px; }
   .bluff-purse.big { --cs: 20px; --co: 3px; } .bluff-purse.big .bluff-ccount { font-size: 19px; }
   .bluff-secret { display: none; }
   .bluff-hand { --cw: 112px; gap: 12px; }
@@ -1266,15 +1380,15 @@ button:disabled .bluff-tag { opacity: .75; }
   .bluff-groups { grid-template-columns: 1fr; gap: 8px; }
   .bluff-group.common .bluff-btns { grid-template-columns: 1fr 1fr 1fr; }
   .bluff-group.common button.bluff-act { flex-direction: column; text-align: center; gap: 3px; padding: 6px 4px; }
-  .bluff-group.common .bluff-act-ic { width: 30px; height: 30px; } .bluff-group.common .bluff-act-ic .bluff-ic { width: 18px; height: 18px; }
+  .bluff-group.common .bluff-act-ic { width: 32px; height: 32px; border-radius: 10px; } .bluff-group.common .bluff-act-ic .bluff-ic { width: 18px; height: 18px; }
   button.bluff-act { gap: 7px; padding: 5px 6px 5px 5px; }
-  .bluff-act-ic { width: 32px; height: 32px; } .bluff-act-ic .bluff-ic { width: 19px; height: 19px; }
+  .bluff-act-ic { width: 34px; height: 34px; border-radius: 10px; } .bluff-act-ic .bluff-ic { width: 19px; height: 19px; }
   .bluff-act-l b { font-size: 12.5px; } .bluff-act-l small { font-size: 10px; }
   .bluff-tag { font-size: 8px; padding: 0 5px; top: -7px; right: 5px; }
   .bluff-resp button { min-width: 0; flex: 1 1 40%; font-size: 15px; padding: 8px 10px; }
   .bluff-hint { font-size: 14px; }
   .bluff-banner { padding: 10px 26px 10px 20px; gap: 10px; }
-  .bluff-banner .bb-medal { width: 46px; height: 46px; } .bluff-banner .bb-medal .bluff-ic { width: 26px; height: 26px; }
+  .bluff-banner .bb-medal { width: 46px; height: 46px; border-radius: 14px; } .bluff-banner .bb-medal .bluff-ic { width: 26px; height: 26px; }
   .bluff-banner .bb-who { font-size: 11px; } .bluff-banner .bb-sub { font-size: 12px; }
   .bluff-proof-cap { font-size: 14px; white-space: normal; text-align: center; max-width: 86vw; }
   .bluff-seal { width: 90px; height: 90px; }
@@ -1298,7 +1412,11 @@ const outAt = new Map(); // pid -> ms when the "Banished" badge lands
 const GAP = { claim: 500, act: 400, block: 500, challenge: 1050, slash: 800, coup: 700, lose: 500, out: 900, stopped: 500, draw: 0, shuffle: 0 };
 
 const short = (name) => String(name || '?').replace(/[^\p{L}\p{N}\s'.-]/gu, '').trim().split(/\s+/)[0].slice(0, 9) || '?';
-const initial = (name) => (short(name)[0] || '?').toUpperCase();
+const COIN_HUE = '#e2a232'; // Income, Foreign Aid and the winner's medal: the colour of the coins
+let prevCoins = new Map(); // game id | player id -> coins at the last render, for the "gain" flash
+// The ledger and chronicle fold away on phones so the table gets the screen; they stay as the player left them.
+const WIDE = typeof matchMedia === 'function' ? matchMedia('(min-width: 901px)').matches : true;
+let ledgerOpen = WIDE, chronOpen = WIDE;
 
 function prepEvents(v, now) {
   const list = v.ev || [];
@@ -1369,15 +1487,21 @@ function purseHTML(p, big = false) {
   return `<div class="bluff-purse${big ? ' big' : ''}" data-a="p-${esc(p.id)}-coins" title="${n} coin${n === 1 ? '' : 's'}"><div class="bluff-stacks">${st}</div><b class="bluff-ccount">${n}</b></div>`;
 }
 const claimsHTML = (p) => `<div class="bluff-claims" title="Roles claimed">${p.claims.map((r) => `<span class="bluff-medal" style="--rc:${R[r].color}" title="Claimed ${R[r].name}">${icon(r)}</span>`).join('')}</div>`;
-const avatarHTML = (p, color) => `<div class="bluff-av" style="--pc:${color}">${esc(initial(p.name))}</div>`;
+// The lobby portrait (a robot for computer players), ringed in the seat colour.
+const avatarHTML = (p, color, ctx) => `<div class="bluff-av" style="--pc:${color}" title="${esc(p.name)}">${portrait({ id: p.id, bot: !!ctx?.isBot?.(p.id) })}</div>`;
+// A tiny face for the "who still has to answer" chips under the stage.
+const seatColor = (v, id) => PLAYER_COLORS[Math.max(0, v.players.findIndex((p) => p.id === id)) % PLAYER_COLORS.length];
+const tinyFace = (v, id, ctx) => `<span class="bluff-tkface" style="--pc:${seatColor(v, id)}">${portrait({ id, bot: !!ctx?.isBot?.(id) })}</span>`;
+const DOTS = '<i></i><i></i><i></i>';
 
 function flagHTML(v, pid) {
-  if (v.over) return v.winners.includes(pid) ? '<span class="bluff-flag win">♛</span>' : '';
+  if (v.over) return v.winners.includes(pid) ? `<span class="bluff-flag win" title="Rules the court">${uiIcon('crown')}</span>` : '';
   if (WINDOWS.includes(v.phase)) {
-    if (v.allowed.includes(pid)) return '<span class="bluff-flag ok" title="Allowed">✓</span>';
-    if (v.respond.includes(pid)) return '<span class="bluff-flag wait" title="Deciding"><span>?</span></span>';
+    if (v.allowed.includes(pid)) return `<span class="bluff-flag ok" title="Allowed">${uiIcon('check')}</span>`;
+    if (v.respond.includes(pid)) return `<span class="bluff-flag wait" title="Deciding">${DOTS}</span>`;
   }
-  if ((v.phase === 'lose' || v.phase === 'exchange') && v.respond.includes(pid)) return `<span class="bluff-flag ${v.phase === 'lose' ? 'bad' : 'wait'}"><span>${v.phase === 'lose' ? '!' : '⇄'}</span></span>`;
+  if (v.phase === 'lose' && v.respond.includes(pid)) return '<span class="bluff-flag bad" title="Giving up an influence"><b>!</b></span>';
+  if (v.phase === 'exchange' && v.respond.includes(pid)) return `<span class="bluff-flag wait swap" title="Exchanging cards">${uiIcon('refresh')}</span>`;
   return '';
 }
 function saysHTML(v, pid) {
@@ -1395,15 +1519,16 @@ function seatHTML(v, p, st) {
   const cls = ['bluff-seat'];
   if (!v.over && v.players[v.turn].id === p.id) cls.push('turn');
   if (p.out) cls.push('out');
-  if (pickable) cls.push('pickable', 'pulse-glow');
+  if (pickable) cls.push('pickable');
   if (v.over && v.winners.includes(p.id)) cls.push('win');
+  if (st.gained.has(p.id)) cls.push('gain');
   const ex = v.exchange && v.exchange.pid === p.id ? v.exchange.drawn : [];
   const cards = p.cards.map((c) => cardHTML(c, { now: st.now, mini: true, cls: 'mini', reveal: v.over })).join('') + ex.map((c) => cardHTML(c, { now: st.now, mini: true, cls: 'mini extra' })).join('');
   const ob = outAt.get(p.id);
   const badge = p.out && !v.over ? `<span class="bluff-banished${ob && ob - st.now > -600 ? ' new' : ''}"${ob ? ` style="--bd:${Math.round(ob - st.now)}ms"` : ''}>Banished</span>` : '';
   return `<div class="${cls.join(' ')}" data-a="p-${esc(p.id)}-seat" style="--pc:${color}"${pickable ? ` data-do="target" data-pid="${esc(p.id)}" role="button" tabindex="0" aria-label="Target ${esc(p.name)}"` : ''}>
 ${flagHTML(v, p.id)}${saysHTML(v, p.id)}
-<div class="bluff-seat-head">${avatarHTML(p, color)}<div class="bluff-seat-name">${esc(p.name)}</div></div>
+<div class="bluff-seat-head">${avatarHTML(p, color, st.ctx)}<div class="bluff-seat-name">${esc(p.name)}</div></div>
 <div class="bluff-seat-cards" data-a="p-${esc(p.id)}-hand">${cards}${badge}</div>
 <div class="bluff-seat-foot">${purseHTML(p)}${claimsHTML(p)}</div>
 </div>`;
@@ -1414,12 +1539,12 @@ const CANDLE = `<svg class="bluff-candle" viewBox="0 0 40 56" aria-hidden="true"
 <path d="M7 50c0-4 26-4 26 0s-26 4-26 0Z" fill="url(#bw-gold)"/><path d="M20 22v-4" stroke="#2a1a0a" stroke-width="1.2"/>
 <path class="fl" d="M20 4c4.5 6.5 5 11 0 15.5C15 15 15.5 10.5 20 4Z" fill="url(#bw-cfl)"/></svg>`;
 
-function stageHTML(v, me) {
+function stageHTML(v, me, ctx) {
   const pd = v.pending;
   const nm = (id) => (id === me ? 'You' : esc(short(P(v, id)?.name)));
   if (v.over) {
     const w = P(v, v.winners[0]);
-    return `<div class="bluff-plate"><div class="bluff-pl-row"><div class="bluff-pl-ic" style="--rc:#b8862b">${icon('chancellor')}</div><div class="bluff-pl-txt"><b>${w ? nm(w.id) : 'Nobody'} ${w && w.id === me ? 'rule' : 'rules'} the court</b><small>The whispers fall silent.</small></div></div></div>`;
+    return `<div class="bluff-plate"><div class="bluff-pl-row"><div class="bluff-pl-ic" style="--rc:${COIN_HUE}">${icon('chancellor')}</div><div class="bluff-pl-txt"><b>${w ? nm(w.id) : 'Nobody'} ${w && w.id === me ? 'rule' : 'rules'} the court</b><small>The whispers fall silent.</small></div></div></div>`;
   }
   if (!pd) {
     const a = v.players[v.turn];
@@ -1428,7 +1553,7 @@ function stageHTML(v, me) {
   const def = A[pd.action];
   const tgt = pd.target ? ` → ${nm(pd.target)}` : '';
   let h = '<div class="bluff-plate"><div class="bluff-pl-row">';
-  h += pd.claim ? staticCard(pd.claim, 'var(--pcw, 44px)', true) : `<div class="bluff-pl-ic" style="--rc:#9a6a1e">${icon(pd.action)}</div>`;
+  h += pd.claim ? staticCard(pd.claim, 'var(--pcw, 44px)', true) : `<div class="bluff-pl-ic" style="--rc:${pd.action === 'coup' ? '#c8283a' : COIN_HUE}">${icon(pd.action)}</div>`;
   h += `<div class="bluff-pl-txt"><b>${nm(pd.actor)}${pd.claim ? ` · <em style="color:${shade(R[pd.claim].color, 0.35)}">${R[pd.claim].name}</em>` : ''}</b><small>${def.name}${tgt} · ${def.sub}</small></div></div>`;
   if (pd.blocker) {
     h += `<span class="bluff-vs">BLOCKED</span><div class="bluff-pl-row">${staticCard(pd.blockRole, 'var(--pcw, 44px)', true)}<div class="bluff-pl-txt"><b>${nm(pd.blocker)} · <em style="color:${shade(R[pd.blockRole].color, 0.35)}">${R[pd.blockRole].name}</em></b><small>claims a block</small></div></div>`;
@@ -1439,12 +1564,12 @@ function stageHTML(v, me) {
     const lbl = v.phase === 'block' ? (def.by === 'target' ? 'Block?' : 'Anyone may block') : 'Challenge?';
     h += `<div class="bluff-track"><span class="bluff-track-lbl">${lbl}</span>${ids.map((id) => {
       const ok = v.allowed.includes(id);
-      return `<span class="bluff-tk ${ok ? 'ok' : 'wait'}"><i>${ok ? '✓' : ''}</i>${id === me ? 'You' : esc(short(P(v, id)?.name))}</span>`;
+      return `<span class="bluff-tk ${ok ? 'ok' : 'wait'}"><i>${ok ? uiIcon('check') : ''}</i>${tinyFace(v, id, ctx)}${id === me ? 'You' : esc(short(P(v, id)?.name))}</span>`;
     }).join('')}</div>`;
   } else if (v.phase === 'lose') {
-    h += `<div class="bluff-track"><span class="bluff-tk wait"><i></i>${nm(v.respond[0])} ${v.respond[0] === me ? 'must' : 'must'} give up a card</span></div>`;
+    h += `<div class="bluff-track"><span class="bluff-tk wait"><i></i>${tinyFace(v, v.respond[0], ctx)}${nm(v.respond[0])} ${v.respond[0] === me ? 'must' : 'must'} give up a card</span></div>`;
   } else if (v.phase === 'exchange') {
-    h += `<div class="bluff-track"><span class="bluff-tk wait"><i></i>${nm(v.respond[0])} ${v.respond[0] === me ? 'are' : 'is'} choosing cards</span></div>`;
+    h += `<div class="bluff-track"><span class="bluff-tk wait"><i></i>${tinyFace(v, v.respond[0], ctx)}${nm(v.respond[0])} ${v.respond[0] === me ? 'are' : 'is'} choosing cards</span></div>`;
   }
   return h;
 }
@@ -1486,29 +1611,32 @@ function mineHTML(v, meP, st) {
     const drawnKeys = v.exchange.drawn.map((c) => c.k);
     cards = pool.filter((c) => !c.up).map((c) => {
       const kept = ui.ex.includes(c.k);
-      return cardHTML(c, { now: st.now, mine: true, newAt: handAt.get(key(c.k)), cls: 'pick ' + (kept ? 'chosen' : 'dropped'), attrs: `data-do="ex" data-k="${esc(c.k)}" role="button" tabindex="0"`,
+      return cardHTML(c, { now: st.now, mine: true, newAt: handAt.get(key(c.k)), cls: 'pick ' + (kept ? 'chosen' : 'dropped') + (st.tapped === c.k ? ' tapped' : ''), attrs: `data-do="ex" data-k="${esc(c.k)}" role="button" tabindex="0"`,
         ribbon: kept ? '<span class="bluff-ribbon">KEEP</span>' : '<span class="bluff-ribbon red">RETURN</span>', tag: drawnKeys.includes(c.k) ? '<span class="bluff-newtag">Drawn</span>' : '' });
     }).join('') + meP.cards.filter((c) => c.up).map((c) => cardHTML(c, { now: st.now, mine: true })).join('');
   } else {
     cards = meP.cards.map((c) => {
       if (losing && !c.up) {
         const doomed = ui.sel === c.k;
-        return cardHTML(c, { now: st.now, mine: true, newAt: handAt.get(key(c.k)), cls: 'pick glow' + (doomed ? ' doomed' : ''), attrs: `data-do="sel" data-k="${esc(c.k)}" role="button" tabindex="0"`, ribbon: doomed ? '<span class="bluff-ribbon red">REVEAL</span>' : '' });
+        return cardHTML(c, { now: st.now, mine: true, newAt: handAt.get(key(c.k)), cls: 'pick glow' + (doomed ? ' doomed' : '') + (st.tapped === c.k ? ' tapped' : ''), attrs: `data-do="sel" data-k="${esc(c.k)}" role="button" tabindex="0"`, ribbon: doomed ? '<span class="bluff-ribbon red">REVEAL</span>' : '' });
       }
       return cardHTML(c, { now: st.now, mine: true, newAt: handAt.get(key(c.k)) });
     }).join('');
   }
   const turn = !v.over && v.players[v.turn].id === me;
-  return `<div class="bluff-mine${turn ? ' turn' : ''}${meP.out ? ' out' : ''}${v.over && v.winners.includes(me) ? ' win' : ''}" data-a="p-${esc(me)}-seat">${saysHTML(v, me)}
+  return `<div class="bluff-mine${turn ? ' turn' : ''}${meP.out ? ' out' : ''}${v.over && v.winners.includes(me) ? ' win' : ''}${st.gained.has(me) ? ' gain' : ''}" data-a="p-${esc(me)}-seat" style="--pc:${color}">${saysHTML(v, me)}
 <div class="bluff-mine-info">
-<div class="bluff-mine-name">${avatarHTML(meP, color)}<span>${esc(meP.name)}</span><small>You</small>${flagHTML(v, me).replace('bluff-flag', 'bluff-flag bluff-flag-inline')}</div>
+<div class="bluff-mine-name">${avatarHTML(meP, color, st.ctx)}<span>${esc(meP.name)}</span><span class="tag t-you">You</span>${flagHTML(v, me).replace('bluff-flag', 'bluff-flag bluff-flag-inline')}</div>
 ${purseHTML(meP, true)}
 ${meP.claims.length ? `<div class="bluff-secret">Claimed: ${claimsHTML(meP)}</div>` : ''}
-<div class="bluff-secret">🔒 Only you see your hidden cards</div>
+<div class="bluff-secret">${uiIcon('eye')}Only you see your hidden cards</div>
 </div>
 <div class="bluff-hand${exch ? ' ex' : ''}" data-a="p-${esc(me)}-hand">${cards}</div>
 </div>`;
 }
+
+const ALLOW_BTN = `<button class="good" data-do="allow">${uiIcon('check')}Allow</button>`;
+const CHALLENGE_BTN = `<button class="bad" data-do="challenge">${icon('coup', 'ic')}Challenge!</button>`;
 
 function controlsHTML(v, meP, ctx) {
   const me = ctx.me;
@@ -1516,7 +1644,7 @@ function controlsHTML(v, meP, ctx) {
   const nm = (id) => esc(P(v, id)?.name || '?');
   if (v.over) {
     const w = P(v, v.winners[0]);
-    return `<div class="bluff-winner"><div class="winner-banner">♛ ${w ? (w.id === me ? 'You rule' : esc(w.name) + ' rules') : 'Nobody rules'} the Court ♛</div><div class="bluff-hint wait"><small>Every secret is now revealed. The host can start a new game.</small></div></div>`;
+    return `<div class="bluff-winner"><div class="winner-banner">${uiIcon('crown')} ${w ? (w.id === me ? 'You rule' : esc(w.name) + ' rules') : 'Nobody rules'} the Court</div><div class="bluff-hint wait"><small>Every secret is now revealed. The host can start a new game.</small></div></div>`;
   }
   if (!meP) return `<div class="bluff-hint wait">You are watching the court.</div>`;
   if (meP.out) return `<div class="bluff-hint wait">You have been banished.<small>Watch the intrigue unfold — your cards are revealed to all.</small></div>`;
@@ -1528,7 +1656,7 @@ function controlsHTML(v, meP, ctx) {
     const mine = hidden(meP).map((c) => c.role);
     const rivals = alive(v).filter((p) => p.id !== me);
     if (ui.pick) {
-      return `<div class="bluff-hint">Tap a rival's seat to ${A[ui.pick].name}<small>${ui.pick === 'plunder' ? 'Only rivals with coins can be plundered.' : 'They will lose an influence.'}</small></div><div class="bluff-resp"><button data-do="cancel">Cancel</button></div>`;
+      return `<div class="bluff-hint">Tap a rival's seat to ${A[ui.pick].name}<small>${ui.pick === 'plunder' ? 'Only rivals with coins can be plundered.' : 'They will lose an influence.'}</small></div><div class="bluff-resp"><button data-do="cancel">${uiIcon('close')}Cancel</button></div>`;
     }
     const must = coins >= 10;
     const btn = (action) => {
@@ -1538,7 +1666,7 @@ function controlsHTML(v, meP, ctx) {
       if (def.cost && coins < def.cost) ok = false;
       if (action === 'plunder' && !rivals.some((p) => p.coins > 0)) ok = false;
       const held = role && mine.includes(role);
-      const color = role ? R[role].color : action === 'coup' ? '#a8202c' : '#b8862b';
+      const color = role ? R[role].color : action === 'coup' ? '#c8283a' : COIN_HUE;
       return `<button class="bluff-act" data-do="${def.target ? 'pick' : 'act'}" data-action="${action}"${ok ? '' : ' disabled'} style="--rc:${color}">
 <span class="bluff-act-ic">${icon(role || action)}</span><span class="bluff-act-l"><b>${def.name}</b><small>${role ? R[role].name + ' · ' : ''}${def.sub}</small></span>
 ${role ? `<span class="bluff-tag ${held ? 'held' : 'bluff'}">${held ? 'Held' : 'Bluff'}</span>` : ''}</button>`;
@@ -1557,17 +1685,17 @@ ${role ? `<span class="bluff-tag ${held ? 'held' : 'bluff'}">${held ? 'Held' : '
     const def = A[pd.action];
     const vsYou = pd.target === me;
     return `<div class="bluff-hint">${nm(pd.actor)} claims the ${R[pd.claim].name} to ${def.name}${pd.target ? (vsYou ? ' you' : ' ' + nm(pd.target)) : ''}.<small>Challenge if you think it's a bluff. Whoever is wrong loses an influence.${vsYou && def.blockers ? ' Allowing lets you block next.' : ''}</small></div>
-<div class="bluff-resp"><button class="good" data-do="allow">✓ Allow</button><button class="bad" data-do="challenge">⚔ Challenge!</button></div>`;
+<div class="bluff-resp">${ALLOW_BTN}${CHALLENGE_BTN}</div>`;
   }
   if (v.phase === 'block') {
     const def = A[pd.action];
     const msg = pd.action === 'aid' ? `${nm(pd.actor)} wants Foreign Aid (+2).` : pd.action === 'assassinate' ? `${nm(pd.actor)}'s Shadow is coming for you!` : `${nm(pd.actor)} will plunder up to 2 of your coins.`;
     return `<div class="bluff-hint">${msg}<small>Block by claiming ${def.blockers.map((r) => 'the ' + R[r].name).join(' or ')} — or let it happen.</small></div>
-<div class="bluff-resp"><button class="good" data-do="allow">✓ Allow</button>${def.blockers.map((r) => `<button class="blockbtn" data-do="block" data-role="${r}" style="--rc:${R[r].color}">${icon(r)} Block as ${R[r].name}${tagFor(r)}</button>`).join('')}</div>`;
+<div class="bluff-resp">${ALLOW_BTN}${def.blockers.map((r) => `<button class="blockbtn" data-do="block" data-role="${r}" style="--rc:${R[r].color}">${icon(r)} Block as ${R[r].name}${tagFor(r)}</button>`).join('')}</div>`;
   }
   if (v.phase === 'blockChallenge') {
     return `<div class="bluff-hint">${nm(pd.blocker)} claims the ${R[pd.blockRole].name} to block${pd.actor === me ? ' your' : ' ' + nm(pd.actor) + "'s"} ${A[pd.action].name}.<small>Challenge the block if you think it's a bluff.</small></div>
-<div class="bluff-resp"><button class="good" data-do="allow">✓ Allow</button><button class="bad" data-do="challenge">⚔ Challenge!</button></div>`;
+<div class="bluff-resp">${ALLOW_BTN}${CHALLENGE_BTN}</div>`;
   }
   if (v.phase === 'lose') {
     const sel = ui.sel && meP.cards.find((c) => c.k === ui.sel);
@@ -1578,7 +1706,7 @@ ${role ? `<span class="bluff-tag ${held ? 'held' : 'bluff'}">${held ? 'Held' : '
     const need = hidden(meP).length;
     const n = ui.ex.length;
     return `<div class="bluff-hint">Keep ${need} card${need > 1 ? 's' : ''}, return the rest<small>Tap cards to toggle KEEP / RETURN. Returned cards are shuffled into the deck.</small></div>
-<div class="bluff-resp"><button class="primary" data-do="exchange"${n === need ? '' : ' disabled'}>${n === need ? 'Confirm exchange' : `Select ${need - n > 0 ? need - n + ' more' : n - need + ' fewer'}`}</button></div>`;
+<div class="bluff-resp"><button class="primary" data-do="exchange"${n === need ? '' : ' disabled'}>${n === need ? `${uiIcon('check')}Confirm exchange` :`Select ${need - n > 0 ? need - n + ' more' : n - need + ' fewer'}`}</button></div>`;
   }
   return '';
 }
@@ -1627,7 +1755,7 @@ function ledgerHTML(v, meP) {
 
 function logHTML(v) {
   const rx = new RegExp(`\\b(${ROLES.map((r) => R[r].name).join('|')})\\b`, 'g');
-  const byName = Object.fromEntries(ROLES.map((r) => [R[r].name, R[r].ink]));
+  const byName = Object.fromEntries(ROLES.map((r) => [R[r].name, shade(R[r].color, 0.4)]));
   return (v.log || []).map((l) => `<div>${esc(l).replace(rx, (m) => `<b style="color:${byName[m]}">${m}</b>`)}</div>`).join('');
 }
 
@@ -1654,28 +1782,41 @@ function render(el, v, ctx) {
   const myIdx = v.players.findIndex((p) => p.id === me);
   const opps = myIdx < 0 ? v.players.slice() : [...v.players.slice(myIdx + 1), ...v.players.slice(0, myIdx)];
   const pickable = ui.pick ? opps.filter((p) => isAlive(p) && (ui.pick !== 'plunder' || p.coins > 0)).map((p) => p.id) : [];
-  const st = { now, pickable };
+  // Whose purse grew since the last render? Their seat glows once as the coins land.
+  const gained = new Set(v.players.filter((p) => { const had = prevCoins.get(v.gid + '|' + p.id); return had != null && p.coins > had; }).map((p) => p.id));
+  prevCoins = new Map(v.players.map((p) => [v.gid + '|' + p.id, p.coins]));
+  // The card just tapped lifts (or drops) with a short spring; other redraws leave it still.
+  const tapped = ui.tapped;
+  ui.tapped = null;
+  const st = { now, pickable, ctx, gained, tapped };
   const sMine = myAct;
+  const revealed = v.players.reduce((n, p) => n + p.cards.filter((c) => c.up).length, 0);
 
   el.innerHTML = `${DEFS}
 <div class="game-layout bluff">
   <div class="bluff-board">
     <div class="felt bluff-table" data-a="table">
-      <button class="small bluff-refbtn" data-do="ref" title="Role reference">${icon('scroll')}<span>Roles</span></button>
+      <div class="bluff-glow" aria-hidden="true"></div>
+      <button class="small bluff-refbtn" data-do="ref" title="Role reference" aria-label="Role reference">${uiIcon('book')}<span>Roles</span></button>
       <div class="bluff-opps n${opps.length}">${opps.map((p) => seatHTML(v, p, st)).join('')}</div>
-      <div class="bluff-center">${treasuryHTML()}<div class="bluff-stage">${stageHTML(v, me)}</div>${deckHTML(v, now)}</div>
+      <div class="bluff-center">${treasuryHTML()}<div class="bluff-stage">${stageHTML(v, me, ctx)}</div>${deckHTML(v, now)}</div>
       ${meP ? mineHTML(v, meP, st) : ''}
       <div class="bluff-ctrl">${controlsHTML(v, meP, ctx)}</div>
     </div>
   </div>
   <div class="side bluff-side">
-    <div class="panel"><div class="status${sMine ? ' myturn' : ''}">${statusText(v, me)}</div>
-      <div class="small muted" style="margin:4px 0 10px">${v.over ? 'All cards are now face-up.' : `Round ${Math.max(1, Math.ceil(v.turnSeq / Math.max(1, v.players.length)))} · ${alive(v).length} courtiers remain`}</div>
-      <button class="small" data-do="ref">${'📜'} Role reference</button></div>
-    <div class="panel"><h3 class="gold" style="margin-top:0">Court Ledger</h3>${ledgerHTML(v, meP)}</div>
-    <div class="panel"><h3 class="gold" style="margin-top:0">Chronicle</h3><div class="parchment log bluff-log">${logHTML(v)}</div></div>
+    <div class="panel bluff-statuspanel"><div class="status${sMine ? ' myturn' : ''}">${statusText(v, me)}</div>
+      <div class="small muted bluff-round">${v.over ? 'All cards are now face-up.' : `Round ${Math.max(1, Math.ceil(v.turnSeq / Math.max(1, v.players.length)))} · ${alive(v).length} courtiers remain`}</div>
+      <button class="small bluff-refside" data-do="ref">${uiIcon('book')}Role reference</button></div>
+    <details class="panel drawer bluff-ledgerbox" ${ledgerOpen ? 'open' : ''}><summary>${uiIcon('eye')}<span>Court Ledger</span><span class="note">${revealed} of 15 revealed</span>${uiIcon('chevron', 'chev')}</summary>
+      <div class="drawer-body">${ledgerHTML(v, meP)}</div></details>
+    <details class="panel drawer bluff-chronicle" ${chronOpen ? 'open' : ''}><summary>${uiIcon('clock')}<span>Chronicle</span><span class="note">${esc(v.log?.[0] || '')}</span>${uiIcon('chevron', 'chev')}</summary>
+      <div class="drawer-body"><div class="log bluff-log">${logHTML(v)}</div></div></details>
   </div>
 </div>`;
+  // <details> toggle events don't bubble, so listen on each drawer after it is drawn.
+  el.querySelector('.bluff-ledgerbox')?.addEventListener('toggle', (e) => { ledgerOpen = e.currentTarget.open; });
+  el.querySelector('.bluff-chronicle')?.addEventListener('toggle', (e) => { chronOpen = e.currentTarget.open; });
 
   el.onclick = (e) => {
     const t = e.target.closest('[data-do]');
@@ -1696,12 +1837,13 @@ function render(el, v, ctx) {
     if (d === 'allow') { sound('click'); ctx.send({ type: 'allow' }); return; }
     if (d === 'challenge') { ctx.send({ type: 'challenge' }); return; }
     if (d === 'block') { sound('click'); ctx.send({ type: 'block', role: t.dataset.role }); return; }
-    if (d === 'sel') { sound('click'); ui.sel = t.dataset.k; return rerender(); }
+    if (d === 'sel') { sound('click'); ui.sel = ui.tapped = t.dataset.k; return rerender(); }
     if (d === 'lose') { if (ui.sel) { sound('click'); ctx.send({ type: 'lose', card: ui.sel }); } return; }
     if (d === 'ex') {
       sound('click');
       const k = t.dataset.k;
       const need = hidden(meP).length;
+      ui.tapped = k;
       if (ui.ex.includes(k)) ui.ex = ui.ex.filter((x) => x !== k);
       else { ui.ex = ui.ex.concat(k); if (ui.ex.length > need) ui.ex = ui.ex.slice(ui.ex.length - need); }
       return rerender();
@@ -1781,7 +1923,7 @@ function playEv(e, v, me, nm) {
         banner({ color: '#a8202c', icon: 'coup', who: `${nm(e.pid)} ${you ? 'stage' : 'stages'} a`, big: 'Coup', sub: `against ${nm(e.target)} · unstoppable` });
         sound('bad');
       } else {
-        banner({ color: '#9a6a1e', icon: e.action, who: `${nm(e.pid)} ${you ? 'take' : 'takes'}`, big: def.name, sub: e.action === 'aid' ? '+2 coins · a Chancellor may block' : '+1 coin · cannot be stopped' });
+        banner({ color: COIN_HUE, icon: e.action, who: `${nm(e.pid)} ${you ? 'take' : 'takes'}`, big: def.name, sub: e.action === 'aid' ? '+2 coins · a Chancellor may block' : '+1 coin · cannot be stopped' });
         sound('card');
       }
       break;
@@ -1881,9 +2023,10 @@ function openRef() {
   const bg = document.createElement('div');
   bg.className = 'modal-bg bluff-refbg';
   bg.innerHTML = `<div class="modal panel bluff-ref" role="dialog" aria-label="Court roles">
-<div class="row"><h2 class="grow">The Court</h2><button class="small" data-close>Close</button></div>
+<button class="icon-btn bluff-refx" data-close aria-label="Close">${uiIcon('close')}</button>
+<h2>The Court</h2>
 <p class="small muted" style="margin:6px 0 0">15 cards: three of each role. Claim any role — truthfully or not.</p>
-<div class="bluff-ref-grid">${ROLES.map((r) => `<div class="bluff-ref-role">${staticCard(r, '76px')}<div><h3 style="color:${shade(R[r].color, 0.3)}">${R[r].name}</h3><p>${R[r].act}</p><p class="b">${R[r].blk}</p></div></div>`).join('')}</div>
+<div class="bluff-ref-grid">${ROLES.map((r) => `<div class="bluff-ref-role" style="--rc:${R[r].color}">${staticCard(r, '76px')}<div><h3 style="color:${shade(R[r].color, 0.4)}">${R[r].name}</h3><p>${R[r].act}</p><p class="b">${R[r].blk}</p></div></div>`).join('')}</div>
 <h3 class="gold">Common actions</h3>
 <ul><li><b>Income</b> — take 1 coin. Can't be blocked or challenged.</li><li><b>Foreign Aid</b> — take 2 coins. Anyone claiming the Chancellor may block.</li><li><b>Coup</b> — pay 7: a rival loses an influence. Unstoppable. Mandatory with 10+ coins.</li></ul>
 <h3 class="gold">Challenges</h3>
