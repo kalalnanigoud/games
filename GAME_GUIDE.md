@@ -35,6 +35,12 @@ export default {
 
 `ctx` = `{ me, players, name(id), isBot(id), send(action), isHost, local }`.
 
+### Simultaneous games (optional)
+Set `simultaneous: true` when `turnOf` lists every player all the time (the escape rooms do). The platform then
+skips the "your turn" chime and title. Bots in such games should usually return an action that changes nothing
+(the escape rooms use `{ type: 'think' }`); the platform doesn't save or resend a state that didn't change.
+Escape rooms themselves are built from data with `games/escape-kit.js`; see `keeper.js` and `signal.js`.
+
 ### Turn timer (optional)
 Export `onTimeout(view, pid)` (and optionally `defaultTimer: 30`) to give your game a per-move clock.
 The host picks the length in the lobby. When a human's time runs out, the host plays

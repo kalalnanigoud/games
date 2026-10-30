@@ -1,8 +1,9 @@
 <!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Game Night browser checks</title><link rel="stylesheet" href="/css/style.css"><body><main><h1>Browser render checks</h1><button id="run">Run all games</button><pre id="result" style="white-space:pre-wrap">Ready</pre></main><script type="module">
 import {audit} from './render-audit.js';
+globalThis.escapeBotPatience = 0; // escape-room bots normally wait for humans before solving puzzles
 document.querySelector('#run').onclick = async () => {
  const result = document.querySelector('#result'); result.textContent='Running';
- try { const results=await audit(['hexisle','gems','mosaic','bluff'],{maxSteps:3000,every:15}); result.textContent=JSON.stringify({width:document.documentElement.clientWidth,results},null,2); }
+ try { const results=await audit(['hexisle','gems','mosaic','bluff','temple','ember','keeper','signal'],{maxSteps:3000,every:15}); result.textContent=JSON.stringify({width:document.documentElement.clientWidth,results},null,2); }
  catch(e) { result.textContent='FAILED: '+e.stack; }
 };
 </script></body></html>

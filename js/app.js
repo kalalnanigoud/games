@@ -319,12 +319,15 @@ function onConnClosed(conn) {
 function applyAction(pid, action) {
   if (!S.started || !action) return 'Game not running.';
   const g = getGame(S.gameId);
+  const before = JSON.stringify(S.game);
   const next = structuredClone(S.game);
   try {
     g.act(next, pid, action);
   } catch (e) {
     return e.message || String(e);
   }
+  // A move that changed nothing (a bot pausing to think) needs no save or resend.
+  if (JSON.stringify(next) === before) { scheduleBots(); return null; }
   S.game = next;
   if (S.role === 'local') followTurn();
   saveSession();
@@ -840,7 +843,8 @@ function renderGame() {
   lastGameKey = key;
   const isHost = S.role === 'host' || S.role === 'local';
   const turn = g.turnOf ? g.turnOf(S.view) : [];
-  const myTurn = turn.includes(myId());
+  // In simultaneous games everyone can always act, so there is no "your turn" moment.
+  const myTurn = turn.includes(myId()) && !g.simultaneous;
   if (myTurn && !wasMyTurn && S.role !== 'local') {
     // Browsers only allow vibration after the player has tapped the page.
     if (navigator.userActivation?.hasBeenActive) try { navigator.vibrate?.(80); } catch {}
@@ -889,12 +893,12 @@ function renderGame() {
     console.warn('animation error', e);
   }
   if (changed('over', !!S.view.over) && S.view.over) {
+    if (S.view.won === false) sound('bad');
     // Let the game finish its own end-of-game animation first.
     let waited = 0;
     const celebrate = () => {
       if (g.isAnimating?.() && (waited += 300) < 20000) return setTimeout(celebrate, 300);
-      confetti();
-      sound('win');
+      if (S.view.won !== false) { confetti(); sound('win'); }
     };
     celebrate();
   }

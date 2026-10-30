@@ -15,6 +15,11 @@ import gems from './gems.js';
 import mosaic from './mosaic.js';
 import bluff from './bluff.js';
 
-export const GAMES = [hexisle, gems, mosaic, bluff];
+import temple from './temple.js';
+import ember from './ember.js';
+import keeper from './keeper.js';
+import signal from './signal.js';
+
+export const GAMES = [hexisle, gems, mosaic, bluff, temple, ember, keeper, signal];
 
 export const getGame = (id) => GAMES.find((g) => g.id === id) || GAMES[0];
