@@ -370,3 +370,9 @@ input.code { text-transform: uppercase; letter-spacing: .25em; font-weight: 800;
 .tour-table li { display: flex; gap: 8px; padding: 5px 0; border-bottom: 1px dashed rgba(242, 200, 130, .2); }
 .tour-table li.champ { color: var(--gold); font-weight: 800; }
 .tour-bar { flex-basis: 100%; font-size: .85rem; color: var(--gold); padding: 6px 12px; border-radius: 10px; background: rgba(0, 0, 0, .3); border: 1px solid rgba(242, 193, 78, .3); }
+
+/* ---------- connection quality and updates ---------- */
+.dot.q-good { background: var(--good); box-shadow: 0 0 6px rgba(123, 216, 143, .8); }
+.dot.q-ok { background: var(--gold); box-shadow: 0 0 6px rgba(242, 193, 78, .8); }
+.dot.q-bad { background: var(--bad); box-shadow: 0 0 6px rgba(255, 122, 107, .8); }
+#updateBar { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: center; padding: 8px 14px; background: linear-gradient(180deg, #2c4a3a, #1d3328); border-bottom: 1px solid var(--good); color: #e0ffe8; font-weight: 700; font-size: .9rem; text-align: center; }

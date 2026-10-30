@@ -12,6 +12,9 @@ const run = (...args) => {
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status || 1);
 };
+// The catalog (names, covers, version) is generated from the game files. Locally it is rebuilt;
+// on GitHub (CI=true) a stale catalog fails the run, because the live site would serve it.
+run('tools/build-catalog.mjs', ...(process.env.CI ? ['--check'] : []));
 run('--check', 'serve.js');
 for (const dir of ['js', 'games', 'tools']) {
   for (const file of readdirSync(new URL(`../${dir}/`, import.meta.url))) {

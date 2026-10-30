@@ -190,9 +190,11 @@ function timeUp(s, loser) {
   return finish(s, winner, `${loser.name} ran out of time. ${winner.name} wins.`);
 }
 
-function setup(players, opts = {}) {
+// extra.previous: the game just finished, for a rematch. The players swap colours.
+function setup(players, opts = {}, extra = {}) {
   if (players.length !== 2) throw Error('Chess needs exactly 2 players.');
-  const white = rand(2);
+  const wasWhite = extra.previous?.players?.find((p) => p.color === 'w')?.id;
+  const white = players.some((p) => p.id === wasWhite) ? players.findIndex((p) => p.id !== wasWhite) : rand(2);
   const s = {
     phase: 'play', over: false, winners: [], result: '', reason: '',
     players: players.map((p, i) => ({ id: p.id, name: p.name, color: i === white ? 'w' : 'b' })),

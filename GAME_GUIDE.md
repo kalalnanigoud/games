@@ -123,7 +123,8 @@ All helpers are in `js/fx.js`, and sounds are in `js/sound.js`.
 
 ## Testing (required)
 
-1. Rules: `node tools/sim.mjs <id> <players> <runs>` plays full bot games and checks every move.
+1. Add the game to `games/index.js` and run `node tools/build-catalog.mjs` (the site lists games from `games/catalog.js`).
+   Rules: `node tools/sim.mjs <id> <players> <runs>` plays full bot games and checks every move.
    It must pass for **every** supported player count (e.g. 50 runs each).
 2. Visuals: a dev server is running at http://localhost:8080. Open **your own browser tab** (`tabs_create`), choose
    your game → **One device**, remove "Player 2", and add bots so you can watch and play. Check it at desktop size and at

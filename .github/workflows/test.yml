@@ -1,0 +1,40 @@
+# Runs on every push and pull request, so a broken change is caught before it reaches the live site.
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rules:
+    name: Rules, platform and simulated games
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Command-line checks
+        run: node tools/test.mjs 20
+        env:
+          CI: 'true'
+
+  browser:
+    name: Rendering at phone and desktop sizes
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install a headless browser
+        run: |
+          npm install --no-save --no-package-lock playwright@1
+          npx playwright install --with-deps chromium
+      - name: Browser checks
+        run: node tools/browser-ci.mjs
