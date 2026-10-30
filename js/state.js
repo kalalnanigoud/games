@@ -45,6 +45,7 @@ export const S = {
   voice: [], // [player id, PeerJS id] for everyone in voice chat (kept by the host)
   tour: null, // tournament in progress (js/tour.js), kept by the host
   successor: null, // who takes over the room if the host disappears
+  backupHost: '', // host's explicitly trusted successor; empty disables migration
   backup: null, // successor only: the host's latest copy of the room
   net: {}, // round-trip time to the host in ms, per player
   relay: false, // client: our connection goes through a TURN relay
@@ -82,16 +83,34 @@ export const newerVersion = (a, b) => String(a) > String(b);
 
 // Saved in sessionStorage (survives a refresh of this tab) and localStorage
 // (lets you resume after closing the browser).
+let saveTimer = null;
+let saveWarned = false;
+export function queueSessionSave() {
+  // Throttle, rather than trailing debounce: continuous drawing still saves.
+  if (!saveTimer) saveTimer = setTimeout(saveSession, 750);
+}
 export function saveSession() {
+  clearTimeout(saveTimer);
+  saveTimer = null;
   if (!S.role) return;
   const data = S.role === 'client'
     ? { role: 'client', code: S.code, token: S.token, secret: S.secret }
     : { role: S.role, code: S.code, token: S.token, secret: S.secret, credentials: S.credentials, gameId: S.gameId, players: S.players, started: S.started, game: S.game, viewAs: S.viewAs, timerSec: S.timerSec, opts: S.opts, tour: S.tour };
+  if (S.role === 'host') data.backupHost = S.backupHost;
   data.version = 3;
   const json = JSON.stringify(data);
-  sessionStorage.setItem('gn-session', json);
-  localStorage.setItem('gn-session', json);
+  for (const storage of [sessionStorage, localStorage]) {
+    try { storage.setItem('gn-session', json); }
+    catch (error) {
+      // A full store must not prevent the move from being broadcast.
+      if (!saveWarned) console.warn('Could not save this game on this device.', error);
+      saveWarned = true;
+    }
+  }
 }
+export function flushSessionSave() { if (saveTimer) saveSession(); }
+addEventListener('pagehide', flushSessionSave);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSessionSave(); });
 export const parse = (s) => {
   try {
     const v = JSON.parse(s);
@@ -106,4 +125,4 @@ export const parse = (s) => {
 };
 export const loadTabSession = () => parse(sessionStorage.getItem('gn-session'));
 export const loadSession = () => loadTabSession() || parse(localStorage.getItem('gn-session'));
-export const clearSession = () => { sessionStorage.removeItem('gn-session'); localStorage.removeItem('gn-session'); };
+export const clearSession = () => { clearTimeout(saveTimer); saveTimer = null; sessionStorage.removeItem('gn-session'); localStorage.removeItem('gn-session'); };

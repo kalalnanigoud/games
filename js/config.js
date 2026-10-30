@@ -1,9 +1,10 @@
 // Network settings.
 //
 // STUN servers let most players connect directly to each other for free.
-// Some mobile networks block direct connections; for those you can add a
-// free TURN relay (e.g. Cloudflare Realtime TURN or Metered free plan) below.
-// Board games send only a few KB per move, so a free plan is plenty.
+// Some mobile networks block direct connections; for those a TURN relay is needed.
+// Use short-lived credentials from your own authenticated service for production;
+// never commit a permanent provider secret. Voice can use substantially more
+// bandwidth than game moves. No relay is provisioned by this static app.
 //
 // Example TURN entry (replace with your own credentials):
 //   { urls: 'turn:global.relay.metered.ca:443', username: 'xxx', credential: 'yyy' },

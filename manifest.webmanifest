@@ -1,7 +1,7 @@
 {
   "name": "Game Night",
   "short_name": "Game Night",
-  "description": "Beautiful multiplayer strategy board games. Free, no sign-up, on any phone or computer.",
+  "description": "Party games, strategy, and cooperative adventures with friends. Free, no sign-up, on any phone or computer.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

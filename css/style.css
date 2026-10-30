@@ -376,3 +376,13 @@ input.code { text-transform: uppercase; letter-spacing: .25em; font-weight: 800;
 .dot.q-ok { background: var(--gold); box-shadow: 0 0 6px rgba(242, 193, 78, .8); }
 .dot.q-bad { background: var(--bad); box-shadow: 0 0 6px rgba(255, 122, 107, .8); }
 #updateBar { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: center; padding: 8px 14px; background: linear-gradient(180deg, #2c4a3a, #1d3328); border-bottom: 1px solid var(--good); color: #e0ffe8; font-weight: 700; font-size: .9rem; text-align: center; }
+/* Library controls preserve the room/name inputs while only results update. */
+.library-tools { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.library-tools label { display: flex; flex: 1 1 135px; flex-direction: column; gap: 6px; font-size: .85rem; min-width: 0; }
+.library-tools .library-search { flex-basis: 240px; }
+.library-tools input, .library-tools select { width: 100%; min-width: 0; min-height: 44px; }
+.library-tools button { min-height: 44px; }
+.game-meta { color: var(--gold); font-size: .8rem; line-height: 1.6; }
+.game-card .row .favorite { flex: 0 0 44px; min-width: 44px; min-height: 44px; font-size: 1.3rem; }
+.game-card .favorite[aria-pressed="true"] { color: var(--gold); }
+.library-empty { grid-column: 1 / -1; text-align: center; }

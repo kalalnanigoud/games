@@ -15,7 +15,7 @@ const storage = () => { const data = new Map(); return { getItem: k => data.get(
 const tasks = new Map(); let nextTimer = 0;
 const loaders = Object.fromEntries(GAMES.map((g) => [g.id, async () => ({ default: g })]));
 const context = { CATALOG: GAMES, loaders, VERSION, FILES, CONFIG, uid, randomCode, reconnectSecret, sha256hex, diff, apply, console, structuredClone, TextEncoder,
-  createVoice, createTour, currentMatch, recordResult, standings, tourLine, confirm: () => true,
+  createVoice, createTour, currentMatch, recordResult, standings, tourLine, rememberPlayed() {}, confirm: () => true,
   sessionStorage: storage(), localStorage: storage(), document: { getElementById: () => ({}), addEventListener() {} },
   addEventListener() {}, setInterval() {}, clearInterval() {}, setTimeout(fn) { tasks.set(++nextTimer, fn); return nextTimer; }, clearTimeout(id) { tasks.delete(id); },
   toast() {}, history: { replaceState() {} }, location: {pathname:'/'},
@@ -33,6 +33,22 @@ globalThis.test = { S, conns, onHostMessage, onConnClosed, saveSession, resume, 
 `, context);
 const t = context.test;
 const json = (x) => JSON.parse(JSON.stringify(x));
+// A fresh client receives a private view before its game module has downloaded.
+const coldView = getGame('gems').setup([{id:'cold',name:'Cold'},{id:'host',name:'Host'}]);
+t.S.role='client'; t.S.token='cold'; t.S.game=null;
+const cold = {t:'sync',seq:1,gameId:'gems',started:true,view:coldView,players:[],hostId:'host'};
+t.onClientMessage(cold);
+await t.loadGame('gems');
+await Promise.resolve();
+assert.deepEqual(json(t.S.view),coldView,'lazy loading must retain the received client view');
+t.onClientMessage({...cold,seq:0,view:null});
+assert.deepEqual(json(t.S.view),coldView,'stale snapshots must not replace newer state');
+t.onClientMessage({...cold,seq:4}); // fresh full snapshot, then simulate losing its base
+t.S.view=null;
+const lost = { ...cold, seq:5,from:4,patch:{}}; delete lost.view;
+t.onClientMessage(lost);
+assert.equal(t.S.view,null,'a delta cannot be applied to a missing base');
+t.cleanup(); t.S.started=false;
 for (const g of GAMES) await t.loadGame(g.id); // the site loads game code on demand
 const runTask = (fn) => { for (const [id, f] of [...tasks]) if (!fn || f === fn) { tasks.delete(id); f(); } };
 const secret = reconnectSecret(), otherSecret = reconnectSecret();
@@ -82,7 +98,10 @@ assert.equal(late.pid,'late'); assert.equal(t.S.players.find(p=>p.id==='late').w
 const watched=JSON.stringify(t.S.game); t.onHostMessage(late,{t:'action',action:{type:'take',gems:['white','black','red']}});
 assert.equal(JSON.stringify(t.S.game),watched); assert.match(late.sent.at(-1).msg,/watching/);
 t.onHostMessage(late,{t:'watch',on:false}); assert.match(late.sent.at(-1).msg,/game ends/); assert.equal(t.S.players.find(p=>p.id==='late').watch,true);
-assert.equal(t.S.successor, 'late', 'a spectator is preferred as the backup host');
+assert.equal(t.S.successor, null, 'hidden state is not automatically sent to a spectator');
+t.S.backupHost='late'; t.broadcast();
+assert.equal(t.S.successor,'late','only the explicitly trusted person receives a backup');
+t.S.backupHost=''; t.broadcast(); assert.equal(t.S.successor,null);
 t.S.players.push({id:'bot',name:'Bot',bot:true});
 const botThief=conn();t.onHostMessage(botThief,{t:'hello',token:'bot',secret});assert.equal(botThief.sent[0].fatal,true);
 t.saveSession();
@@ -107,13 +126,13 @@ assert.notEqual(JSON.stringify(t.S.game), beforeStandIn, 'the computer moved for
 const back=conn(); t.onHostMessage(back,{t:'hello',token:'guest',secret,name:'Guest'});
 assert.equal(guest.standIn, undefined); assert.equal(guest.away, undefined); assert.equal(t.standingIn('guest'), false, 'they get their seat back');
 // Backup host: the successor receives a copy of the room; if the host vanishes, it takes the room over.
-t.broadcast(); assert.equal(t.S.successor, 'guest');
+t.S.backupHost='guest'; t.broadcast(); assert.equal(t.S.successor, 'guest');
 runTask(); const backup = back.sent.find((m) => m.t === 'backup');
 assert.ok(backup); assert.equal(backup.data.code, t.S.code); assert.ok(!JSON.stringify(backup).includes(secret), 'the copy holds no reconnect secrets');
 const oldHost = { token: t.S.token, secret: t.S.secret }, game = JSON.stringify(backup.data.game);
 class FakePeer { constructor(id) { this.id = id || 'peer-' + uid(); this.handlers = {}; } on(e, f) { this.handlers[e] = f; } destroy() { this.destroyed = true; } connect() { return { on() {}, send() {}, close() {} }; } }
 context.Peer = FakePeer;
-t.cleanup(); Object.assign(t.S, { role: 'client', token: 'guest', secret, code: backup.data.code, successor: 'guest', backup: null });
+t.cleanup(); Object.assign(t.S, { role: 'client', token: 'guest', secret, code: backup.data.code, hostId: backup.data.hostId, successor: 'guest', backup: null });
 t.onClientMessage(backup); assert.ok(t.S.backup);
 t.S.lostAt = Date.now() - 1000; t.scheduleClientRetry(); assert.equal(t.S.role, 'client', 'the backup host waits for the host to come back first');
 t.S.lostAt = Date.now() - 16000; t.scheduleClientRetry();
@@ -139,7 +158,9 @@ t.S.opts={clock:'bogus'}; t.S.players.pop(); t.startGame(); assert.equal(t.S.opt
 // Voice chat: the host keeps the member list, shares it in every sync, and drops people who leave.
 t.S.started=false; t.S.voice=[];
 const talker=conn(); t.onHostMessage(talker,{t:'hello',token:'talker',secret:otherSecret,name:'Talker'});
+talker.peer='abc-123';
 t.onHostMessage(talker,{t:'voice',on:true,peer:'not a valid id!'}); assert.deepEqual(json(t.S.voice),[],'bad PeerJS ids are ignored');
+t.onHostMessage(talker,{t:'voice',on:true,peer:'someone-else'}); assert.deepEqual(json(t.S.voice),[],'a member cannot authorize an unrelated caller');
 t.onHostMessage(talker,{t:'voice',on:true,peer:'abc-123'}); assert.deepEqual(json(t.S.voice),[['talker','abc-123']]);
 assert.deepEqual(talker.sent.at(-1).voice,[['talker','abc-123']],'the member list travels with every sync');
 t.onHostMessage(talker,{t:'voice',on:false}); assert.deepEqual(json(t.S.voice),[]);

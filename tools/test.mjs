@@ -21,6 +21,6 @@ for (const dir of ['js', 'games', 'tools']) {
     if (/\.(js|mjs|cjs)$/.test(file)) run('--check', `${dir}/${file}`);
   }
 }
-for (const file of ['server-test.cjs', 'platform-test.mjs', 'gems-check.mjs', 'bluff-test.mjs', 'mosaic-test.mjs', 'coop-test.mjs', 'escape-test.mjs', 'chess-test.mjs', 'party-test.mjs']) run(`tools/${file}`);
+for (const file of ['server-test.cjs', 'platform-test.mjs', 'reliability-test.mjs', 'gems-check.mjs', 'bluff-test.mjs', 'mosaic-test.mjs', 'coop-test.mjs', 'escape-test.mjs', 'chess-test.mjs', 'party-test.mjs']) run(`tools/${file}`);
 for (const g of GAMES) for (let n = g.minPlayers; n <= g.maxPlayers; n++) run('tools/sim.mjs', g.id, String(n), String(runs));
 console.log('All command-line checks passed. Browser checks: /tools/browser-test.html and /tools/local-boot-test.html');

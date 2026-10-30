@@ -8,7 +8,8 @@ import { toast, randomCode, uid, sha256hex } from './util.js';
 import { createVoice } from './voice.js';
 import { createTour, currentMatch, recordResult } from './tour.js';
 import { diff, apply } from './patch.js';
-import { MAX_ROOM, MAX_WATCHERS, BOT_NAMES, S, VERSION, getGame, gameReady, loadGame, defaultTimer, defaultOpts, validOpts, seated, isWatching, adoptToken, myId, playerName, isBot, newerVersion, saveSession, clearSession } from './state.js';
+import { rememberPlayed } from './library.js';
+import { MAX_ROOM, MAX_WATCHERS, BOT_NAMES, S, VERSION, getGame, gameReady, loadGame, defaultTimer, defaultOpts, validOpts, seated, isWatching, adoptToken, myId, playerName, isBot, newerVersion, saveSession, queueSessionSave, flushSessionSave, clearSession } from './state.js';
 import { render, renderTopbar, paintNet } from './ui.js';
 
 const TAKEOVER_MS = 15000; // how long the backup host waits for the host to come back before taking over
@@ -46,6 +47,7 @@ export function resume(session) {
 }
 
 export function cleanup() {
+  flushSessionSave();
   voice.leave();
   S.voice = [];
   clearTimeout(botTimer);
@@ -80,7 +82,12 @@ export function leave() {
 // Game code loads on demand. Once it is here, bring the room up to date.
 function whenLoaded() {
   if (!S.gameId || gameReady(S.gameId)) return;
-  loadGame(S.gameId).then(() => { if (S.role) { refreshLocalView(); if (S.role === 'client') render(); else broadcast(); } })
+  const id = S.gameId;
+  loadGame(id).then(() => {
+    if (!S.role || S.gameId !== id) return;
+    // Clients already received their private view; they have no authoritative game.
+    if (S.role === 'client') render(); else broadcast();
+  })
     .catch(() => toast('Could not load the game. Check your connection and reload.'));
 }
 
@@ -104,6 +111,7 @@ export function hostRoom(gameId, resume = null) {
     screen: resume?.started ? 'game' : 'lobby',
     status: 'connecting',
     backup: null,
+    backupHost: resume?.backupHost || '',
   });
   const me = S.players.find((p) => p.id === S.token);
   if (me) { me.name = S.name; me.connected = true; delete me.away; delete me.standIn; }
@@ -220,7 +228,7 @@ export function onHostMessage(conn, msg) {
     const err = applyAction(conn.pid, msg.action);
     if (err) conn.open && conn.send({ t: 'error', msg: err });
   } else if (msg.t === 'voice') {
-    if (msg.on && (typeof msg.peer !== 'string' || !/^[\w-]{1,64}$/.test(msg.peer))) return;
+    if (msg.on && (typeof msg.peer !== 'string' || msg.peer !== conn.peer)) return;
     setVoiceMember(conn.pid, msg.on ? msg.peer : null);
   } else if (msg.t === 'watch') {
     const err = setWatch(conn.pid, !!msg.on);
@@ -293,7 +301,7 @@ export function applyAction(pid, action) {
     if (S.tour.done) restoreSeats();
   }
   if (S.role === 'local') followTurn();
-  saveSession();
+  if (S.game.over) saveSession(); else queueSessionSave();
   broadcast();
   return null;
 }
@@ -425,14 +433,13 @@ export function broadcast() {
 }
 
 /* ---------------- backup host ---------------- */
-// The host keeps one connected person (a spectator if possible, since they have the least to gain)
-// up to date with a copy of the room. If the host vanishes, that person takes the room over.
+// The host may explicitly trust one person with a copy of the entire room.
 // The copy holds only fingerprints of reconnect secrets, so it can't be used to pose as anyone.
-// It does include the whole game, hidden cards and all, which is why a spectator is preferred.
+// It includes hidden cards and puzzle answers. Migration is off until a successor is chosen.
 
 function pickSuccessor() {
   const live = S.players.filter((p) => p.id !== S.token && !p.bot && p.connected && conns.get(p.id)?.open);
-  return (live.find((p) => p.watch) || live[0])?.id || null;
+  return live.find((p) => p.id === S.backupHost)?.id || null;
 }
 function queueBackup() {
   if (backupTimer || !S.successor) return;
@@ -489,6 +496,7 @@ export function startGame(rematch = false) {
   S.opts = validOpts(g, S.opts);
   S.game = getGame(S.gameId).setup(table.map((p) => ({ id: p.id, name: p.name })), S.opts, previous ? { previous } : {});
   S.started = true;
+  rememberPlayed(S.gameId);
   S.screen = 'game';
   botFails = 0;
   if (S.role === 'local') { S.viewAs = null; followTurn(); }
@@ -677,10 +685,12 @@ export function onClientMessage(msg) {
     retries = 0;
     clearTimeout(retryTimer);
     let view = S.view;
+    if (!Number.isSafeInteger(msg.seq) || msg.seq <= viewSeq) return;
     if ('view' in msg) view = msg.view;
-    else if (msg.from === viewSeq) view = apply(S.view, msg.patch);
+    else if (msg.from === viewSeq && S.view != null && msg.gameId === S.gameId) view = apply(S.view, msg.patch);
     else { hostConn?.open && hostConn.send({ t: 'resync' }); return; } // missed an update: ask for a full copy
     viewSeq = msg.seq;
+    if (msg.started && (!S.started || S.gameId !== msg.gameId)) rememberPlayed(msg.gameId);
     Object.assign(S, { players: msg.players, gameId: msg.gameId, started: msg.started, view, hostId: msg.hostId, synced: true, timerSec: msg.timerSec || 0, timer: msg.timer || null, opts: msg.opts || {}, voice: msg.voice || [], tour: msg.tour || null, successor: msg.successor || null });
     S.update = msg.v && msg.v !== VERSION ? { newer: newerVersion(msg.v, VERSION) } : null;
     if (S.successor !== S.token) S.backup = null;
@@ -692,7 +702,7 @@ export function onClientMessage(msg) {
   } else if (msg.t === 'ping') {
     hostConn?.open && hostConn.send({ t: 'pong', ts: msg.ts });
     if (msg.net && typeof msg.net === 'object') { S.net = msg.net; paintNet(); }
-  } else if (msg.t === 'backup' && msg.data && typeof msg.data === 'object' && msg.data.code === S.code) {
+  } else if (msg.t === 'backup' && S.successor === S.token && msg.data && typeof msg.data === 'object' && msg.data.code === S.code && msg.data.hostId === S.hostId) {
     S.backup = msg.data;
   } else if (msg.t === 'notice') {
     toast(msg.msg, 'info');

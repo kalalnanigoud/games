@@ -5,6 +5,7 @@
 
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { seededRandom } from './seed.mjs';
 
 const [id, nArg = '3', runsArg = '20'] = process.argv.slice(2);
 if (!id) {
@@ -17,7 +18,10 @@ const MAX_STEPS = 20000;
 
 let failures = 0;
 const lengths = [];
+const seed = process.env.SEED || String(Date.now());
+console.log(`Simulation seed: ${seed} (${id}, ${n} players). Replay with SEED=${seed}.`);
 for (let r = 0; r < runs; r++) {
+  Math.random = seededRandom(`${seed}:${id}:${n}:${r}`);
   const players = Array.from({ length: n }, (_, i) => ({ id: 'P' + i, name: 'Player ' + i }));
   let s = mod.setup(players);
   let steps = 0;

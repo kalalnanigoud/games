@@ -3,6 +3,7 @@
 import { esc, toast, uid } from './util.js';
 import { snapshot, flip, playFx, changed, confetti, wake, settleLoops } from './fx.js';
 import { sound, isMuted, setMuted } from './sound.js';
+import { GAME_INFO, favorites, toggleFavorite, filterGames } from './library.js';
 import { standings, tourLine } from './tour.js';
 import { MAX_ROOM, S, GAMES, FILES, getGame, gameReady, loadGame, defaultTimer, defaultOpts, seated, isWatching, myId, playerName, isBot, saveSession, loadSession, clearSession } from './state.js';
 import { clockSkew, voice, resume, leave, hostRoom, refreshLocalView, broadcast, addBot, startGame, requestRematch, standingIn, startTour, playTour, closeTour, endGame, localRoom, joinRoom, send, joinVoice, leaveVoice, toggleWatch } from './net.js';
@@ -142,13 +143,14 @@ export function renderUpdateBar() {
 }
 
 
+const libraryFilters = { query: '', category: '', players: '', minutes: '', difficulty: '', collection: '' };
 export function renderHome() {
   const session = loadSession();
   const roomParam = new URLSearchParams(location.search).get('room') || '';
   app.innerHTML = `
     <div class="hero">
       <h1>Game Night</h1>
-      <p>Beautiful strategy games to play with friends. Free, no sign-up, on any phone or computer.</p>
+      <p>Party games, strategy, and cooperative adventures. One place to play together. Free, no sign-up.</p>
     </div>
     <div class="home-top">
       <div class="panel stack">
@@ -164,21 +166,20 @@ export function renderHome() {
         </div>
       </div>
     </div>
-    <div class="section-title">Choose a game</div>
-    <div class="games-grid">
-      ${GAMES.map((g) => `
-        <div class="game-card">
-          <div class="cover">${g.cover || ''}<span class="badge">${g.minPlayers === g.maxPlayers ? g.minPlayers : g.minPlayers + '–' + g.maxPlayers} players</span>${helpBtn(g.id, 'on-cover')}</div>
-          <div class="body">
-            <h3>${esc(g.name)}</h3>
-            <p>${esc(g.description)}</p>
-            <div class="row">
-              <button class="primary" data-host="${g.id}">Host online</button>
-              <button data-local="${g.id}" title="Pass one device around, or play against bots">One device</button>
-            </div>
-          </div>
-        </div>`).join('')}
-    </div>`;
+    <div class="section-title">Find your next game</div>
+    <div class="panel library-tools">
+      <label class="library-search">Search games<input type="search" data-filter="query" placeholder="Name or description" /></label>
+      ${[
+        ['category', 'Type', [['', 'All types'], ...['Party', 'Strategy', 'Adventure', 'Cooperative'].map((x) => [x, x])]],
+        ['players', 'Players', [['', 'Any group'], ...Array.from({ length: 8 }, (_, i) => [i + 1, `${i + 1} player${i ? 's' : ''}`])]],
+        ['minutes', 'Estimated time', [['', 'Any length'], [15, 'Up to 15 min'], [30, 'Up to 30 min'], [60, 'Up to 60 min']]],
+        ['difficulty', 'Difficulty', [['', 'Any level'], ...['Easy', 'Medium', 'Deep'].map((x) => [x, x])]],
+        ['collection', 'Collection', [['', 'All games'], ['favorites', 'Favorites'], ['recent', 'Recently played']]],
+      ].map(([key, title, options]) => `<label>${title}<select data-filter="${key}">${options.map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}</select></label>`).join('')}
+      <button id="clearFilters" class="small">Clear filters</button>
+    </div>
+    <p id="libraryCount" class="muted small" role="status" aria-live="polite"></p>
+    <div id="libraryResults" class="games-grid"></div>`;
 
   const nameIn = app.querySelector('#nameIn');
   const storeName = () => {
@@ -207,8 +208,47 @@ export function renderHome() {
     const v = codeIn.value.toUpperCase().replace(/[^A-Z]/g, '');
     if (v !== codeIn.value) codeIn.value = v;
   });
-  app.querySelectorAll('[data-host]').forEach((b) => (b.onclick = () => needName() && hostRoom(b.dataset.host)));
-  app.querySelectorAll('[data-local]').forEach((b) => (b.onclick = () => { S.name = nameIn.value.trim(); localRoom(b.dataset.local); }));
+  const results = app.querySelector('#libraryResults');
+  const drawLibrary = () => {
+    const saved = favorites();
+    const games = filterGames(GAMES, libraryFilters, saved);
+    app.querySelector('#libraryCount').textContent = `${games.length} of ${GAMES.length} games · Times are estimates and depend on your group and settings.`;
+    results.innerHTML = games.map((g) => {
+      const info = GAME_INFO[g.id];
+      return `<article class="game-card">
+        <div class="cover">${g.cover || ''}<span class="badge">${g.minPlayers === g.maxPlayers ? g.minPlayers : g.minPlayers + '–' + g.maxPlayers} players</span>${helpBtn(g.id, 'on-cover')}</div>
+        <div class="body">
+          <div class="row"><h3 class="grow">${esc(g.name)}</h3><button class="small favorite" data-favorite="${g.id}" aria-label="Favorite ${esc(g.name)}" aria-pressed="${saved.includes(g.id)}">${saved.includes(g.id) ? '★' : '☆'}</button></div>
+          <div class="game-meta">${info.category}${info.coop ? ' · Co-op' : ''} · ${info.duration} min · ${info.difficulty}</div>
+          <p>${esc(g.description)}</p>
+          <div class="row"><button class="primary" data-host="${g.id}">Host online</button><button data-local="${g.id}" title="Pass one device around, or play against bots">One device</button></div>
+        </div></article>`;
+    }).join('') || '<div class="panel library-empty"><h3>No games match yet</h3><p>Try a different group size or clear your filters. Use ☆ on a game to save a favorite.</p></div>';
+  };
+  app.querySelectorAll('[data-filter]').forEach((input) => {
+    input.value = libraryFilters[input.dataset.filter];
+    input.addEventListener(input.type === 'search' ? 'input' : 'change', () => {
+      libraryFilters[input.dataset.filter] = input.value;
+      drawLibrary();
+    });
+  });
+  app.querySelector('#clearFilters').onclick = () => {
+    Object.keys(libraryFilters).forEach((key) => { libraryFilters[key] = ''; });
+    app.querySelectorAll('[data-filter]').forEach((input) => { input.value = ''; });
+    drawLibrary();
+  };
+  results.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.favorite) {
+      const id = b.dataset.favorite;
+      toggleFavorite(id); drawLibrary();
+      (results.querySelector(`[data-favorite="${id}"]`) || app.querySelector('[data-filter="collection"]')).focus({ preventScroll: true });
+    }
+    if (b.dataset.host && needName()) hostRoom(b.dataset.host);
+    if (b.dataset.local) { S.name = nameIn.value.trim(); localRoom(b.dataset.local); }
+  });
+  drawLibrary();
   if (session) {
     app.querySelector('#resumeBtn').onclick = () => {
       if (!needName()) return;
@@ -232,7 +272,7 @@ export function renderJoining() {
           <p class="muted" style="margin:0">Check the code with your friend. Their game page must stay open while you join.</p>
           <div class="row" style="justify-content:center"><button class="primary" id="retryBtn">Try again</button><button id="backBtn">Back</button></div>`
         : `<p class="muted" style="margin:0">Looking for the room… <span class="small">(${esc(S.status)})</span></p>
-          ${S.status === 'cannot reach host' ? '<p class="small" style="margin:0">The room exists, but your networks are blocking a direct connection. Try switching between Wi-Fi and mobile data. If it keeps happening, the host can add a free TURN relay (see the README).</p>' : ''}
+          ${S.status === 'cannot reach host' ? '<p class="small" style="margin:0">A connection to the host could not be established. Check that their room is still open, then try switching between Wi-Fi and mobile data. You can also play together on one device.</p>' : ''}
           <div class="row" style="justify-content:center"><button id="backBtn">Cancel</button></div>`}
       </div>
     </div>`;
@@ -287,6 +327,13 @@ export function renderLobby() {
         ${S.role !== 'local' && me && !S.tour ? `<button id="watchBtn" style="width:100%">${me.watch ? '🎲 Take a seat and play' : '👀 Just watch this game'}</button>` : ''}
       </div>
       ${tourPanel(isHost)}
+      ${S.role === 'host' ? `<div class="panel stack">
+        <label for="backupHost">Trusted backup host</label>
+        <select id="backupHost"><option value="">Off — keep hidden information on this device</option>
+          ${S.players.filter((p) => p.id !== S.token && !p.bot).map((p) => `<option value="${esc(p.id)}" ${p.id === S.backupHost ? 'selected' : ''}>${esc(p.name)}${p.connected ? '' : ' (disconnected)'}</option>`).join('')}
+        </select>
+        <p class="small muted" style="margin:0">Optional: this person can continue hosting if you disconnect. Their device receives the entire game, including secret cards and puzzle answers. Choose someone you trust. Turning this off stops future backups; it cannot erase a copy already received.</p>
+      </div>` : ''}
       ${isHost ? `
       <div class="panel stack">
         <div class="row"><h3 class="gold grow" style="margin:0">Game</h3>${g.howTo ? `<button class="small" data-help="${g.id}">? How to play</button>` : ''}</div>
@@ -320,6 +367,7 @@ export function renderLobby() {
     </div>`;
 
   if (S.role === 'host') {
+    app.querySelector('#backupHost').onchange = (e) => { S.backupHost = e.target.value; saveSession(); broadcast(); };
     app.querySelector('#shareBtn').onclick = async () => {
       if (navigator.share) {
         try { await navigator.share({ title: 'Join my game', text: `Join my ${g.name} game! Code: ${S.code}`, url: link }); } catch {}
@@ -369,6 +417,7 @@ export function renderLobby() {
 }
 
 export let lastGameKey = '';
+let lastView = null, lastRoomKey = '';
 
 export function renderGame() {
   const g = getGame(S.gameId);
@@ -380,7 +429,12 @@ export function renderGame() {
   }
   // Redrawing a big board costs phone battery: skip it when nothing visible changed
   // (reconnects, repeated syncs).
-  const key = JSON.stringify([S.gameId, myId(), S.view, S.players.map((p) => [p.id, p.name, p.connected])]);
+  const roomKey = JSON.stringify([S.gameId, myId(), S.role, S.players, S.tour]);
+  // Delta application preserves the view reference when nothing changed. Avoid
+  // serializing a large drawing/board again just for a room or voice update.
+  if (S.view === lastView && roomKey === lastRoomKey && app.querySelector('#gamebox')) { tickTimer(); return; }
+  const key = roomKey + JSON.stringify(S.view);
+  lastView = S.view; lastRoomKey = roomKey;
   if (key === lastGameKey && app.querySelector('#gamebox')) { tickTimer(); return; }
   lastGameKey = key;
   const isHost = S.role === 'host' || S.role === 'local';

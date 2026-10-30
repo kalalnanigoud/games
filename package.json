@@ -1,0 +1,13 @@
+{
+  "name": "game-night",
+  "private": true,
+  "scripts": {
+    "test": "node tools/test.mjs 10",
+    "test:browser": "node tools/browser-ci.mjs && node tools/multiplayer-ci.mjs"
+  },
+  "devDependencies": {
+    "peer": "1.0.2",
+    "peerjs": "1.5.4",
+    "playwright": "1.56.1"
+  }
+}

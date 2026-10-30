@@ -1,6 +1,6 @@
 # 🎲 Game Night
 
-Free multiplayer board games in the browser, on phones and computers.
+Free multiplayer party games, strategy, and cooperative adventures in the browser, on phones and computers.
 One player hosts a room, friends join with a 5-letter code. No sign-up, no game server.
 
 ## How it works (and why it's free)
@@ -54,6 +54,14 @@ Run `node tools/test.mjs` for syntax checks, server and multiplayer regressions,
 and 50 simulated games at every supported player count. An optional number changes the simulation
 count, for example `node tools/test.mjs 10`.
 
+Install the pinned browser-test dependencies with `npm ci`, then run
+`npx playwright install chromium webkit` and `npm run test:browser`.
+The multiplayer suite uses a local PeerJS broker and real WebRTC between isolated Chromium contexts;
+WebKit checks touch-sized library navigation and local play. It uses synthetic audio, never your microphone.
+Traces and screenshots are written to `test-results/` and uploaded by CI. These checks do not replace
+real-phone background/resume or difficult-network testing. Simulation logs include a `SEED` for replay;
+set that environment variable and rerun the same game/player count to reproduce its random choices.
+
 With the local server running, open `/tools/browser-test.html` and click **Run all games**
 at phone and desktop viewport sizes. It reports render failures, horizontal overflow, and buttons
 smaller than 30px. Open `/tools/local-boot-test.html` to exercise shared-device play without PeerJS.
@@ -75,13 +83,18 @@ and it holds the site's version. Commit it with your changes; the GitHub check f
 
 - **Version check.** Players' copies of the site compare versions when they connect. If someone has a
   newer copy, the others see "A newer version is available" with an **Update now** button.
-- **Backup host.** The host keeps one other person (a spectator if there is one) up to date with a copy
-  of the room, marked **BACKUP HOST** in the lobby. If the host disappears for 15 seconds, the backup host
+- **Backup host.** Migration is off by default. The host can choose a **Trusted backup host** in the lobby,
+  marked **BACKUP HOST** when connected. If the host disappears for 15 seconds, the backup host
   reopens the room under the same code and everyone reconnects; the old host rejoins as a player.
-  The copy contains the whole game, including hidden cards, which is why a spectator is preferred.
+  The copy contains the whole game, including hidden cards and puzzle answers. Only select someone you
+  trust with that information. Disabling backups cannot retract information already received.
 - **Stand-ins.** If a player drops out mid-game for 20 seconds, a computer plays their seat until they
   reconnect, so the table never stalls.
 - **Less data.** After the first full copy, each update sends only what changed.
+- **Bounded saves.** Rapid actions share a durable snapshot at most every 750 ms; game ends, tab hiding,
+  and page exits flush immediately. An abrupt browser/process crash may lose up to that interval of moves.
+  Storage quota failures do not stop online play. `node tools/reliability-test.mjs` includes a synthetic
+  serialization benchmark; its mocked storage timings are not real device disk measurements.
 - **Connection dots.** The dots in the top bar and lobby turn green, yellow or red with each player's
   delay to the host (hover for the milliseconds, and whether the connection goes through a relay).
 - **Rematch.** When a game ends, the host's **🔁 Rematch** keeps everyone in their seats (chess swaps
@@ -102,6 +115,15 @@ and the tournament brackets.
 In an online room, tap 🎙 in the top bar to talk to everyone else who joined voice (tap again to mute,
 📵 to leave). Audio goes directly between players' browsers, like the games. The browser asks for
 microphone access the first time, and it needs the site on https (GitHub Pages is) or localhost.
+Incoming callers must be on the host-authorized voice roster; the host binds their voice ID to their
+authenticated data connection. Leaving voice stops audio tracks and closes calls.
+
+## Finding a game
+
+The library filters by type, supported group size, estimated duration, and difficulty. Cooperative
+is a cross-category filter. Stars save favorites; recently played records games when they start.
+Preferences stay in this browser without an account. Durations are editorial estimates, especially
+for games with configurable rounds or clocks.
 
 ## Tournaments
 
