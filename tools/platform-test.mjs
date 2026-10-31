@@ -29,7 +29,7 @@ function renderTopbar() {}
 function paintNet() {}
 globalThis.test = { S, conns, onHostMessage, onConnClosed, saveSession, resume, parse, cleanup, localRoom, hostRoom, joinRoom, broadcast, requireMultiplayer,
   startGame, armTimer, scheduleBots, onClientMessage, setWatch, applyAction, startTour, playTour, closeTour, loadGame, viewFor, standingIn, scheduleClientRetry,
-  addBot, fitTable, seatLimit,
+  addBot, fitTable, seatLimit, endGame, validTourDraft,
   get timer() { return turnTimer; } };
 `, context);
 const t = context.test;
@@ -50,6 +50,21 @@ const lost = { ...cold, seq:5,from:4,patch:{}}; delete lost.view;
 t.onClientMessage(lost);
 assert.equal(t.S.view,null,'a delta cannot be applied to a missing base');
 t.cleanup(); t.S.started=false;
+// Failed asynchronous loads and failed setup must not consume a tournament match.
+t.S.role='local'; t.S.players=[{id:'L1',name:'One'},{id:'L2',name:'Two'}]; t.S.gameId='chess';
+const chessLoader=loaders.chess;
+loaders.chess=async()=>{throw Error('simulated offline module');};
+await t.startTour('series',['chess']);
+assert.equal(t.S.tour.gameNo,0); assert.equal(t.S.started,false);
+loaders.chess=chessLoader;
+await t.playTour(); assert.equal(t.S.tour.gameNo,1); assert.equal(t.S.started,true);
+t.playTour(); assert.equal(t.S.tour.gameNo,1,'duplicate start cannot restart a live match');
+t.endGame();
+const chessSetup=getGame('chess').setup;
+getGame('chess').setup=()=>{throw Error('simulated setup failure');};
+try { t.playTour(); assert.equal(t.S.tour.gameNo,1); assert.equal(t.S.started,false); }
+finally { getGame('chess').setup=chessSetup; }
+t.closeTour(); t.cleanup(); t.S.game=null;
 for (const g of GAMES) await t.loadGame(g.id); // the site loads game code on demand
 const runTask = (fn) => { for (const [id, f] of [...tasks]) if (!fn || f === fn) { tasks.delete(id); f(); } };
 const secret = reconnectSecret(), otherSecret = reconnectSecret();
@@ -213,4 +228,29 @@ t.cleanup();t.localRoom('hexisle',localSaved);assert.ok(t.timer,'resumed local g
 // A pending bot move must not survive leaving a room.
 t.S.players[0].bot=true;t.S.game.over=false;t.scheduleBots();assert.ok(tasks.size>0);
 t.cleanup();assert.equal(tasks.size,0);
+// Tournament drafts survive refresh; malformed/old drafts have safe defaults.
+t.S.started=false; t.localRoom('gems');
+t.S.lobbyMode='tour'; t.S.tourDraft={format:'series',picks:['sketch','gems'],ko:'chess'}; t.saveSession();
+const draftSaved=JSON.parse(context.sessionStorage.getItem('gn-session'));
+t.localRoom('gems',draftSaved);
+assert.equal(t.S.lobbyMode,'tour'); assert.deepEqual(json(t.S.tourDraft),draftSaved.tourDraft);
+assert.deepEqual(json(t.validTourDraft({format:'wrong',picks:['gems','no-game','gems',null],ko:'spies'})),{format:'series',picks:['gems'],ko:null});
+t.localRoom('gems',{...draftSaved,lobbyMode:undefined,tourDraft:undefined});
+assert.equal(t.S.lobbyMode,'game'); assert.deepEqual(json(t.S.tourDraft),{format:'series',picks:[],ko:null});
+t.cleanup(); tasks.clear();
+// A late arrival between knockout rounds cannot take a match seat.
+t.S.role='host'; t.S.gameId='chess'; t.S.players=[{id:t.S.token,name:'Host',connected:true},{id:'one',name:'One',connected:true},{id:'two',name:'Two',connected:true}];
+t.startTour('knockout',['chess']); t.applyAction(t.S.game.players[0].id,{type:'resign'}); t.endGame();
+const visitor=conn(); t.onHostMessage(visitor,{t:'hello',token:'visitor',secret:reconnectSecret(),name:'Visitor'});
+assert.equal(t.S.players.find(p=>p.id==='visitor').watch,true);
+assert.match(t.setWatch('visitor',false),/Tournament seats/);
+// Also repair a legacy saved room that already had a non-entrant seated.
+delete t.S.players.find(p=>p.id==='visitor').watch;
+const expectedSeats=currentMatch(t.S.tour).seats.slice().sort(), previousNo=t.S.tour.gameNo;
+t.playTour();
+assert.equal(t.S.started,true); assert.equal(t.S.tour.gameNo,previousNo+1);
+assert.deepEqual(t.S.game.players.map(p=>p.id).sort(),expectedSeats);
+assert.equal(t.S.players.find(p=>p.id==='visitor').watch,true);
+t.cleanup();tasks.clear();
+console.log('Tournament regressions passed: failed loads/setup, duplicate starts, draft restore/validation, late arrivals and legacy seating repair.');
 console.log('Platform regression checks passed: identity, secret fingerprints, valid reconnect, stale connections, rules enforcement, change-only syncs, version check, saved credentials, legacy sessions, stand-ins, backup host takeover, rematch, local fallback, timers, spectators, game options, voice chat membership and tournaments.');

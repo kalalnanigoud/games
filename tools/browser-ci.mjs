@@ -30,6 +30,8 @@ for (const [label, viewport] of [['phone', { width: 375, height: 812 }], ['deskt
   await page.route(/https:\/\/fonts\./, route => route.fulfill({ contentType: 'text/css', body: '' }));
 
   await page.goto(base + '/', { waitUntil: 'networkidle' });
+  // On a cold start the network goes quiet a moment before the library has drawn its cards.
+  await page.waitForFunction((n) => document.querySelectorAll('.game-card').length >= n, CATALOG.length, { timeout: 10000 }).catch(() => {});
   const cards = await page.locator('.game-card').count();
   if (cards !== CATALOG.length) fail(`${label}: home page shows ${cards} games, expected ${CATALOG.length}`);
   const wide = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);

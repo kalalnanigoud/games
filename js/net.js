@@ -9,7 +9,7 @@ import { createVoice } from './voice.js';
 import { createTour, currentMatch, recordResult } from './tour.js';
 import { diff, apply } from './patch.js';
 import { rememberPlayed } from './library.js';
-import { MAX_ROOM, MAX_WATCHERS, BOT_NAMES, S, VERSION, getGame, gameReady, loadGame, defaultTimer, defaultOpts, validOpts, seated, isWatching, adoptToken, myId, playerName, isBot, newerVersion, saveSession, queueSessionSave, flushSessionSave, clearSession } from './state.js';
+import { MAX_ROOM, MAX_WATCHERS, BOT_NAMES, S, VERSION, getGame, gameReady, loadGame, defaultTimer, defaultOpts, validOpts, validTourDraft, seated, isWatching, adoptToken, myId, playerName, isBot, newerVersion, saveSession, queueSessionSave, flushSessionSave, clearSession } from './state.js';
 import { render, renderTopbar, paintNet } from './ui.js';
 
 const TAKEOVER_MS = 15000; // how long the backup host waits for the host to come back before taking over
@@ -106,6 +106,8 @@ export function hostRoom(gameId, resume = null) {
     timerSec: resume?.timerSec ?? defaultTimer(getGame(resume?.gameId || gameId)),
     opts: validOpts(getGame(resume?.gameId || gameId), resume?.opts),
     tour: resume?.tour || null,
+    lobbyMode: resume?.lobbyMode === 'tour' ? 'tour' : 'game',
+    tourDraft: validTourDraft(resume?.tourDraft),
     timer: null,
     game: resume?.game || null,
     screen: resume?.started ? 'game' : 'lobby',
@@ -206,7 +208,7 @@ export function onHostMessage(conn, msg) {
     let seatedOut = false;
     if (!p) {
       // Someone arriving after the start, or when the chosen game's table is full, joins as a spectator.
-      const watching = S.started || seated().length >= seatLimit();
+      const watching = S.started || !!S.tour || seated().length >= seatLimit();
       if (watching && S.players.length >= MAX_ROOM + MAX_WATCHERS) return reject(conn, 'Room is full.');
       seatedOut = watching && !S.started;
       p = { id: String(msg.token), name, connected: true, ...(watching ? { watch: true } : {}) };
@@ -225,7 +227,7 @@ export function onHostMessage(conn, msg) {
     if (old && old !== conn) try { old.close(); } catch {}
     saveSession();
     broadcast();
-    if (seatedOut && conn.open) conn.send({ t: 'notice', msg: `${getGame(S.gameId).name} seats ${seatLimit()}, so you're watching for now. Tap "Take a seat" if one frees up.` });
+    if (seatedOut && conn.open) conn.send({ t: 'notice', msg: S.tour ? 'This tournament already has its entrants. You can watch until it finishes.' : `${getGame(S.gameId).name} seats ${seatLimit()}, so you're watching for now. Tap "Take a seat" if one frees up.` });
   } else if (!ownConn(conn)) {
     return;
   } else if (msg.t === 'action') {
@@ -259,6 +261,7 @@ export function setWatch(pid, on) {
   const p = S.players.find((x) => x.id === pid);
   if (!p || p.bot) return 'Only people can watch.';
   if (S.started) return 'Wait until this game ends to change seats.';
+  if (S.tour) return 'Tournament seats are assigned by the bracket. Wait until the tournament closes to change seats.';
   if (!on && seated().length >= seatLimit()) return `The table is full: ${getGame(S.gameId).name} seats ${seatLimit()}.`;
   if (on) p.watch = true; else delete p.watch;
   saveSession();
@@ -451,7 +454,7 @@ function queueBackup() {
 }
 export function backupData() {
   return {
-    v: VERSION, code: S.code, gameId: S.gameId, players: S.players, started: S.started, game: S.game, timerSec: S.timerSec, opts: S.opts, tour: S.tour, hostId: S.token,
+    v: VERSION, code: S.code, gameId: S.gameId, players: S.players, started: S.started, game: S.game, timerSec: S.timerSec, opts: S.opts, tour: S.tour, lobbyMode: S.lobbyMode, tourDraft: validTourDraft(S.tourDraft), hostId: S.token,
     credentials: S.credentials.concat([[S.token, sha256hex(S.secret)]]), // the old host can rejoin as a player
   };
 }
@@ -514,11 +517,21 @@ export function startGame(rematch = false) {
   if (n < g.minPlayers || n > g.maxPlayers) return toast(`${g.name} needs ${g.minPlayers}–${g.maxPlayers} players.`);
   if (!gameReady(S.gameId)) {
     toast(`Loading ${g.name}…`, 'info');
-    return loadGame(S.gameId).then(() => startGame(rematch), () => toast('Could not load the game. Check your connection and reload.'));
+    const role = S.role, players = S.players, tour = S.tour, game = S.game;
+    return loadGame(S.gameId).then(() => {
+      if (S.role !== role || S.players !== players || S.tour !== tour || S.game !== game || S.gameId !== g.id) return;
+      return tour ? playTour() : startGame(rematch);
+    }, () => toast('Could not load the game. Check your connection and reload.'));
   }
   const previous = rematch && S.game?.over ? S.game : null;
-  S.opts = validOpts(g, S.opts);
-  S.game = getGame(S.gameId).setup(table.map((p) => ({ id: p.id, name: p.name })), S.opts, previous ? { previous } : {});
+  const opts = validOpts(g, S.opts);
+  let game;
+  try { game = g.setup(table.map((p) => ({ id: p.id, name: p.name })), opts, previous ? { previous } : {}); }
+  catch (error) { toast(`Could not start ${g.name}: ${error.message || error}`); return; }
+  S.opts = opts;
+  S.game = game;
+  // A failed load, invalid table, or failed setup must not consume a match number.
+  if (S.tour && !S.tour.done) S.tour.gameNo++;
   S.started = true;
   rememberPlayed(S.gameId);
   S.screen = 'game';
@@ -535,19 +548,19 @@ export function requestRematch() {
 
 export function startTour(mode, games) {
   try { S.tour = createTour(mode, games, seated()); } catch (e) { return toast(e.message); }
-  playTour();
+  return playTour();
 }
 // Seat the next match (everyone else in the tournament watches) and start it.
 export function playTour() {
   const m = S.tour && currentMatch(S.tour);
   if (!m) return;
+  if (S.started && S.game && !S.game.over) return;
+  if (!m.seats.every((id) => S.players.some((p) => p.id === id))) return toast('A tournament player is missing. Restore their seat or close the tournament.');
   if (S.gameId !== m.gameId) { S.gameId = m.gameId; S.opts = defaultOpts(getGame(m.gameId)); S.timerSec = defaultTimer(getGame(m.gameId)); }
-  for (const e of S.tour.entrants) {
-    const p = S.players.find((x) => x.id === e.id);
-    if (p && m.seats.includes(e.id)) delete p.watch; else if (p) p.watch = true;
+  for (const p of S.players) {
+    if (m.seats.includes(p.id)) delete p.watch; else p.watch = true;
   }
-  S.tour.gameNo++;
-  startGame();
+  return startGame();
 }
 export function restoreSeats() {
   for (const e of S.tour?.entrants || []) { const p = S.players.find((x) => x.id === e.id); if (p) delete p.watch; }
@@ -585,6 +598,8 @@ export function localRoom(gameId, resume = null) {
     timerSec: resume?.timerSec ?? defaultTimer(getGame(resume?.gameId || gameId)),
     opts: validOpts(getGame(resume?.gameId || gameId), resume?.opts),
     tour: resume?.tour || null,
+    lobbyMode: resume?.lobbyMode === 'tour' ? 'tour' : 'game',
+    tourDraft: validTourDraft(resume?.tourDraft),
     timer: null,
     game: resume?.game || null,
     viewAs: resume?.viewAs || 'L1',

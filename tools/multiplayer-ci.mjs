@@ -2,19 +2,30 @@
 // No public signaling service, microphone, or external network is needed.
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { chromium, webkit } from 'playwright';
 import { createRequire } from 'node:module';
+import { checkInteractions } from './interaction-checks.mjs';
 const require = createRequire(import.meta.url);
 const { createServer } = require('../serve.js');
 const root = fileURLToPath(new URL('../', import.meta.url));
 const server = createServer(root);
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
-const brokerPort = 9101;
-const broker = spawn(process.execPath, ['node_modules/peer/dist/bin/peerjs.js', '--host', '127.0.0.1', '--port', String(brokerPort)], { cwd: root, stdio: 'pipe' });
-broker.stderr.on('data', (data) => process.stderr.write(data));
+const broker = fork(fileURLToPath(new URL('./peer-test-server.mjs', import.meta.url)), [], { cwd: root, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+let brokerLog = '';
+for (const stream of [broker.stdout, broker.stderr]) stream.on('data', (data) => { brokerLog = (brokerLog + data).slice(-8000); });
+const brokerPort = await new Promise((resolve, reject) => {
+  const fail = (reason) => { clearTimeout(timeout); reject(Error(`Local signaling broker failed: ${reason}\n${brokerLog}`)); };
+  const timeout = setTimeout(() => fail('no listening address after 20 seconds'), 20000);
+  broker.once('error', (error) => fail(error.message));
+  broker.once('exit', (code) => fail(`exited with code ${code}`));
+  broker.once('message', (message) => {
+    if (!Number.isInteger(message?.port) || message.port < 1) return fail('invalid listening address');
+    clearTimeout(timeout); resolve(message.port);
+  });
+}).catch((error) => { broker.kill(); server.close(); throw error; });
 const out = new URL('../test-results/', import.meta.url);
 await fs.mkdir(out, { recursive: true });
 const peerSource = await fs.readFile(new URL('../node_modules/peerjs/dist/peerjs.min.js', import.meta.url), 'utf8');
@@ -50,11 +61,10 @@ async function sameView(host,guest) {
   await waitFor(guest, async(expected)=>JSON.stringify((await import('/js/state.js')).S.view)===expected,expected);
 }
 try {
-  let brokerReady=false;
-  for(let i=0;i<50;i++){try{if((await fetch(`http://127.0.0.1:${brokerPort}/`)).ok){brokerReady=true;break;}}catch{} await new Promise(r=>setTimeout(r,100));}
-  assert.ok(brokerReady,'local signaling broker started');
+  assert.ok((await fetch(`http://127.0.0.1:${brokerPort}/`)).ok, `local signaling broker responds on its assigned port ${brokerPort}`);
   browser=await chromium.launch({args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});
   const host=await openContext(browser,{permissions:['microphone']});
+  await checkInteractions(host, 'Chromium');
   const guest=await openContext(browser,{viewport:{width:375,height:812},permissions:['microphone']});
   await host.fill('#nameIn','Host'); await host.click('[data-host="gems"]');
   await waitFor(host, async()=>(await import('/js/state.js')).S.status==='online');
@@ -122,11 +132,23 @@ try {
   await outsider.evaluate(()=>{outsiderPeer.destroy();outsiderMedia.getTracks().forEach(t=>t.stop());});
   console.log('PASS authorized voice, outsider rejection, and voice leave');
 
-  await host.reload(); await ready(host); await ready(guest); await sameView(host,guest);
+  await host.reload(); await ready(host);
+  await waitFor(host, async() => {
+    const { S } = await import('/js/state.js');
+    const { conns } = await import('/js/net.js');
+    return S.status === 'online' && [...conns.values()].filter(c => c.open).length >= 2;
+  });
+  await ready(guest); await sameView(host,guest);
   console.log('PASS host refresh and guest reconnect');
   await waitFor(guest, async()=>!!(await import('/js/state.js')).S.backup);
   const oldSession=await host.evaluate(async()=>{(await import('/js/state.js')).saveSession();return sessionStorage.getItem('gn-session');});
-  await host.close();
+  // Inject a real transport loss without sending the application's Leave action.
+  // This tests recovery after a detected disconnect, not OS/browser crash detection.
+  await host.evaluate(async() => (await import('/js/net.js')).peer.destroy());
+  const departed = host.context();
+  await departed.tracing.stop({path:fileURLToPath(new URL('departed-host.zip',out))});
+  await departed.close();
+  contexts.splice(contexts.indexOf(departed),1);
   await waitFor(guest, async()=>{const {S}=await import('/js/state.js');return S.role==='host'&&S.status==='online';},null,{timeout:40000});
   await ready(guest);
   // A previous host returning uses the same production conflict/rejoin path.
@@ -136,6 +158,35 @@ try {
   await waitFor(returning, async()=>{const {S}=await import('/js/state.js');return S.role==='client'&&S.synced;},null,{timeout:45000});
   await ready(returning); await sameView(guest,returning);
   console.log('PASS trusted host migration and original host returning');
+  // Use the connected room to reproduce the real between-round newcomer path.
+  guest.once('dialog', (dialog) => dialog.accept());
+  await guest.evaluate(async() => {
+    const { S } = await import('/js/state.js');
+    const net = await import('/js/net.js');
+    net.endGame();
+    for (const p of S.players) if (p.watch) net.setWatch(p.id, false);
+    await net.startTour('knockout', ['chess']);
+  });
+  await ready(guest);
+  await guest.evaluate(async() => {
+    const { S } = await import('/js/state.js');
+    (await import('/js/net.js')).applyAction(S.game.players[0].id, { type: 'resign' });
+  });
+  guest.once('dialog', (dialog) => dialog.accept());
+  await guest.evaluate(async() => (await import('/js/net.js')).endGame());
+  const arrival = await openContext(browser);
+  await arrival.fill('#nameIn','Between rounds'); await arrival.fill('#codeIn',code); await arrival.click('#joinBtn');
+  await waitFor(arrival, async() => (await import('/js/state.js')).S.synced);
+  const arrivalState = await state(arrival);
+  assert.equal(arrivalState.players.find(p => p.id === arrivalState.token).watch, true);
+  await guest.click('#tourGo'); await ready(guest); await ready(arrival);
+  const nextMatch = await guest.evaluate(async() => {
+    const { S } = await import('/js/state.js');
+    const { currentMatch } = await import('/js/tour.js');
+    return { actual: S.game.players.map(p => p.id).sort(), expected: currentMatch(S.tour).seats.slice().sort() };
+  });
+  assert.deepEqual(nextMatch.actual, nextMatch.expected);
+  console.log('PASS newcomer between knockout rounds watches and the next match starts');
   assert.deepEqual(errors,[],'no uncaught browser errors');
   await guest.screenshot({path:fileURLToPath(new URL('multiplayer-phone.png',out))});
   for(const [i,c] of contexts.entries())await c.tracing.stop({path:fileURLToPath(new URL(`chromium-${i}.zip`,out))});
@@ -144,6 +195,7 @@ try {
   // WebKit touch checks supplement Chromium multiplayer; no claim of real iOS testing.
   browser=await webkit.launch();
   const phone=await openContext(browser,{viewport:{width:375,height:812},hasTouch:true});
+  await checkInteractions(phone, 'WebKit touch');
   await phone.fill('#nameIn','Phone player'); await phone.fill('#codeIn','ABCDE');
   await phone.selectOption('[data-filter="category"]','Party');
   assert.equal(await phone.locator('.game-card').count(),3);
@@ -165,6 +217,8 @@ try {
   console.log('PASS WebKit touch library, persisted favorites, empty state, local play and refresh');
 } catch(error) {
   console.error(error); process.exitCode=1;
+  if(brokerLog)console.error('Broker diagnostics:\n'+brokerLog);
+  for(const c of contexts)for(const p of c.pages())console.error('Room state',await p.evaluate(async()=>{const {S}=await import('/js/state.js');return {role:S.role,status:S.status,successor:S.successor,backup:!!S.backup,lostAt:S.lostAt,token:S.token};}).catch(()=>null));
   for(const [i,c]of contexts.entries())for(const [j,p]of c.pages().entries())await p.screenshot({path:fileURLToPath(new URL(`failure-${i}-${j}.png`,out))}).catch(()=>{});
 } finally {
   for(const [i,c]of contexts.entries())await c.tracing.stop({path:fileURLToPath(new URL(`trace-${i}.zip`,out))}).catch(()=>{});

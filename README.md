@@ -58,6 +58,8 @@ Install the pinned browser-test dependencies with `npm ci`, then run
 `npx playwright install chromium webkit` and `npm run test:browser`.
 The multiplayer suite uses a local PeerJS broker and real WebRTC between isolated Chromium contexts;
 WebKit checks touch-sized library navigation and local play. It uses synthetic audio, never your microphone.
+The broker uses an automatically assigned local port. Both browser engines check tournament draft
+refresh, typing/menu focus during room updates, and keyboard containment/restoration for dialogs.
 Traces and screenshots are written to `test-results/` and uploaded by CI. These checks do not replace
 real-phone background/resume or difficult-network testing. Simulation logs include a `SEED` for replay;
 set that environment variable and rerun the same game/player count to reproduce its random choices.
@@ -137,6 +139,10 @@ Preferences stay in this browser without an account. Durations are editorial est
 for games with configurable rounds or clocks.
 
 ## Tournaments
+
+Unfinished tournament setup (mode, format, and game order) is saved with the room. Refreshing restores
+the draft; picks that no longer fit the group remain visible as unavailable until the group size changes.
+Once a tournament starts, new arrivals watch. Each match seats only its assigned entrants.
 
 A tournament spans several games, so it is a mode of the room rather than a setting of one game. In the
 lobby the host switches from **One game** to **Tournament** (or taps **Host a tournament night** on the home

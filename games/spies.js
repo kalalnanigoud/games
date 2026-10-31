@@ -515,6 +515,7 @@ export default {
   id: 'spies', name: 'Word Spies',
   description: 'Two teams, 25 words, one secret key. Spymasters give one-word clues and teammates hunt for their agents. Avoid the assassin! For 4–8.',
   minPlayers: 4, maxPlayers: 8,
+  keepDom: true, // let render() capture and restore the active clue input
   cover: coverSVG(),
   howTo: {
     goal: 'Be the first team to find all of your agents on the board, without ever touching the assassin.',

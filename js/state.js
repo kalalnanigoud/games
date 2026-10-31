@@ -45,6 +45,7 @@ export const S = {
   voice: [], // [player id, PeerJS id] for everyone in voice chat (kept by the host)
   tour: null, // tournament in progress (js/tour.js), kept by the host
   lobbyMode: 'game', // the host's lobby choice, shared with guests: 'game' (one game) or 'tour' (setting up a tournament)
+  tourDraft: validTourDraft(), // unfinished setup, saved with the room
   successor: null, // who takes over the room if the host disappears
   backupHost: '', // host's explicitly trusted successor; empty disables migration
   backup: null, // successor only: the host's latest copy of the room
@@ -61,6 +62,15 @@ export function defaultOpts(g) {
 }
 export function validOpts(g, opts) {
   return Object.fromEntries((g?.options || []).map((o) => [o.id, o.choices.some(([v]) => v === opts?.[o.id]) ? opts[o.id] : o.default]));
+}
+export function validTourDraft(draft) {
+  const known = (id) => GAMES.some((g) => g.id === id);
+  const duel = GAMES.find((g) => g.id === draft?.ko);
+  return {
+    format: draft?.format === 'knockout' ? 'knockout' : 'series',
+    picks: Array.isArray(draft?.picks) ? [...new Set(draft.picks.filter(known))] : [],
+    ko: duel && duel.minPlayers <= 2 && duel.maxPlayers >= 2 ? duel.id : null,
+  };
 }
 // Spectators sit in the room but not at the table.
 export const seated = () => S.players.filter((p) => !p.watch);
@@ -98,6 +108,10 @@ export function saveSession() {
     ? { role: 'client', code: S.code, token: S.token, secret: S.secret }
     : { role: S.role, code: S.code, token: S.token, secret: S.secret, credentials: S.credentials, gameId: S.gameId, players: S.players, started: S.started, game: S.game, viewAs: S.viewAs, timerSec: S.timerSec, opts: S.opts, tour: S.tour };
   if (S.role === 'host') data.backupHost = S.backupHost;
+  if (S.role !== 'client') {
+    data.lobbyMode = S.lobbyMode === 'tour' ? 'tour' : 'game';
+    data.tourDraft = validTourDraft(S.tourDraft);
+  }
   data.version = 3;
   const json = JSON.stringify(data);
   for (const storage of [sessionStorage, localStorage]) {

@@ -5,6 +5,7 @@ import { snapshot, flip, playFx, changed, confetti, wake, settleLoops } from './
 import { sound, isMuted, setMuted } from './sound.js';
 import { icon } from './icons.js';
 import { portrait } from './avatar.js';
+import { openModal, closeModal } from './dialog.js';
 import { GAME_INFO, favorites, toggleFavorite, filterGames } from './library.js';
 import { standings, tourLine } from './tour.js';
 import { MAX_ROOM, S, GAMES, FILES, getGame, gameReady, loadGame, defaultTimer, defaultOpts, seated, isWatching, myId, playerName, isBot, saveSession, loadSession, clearSession } from './state.js';
@@ -31,7 +32,7 @@ export const seenHelp = (id) => localStorage.getItem('gn-help-' + id) === '1';
 export const helpBtn = (id, cls = '') =>
   getGame(id).howTo ? `<button class="help-btn ${cls} ${seenHelp(id) ? '' : 'new'}" data-help="${id}" title="How to play" aria-label="How to play">${icon('help')}</button>` : '';
 
-export function showHelp(id) {
+export function showHelp(id, opener = document.activeElement) {
   const g = getGame(id);
   const h = g.howTo;
   if (!h) return;
@@ -57,21 +58,20 @@ export function showHelp(id) {
       </div>
       <div class="help-foot"><button class="primary help-ok">Got it — let's play</button></div>
     </div>`;
-  document.body.appendChild(el);
+  openModal(el, '.help-ok', opener);
   el.querySelector('.help-cover svg')?.setAttribute('preserveAspectRatio', 'xMidYMid slice'); // fill the banner
   el.addEventListener('click', (e) => { if (e.target === el || e.target.closest('.help-x, .help-ok')) closeHelp(); });
-  el.querySelector('.help-ok').focus({ preventScroll: true });
   sound('flip');
 }
 export function closeHelp() {
-  document.getElementById('helpModal')?.remove();
+  closeModal(document.getElementById('helpModal'));
 }
 addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeHelp(); closeMenu(); closePicker(); } });
 // Any "?" button anywhere opens its game's guide. Guides only ever open on request:
 // until a game's guide has been read once, its "?" button carries a gentle highlight instead.
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-help]');
-  if (b) { e.preventDefault(); e.stopPropagation(); closeMenu(); showHelp(b.dataset.help); }
+  if (b) { e.preventDefault(); e.stopPropagation(); closeMenu(); showHelp(b.dataset.help, b); }
 }, true);
 
 /* ---------------- rendering ---------------- */
@@ -381,7 +381,7 @@ function openSeatHTML(i, n, action) {
 
 // The lobby is in one of two modes (S.lobbyMode): one game, or a tournament across several games.
 // The host's tournament picks survive the lobby's frequent redraws.
-const tourSetup = { format: 'series', picks: [], ko: null };
+// S.tourDraft is validated and restored with the room session.
 const TROPHY = `<svg viewBox="0 0 160 100" aria-hidden="true"><defs>
   <linearGradient id="tro-cup" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff1b8"/><stop offset=".5" stop-color="#ffcf5c"/><stop offset="1" stop-color="#c98a1e"/></linearGradient>
   <radialGradient id="tro-glow"><stop offset="0" stop-color="#ffcf5c" stop-opacity=".55"/><stop offset="1" stop-color="#ffcf5c" stop-opacity="0"/></radialGradient></defs>
@@ -404,8 +404,9 @@ function chooseGame(id) {
   fitTable();
   sound('click'); saveSession(); broadcast();
 }
-function closePicker() { document.getElementById('pickerModal')?.remove(); }
-function showPicker() {
+function closePicker() { closeModal(document.getElementById('pickerModal')); }
+function showPicker(event) {
+  const opener = event?.currentTarget || document.activeElement;
   closePicker();
   const n = seated().length;
   const el = document.createElement('div');
@@ -424,19 +425,19 @@ function showPicker() {
             ${fits ? '' : `<span class="pick-warn">${n < x.minPlayers ? `Needs ${range(x)} players` : S.role === 'local' ? `Seats ${range(x)}: remove ${n - x.maxPlayers}` : `Seats ${range(x)}: ${n - x.maxPlayers} will watch`}</span>`}</span></button>`;
       }).join('')}</div>
     </div>`;
-  document.body.appendChild(el);
+  openModal(el, '.pick-card.on', opener);
   el.addEventListener('click', (e) => {
     if (e.target === el || e.target.closest('.picker-x')) return closePicker();
     const card = e.target.closest('[data-game]');
     if (card) { chooseGame(card.dataset.game); closePicker(); }
   });
-  (el.querySelector('.pick-card.on') || el.querySelector('.pick-card'))?.focus({ preventScroll: true });
 }
 
 function tourSetupHTML(n) {
   const fits = GAMES.filter((x) => n >= x.minPlayers && n <= x.maxPlayers);
+  const unavailable = S.tourDraft.picks.filter((id) => !fits.some((g) => g.id === id));
   const duels = GAMES.filter((x) => x.minPlayers <= 2 && x.maxPlayers >= 2);
-  const series = tourSetup.format === 'series';
+  const series = S.tourDraft.format === 'series';
   const chip = (x, input) => `<label class="tour-pick">${input}<span>${esc(x.name)}</span></label>`;
   return `
     <div class="seg" role="radiogroup" aria-label="Tournament format">
@@ -445,22 +446,23 @@ function tourSetupHTML(n) {
     </div>
     ${series ? `
       <p class="small muted">Everyone plays each game you pick, in the order you pick them. Every win is a point; the most points takes the title.</p>
-      <div class="tour-picks">${fits.map((x) => chip(x, `<input type="checkbox" data-tg="${x.id}" ${tourSetup.picks.includes(x.id) ? 'checked' : ''}>`)).join('') || '<p class="muted small">No game fits this many players.</p>'}</div>`
+      ${unavailable.length ? `<p class="small muted">Saved picks that don't fit ${plural(n, 'player')}: ${unavailable.map((id) => esc(getGame(id).name)).join(', ')}. They stay in your draft but won't be included unless the group size changes.</p>` : ''}
+      <div class="tour-picks">${fits.map((x) => chip(x, `<input type="checkbox" data-tg="${x.id}" ${S.tourDraft.picks.includes(x.id) ? 'checked' : ''}>`)).join('') || '<p class="muted small">No game fits this many players.</p>'}</div>`
     : `
       <p class="small muted">One-on-one matches of one game, in a bracket. Winners go through and everyone else watches.${n >= 3 ? '' : ' Needs at least 3 players.'}</p>
-      <div class="tour-picks">${duels.map((x) => chip(x, `<input type="radio" name="tourKO" data-ko="${x.id}" ${tourSetup.ko === x.id ? 'checked' : ''}>`)).join('')}</div>`}`;
+      <div class="tour-picks">${duels.map((x) => chip(x, `<input type="radio" name="tourKO" data-ko="${x.id}" ${S.tourDraft.ko === x.id ? 'checked' : ''}>`)).join('')}</div>`}`;
 }
 // What the tournament Start button would do, or why it can't yet.
 function tourPlan(n) {
-  if (tourSetup.format === 'series') {
-    const games = tourSetup.picks.filter((id) => { const x = getGame(id); return n >= x.minPlayers && n <= x.maxPlayers; });
+  if (S.tourDraft.format === 'series') {
+    const games = S.tourDraft.picks.filter((id) => { const x = getGame(id); return n >= x.minPlayers && n <= x.maxPlayers; });
     if (n < 2) return { label: 'Waiting for more players…' };
     if (!games.length) return { label: 'Pick the games to play' };
     return { label: `Start series · ${plural(games.length, 'game')}`, go: () => startTour('series', games) };
   }
   if (n < 3) return { label: `Waiting for ${plural(3 - n, 'more player')}…` };
-  if (!tourSetup.ko) return { label: 'Pick the game for the bracket' };
-  return { label: `Start knockout · ${n} players`, go: () => startTour('knockout', [tourSetup.ko]) };
+  if (!S.tourDraft.ko) return { label: 'Pick the game for the bracket' };
+  return { label: `Start knockout · ${n} players`, go: () => startTour('knockout', [S.tourDraft.ko]) };
 }
 
 export function renderLobby() {
@@ -590,12 +592,12 @@ export function renderLobby() {
     if (timerSel) timerSel.onchange = (e) => { S.timerSec = +e.target.value; saveSession(); broadcast(); };
     app.querySelector('#startBtn')?.addEventListener('click', startGame);
     // Tournament setup: picks are kept in tick order, which is the order the series plays.
-    app.querySelectorAll('[data-format]').forEach((b) => (b.onclick = () => { tourSetup.format = b.dataset.format; render(); }));
+    app.querySelectorAll('[data-format]').forEach((b) => (b.onclick = () => { S.tourDraft.format = b.dataset.format; saveSession(); broadcast(); }));
     app.querySelectorAll('[data-tg]').forEach((c) => (c.onchange = () => {
-      tourSetup.picks = c.checked ? [...tourSetup.picks.filter((id) => id !== c.dataset.tg), c.dataset.tg] : tourSetup.picks.filter((id) => id !== c.dataset.tg);
-      render();
+      S.tourDraft.picks = c.checked ? [...S.tourDraft.picks.filter((id) => id !== c.dataset.tg), c.dataset.tg] : S.tourDraft.picks.filter((id) => id !== c.dataset.tg);
+      saveSession(); broadcast();
     }));
-    app.querySelectorAll('[data-ko]').forEach((c) => (c.onchange = () => { tourSetup.ko = c.dataset.ko; render(); }));
+    app.querySelectorAll('[data-ko]').forEach((c) => (c.onchange = () => { S.tourDraft.ko = c.dataset.ko; saveSession(); broadcast(); }));
     app.querySelector('#tourStart')?.addEventListener('click', () => { if (!plan?.go) return; S.lobbyMode = 'game'; plan.go(); });
     app.querySelector('#tourGo')?.addEventListener('click', playTour);
     app.querySelectorAll('#tourClose, #tourCancel').forEach((b) => b.addEventListener('click', closeTour));
@@ -653,7 +655,13 @@ function menuBody() {
 const menuMarkup = (anim) => `<div class="gh-sheet ${anim ? 'anim' : ''}"><div class="gh-scrim"></div><div class="gh-menu" role="menu" aria-label="Game menu">${menuBody()}</div></div>`;
 function refreshMenu() {
   const m = document.querySelector('.gh-menu');
-  if (m) m.innerHTML = menuBody();
+  if (!m) return;
+  const html = menuBody();
+  if (m._markup === html) return;
+  const focused = m.contains(document.activeElement) ? document.activeElement.id : null;
+  m.innerHTML = html;
+  m._markup = html;
+  if (focused) m.querySelector(`#${CSS.escape(focused)}`)?.focus({ preventScroll: true });
 }
 function openMenu() {
   const head = document.querySelector('.game-head');
@@ -665,9 +673,11 @@ function openMenu() {
 }
 function closeMenu() {
   if (!menuOpen) return;
+  const hadFocus = !!document.activeElement?.closest('.gh-menu');
   menuOpen = false;
   document.querySelector('.gh-sheet')?.remove();
   document.getElementById('ghMenuBtn')?.setAttribute('aria-expanded', 'false');
+  if (hadFocus) document.getElementById('ghMenuBtn')?.focus({ preventScroll: true });
 }
 document.addEventListener('click', (e) => { if (menuOpen && !e.target.closest('.gh-menu, #ghMenuBtn, #ghTourBtn')) closeMenu(); });
 
@@ -713,6 +723,7 @@ export function renderGame() {
   wasMyTurn = myTurn;
   document.title = (myTurn && S.role !== 'local' ? '🔔 Your turn — ' : '') + g.name + ' — Game Night';
 
+  const menuFocus = document.activeElement?.closest('.gh-menu') ? document.activeElement.id : null;
   const before = snapshot(app);
   const hadModal = !!app.querySelector('.modal');
   const watching = S.players.filter((p) => p.watch).length;
@@ -781,6 +792,7 @@ export function renderGame() {
   // CSS animations start a frame after insertion; then pause new loops if the player is idle.
   requestAnimationFrame(settleLoops);
   const headEl = app.querySelector('.game-head');
+  if (menuFocus) headEl.querySelector(`.gh-menu #${CSS.escape(menuFocus)}`)?.focus({ preventScroll: true });
   headEl.addEventListener('change', (e) => {
     if (e.target.id === 'viewAs') { S.viewAs = e.target.value; closeMenu(); saveSession(); refreshLocalView(); render(); }
   });
