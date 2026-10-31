@@ -677,6 +677,9 @@ body.in-game #topbar { display: none; }
 @media (max-width: 480px) {
   #topinfo { flex-wrap: nowrap; gap: 6px; }
   #topinfo .status-text, #topinfo .wide { display: none; }
+  /* In a room the bar holds voice, sound and Leave; the lobby shows the room code in large type, so
+     the logo's name and the code pill make way for them. */
+  body.in-room #logo span, body.in-room #topinfo .room-pill { display: none; }
   #topbar { padding-left: 12px; padding-right: 12px; }
   .games-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .roomcode { font-size: 2.1rem; }

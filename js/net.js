@@ -32,7 +32,9 @@ let pingTimer = null, backupTimer = null, viewSeq = 0;
 // debug 0: failed retries are expected while a host refreshes, so keep them out of the console.
 export const peerOptions = () => ({ config: { iceServers: CONFIG.iceServers }, debug: 0 });
 export const roomPeerId = (code) => CONFIG.roomPrefix + code;
-export const voice = createVoice({ toast, onChange: () => renderTopbar() });
+export const voice = createVoice({ toast, onChange: () => renderTopbar(), onLost: () => leaveVoice() });
+// "Could not connect to peer X": which PeerJS id the broker couldn't find.
+const missingPeer = (err) => /Could not connect to peer (\S+)/.exec(err?.message || '')?.[1] || '';
 
 export function resume(session) {
   if (session.role !== 'local' && !requireMultiplayer()) return;
@@ -185,7 +187,9 @@ export function openHostPeer(isResume, attempts = 8) {
       toast('Lost connection to the matchmaking server. Retrying…');
       clearTimeout(retryTimer);
       retryTimer = setTimeout(() => { if (p !== peer) return; p.destroy(); openHostPeer(true, attempts); }, 4000);
-    } else if (err.type !== 'peer-unavailable') {
+    } else if (err.type === 'peer-unavailable') {
+      voice.unreachable(missingPeer(err)); // a voice member who just left
+    } else {
       console.warn(err);
     }
   });
@@ -651,6 +655,10 @@ export function openClientPeer() {
   p.on('error', (err) => {
     if (p !== peer) return;
     if (err.type === 'peer-unavailable') {
+      // Calling a voice member who just switched off lands here too. That says nothing about the host,
+      // and treating it as "host not found" would tear down a working connection.
+      const gone = missingPeer(err);
+      if (gone && gone !== roomPeerId(S.code)) return voice.unreachable(gone);
       S.status = 'host not found';
       render();
       scheduleClientRetry();
@@ -776,8 +784,14 @@ export function send(action) {
     if (!hostConn || !hostConn.open) return toast('Not connected to the host yet.');
     hostConn.send({ t: 'action', action });
   } else {
-    const err = applyAction(myId(), action);
-    if (err) toast(err);
+    // Apply it once the tap handler has finished (still before the screen updates), as a guest's move
+    // is: it has to travel to the host. A game that redraws its own screen right after sending would
+    // otherwise paint its old view over the new position, since the board is kept between updates.
+    const pid = myId();
+    queueMicrotask(() => {
+      const err = applyAction(pid, action);
+      if (err) toast(err);
+    });
   }
 }
 

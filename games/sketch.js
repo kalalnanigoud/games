@@ -17,18 +17,40 @@ const COLOR_NAMES = ['Black', 'Eraser (white)', 'Red', 'Orange', 'Yellow', 'Gree
 const SIZES = [6, 14, 32];
 const CHOOSE_MS = 15000, REVEAL_MS = 6000;
 
-const WORDS = `apple,banana,house,tree,car,bicycle,airplane,boat,fish,cat,dog,horse,cow,pig,chicken,duck,rabbit,mouse,elephant,giraffe,
-lion,tiger,monkey,snake,turtle,frog,butterfly,spider,bee,snail,octopus,shark,whale,dolphin,penguin,owl,bird,dragon,unicorn,robot,
-ghost,pirate,king,queen,wizard,clown,astronaut,doctor,chef,guitar,piano,drum,trumpet,violin,microphone,headphones,camera,television,
-computer,phone,clock,glasses,hat,shoe,sock,shirt,dress,crown,ring,umbrella,backpack,key,lock,door,window,ladder,bridge,castle,tent,
-lighthouse,rocket,train,bus,truck,tractor,helicopter,submarine,sun,moon,star,cloud,rain,snow,rainbow,lightning,tornado,volcano,
-mountain,island,river,beach,desert,forest,cactus,flower,rose,mushroom,leaf,pumpkin,carrot,corn,pizza,burger,sandwich,cake,cookie,
-donut,ice cream,popcorn,cheese,egg,bread,coffee,milk,candle,lamp,book,pencil,scissors,paint brush,envelope,gift,balloon,kite,ball,
-football,basketball,trophy,medal,dice,puzzle,swing,slide,bed,chair,table,sofa,bath,toothbrush,soap,mirror,fridge,spoon,fork,knife,
-cup,bottle,bucket,hammer,saw,shovel,broom,magnet,battery,light bulb,anchor,compass,map,flag,sword,shield,bow,arrow,treasure,
-skeleton,heart,snowman,igloo,fire,bubble,spaceship,planet,alien,eye,nose,ear,hand,foot,tooth,brain,smile,sleep,dance,swim,jump,
-laugh,sneeze,fishing,camping,skiing,surfing,waterfall,windmill,train track,hot dog,cupcake,lollipop,watermelon,cherry,grapes,
-lemon,strawberry,snowflake,tooth fairy,mermaid,vampire,zombie,knight,ninja,pyramid,statue,fountain,ferris wheel,roller coaster`
+const WORDS = `apple,banana,house,tree,car,bicycle,airplane,boat,fish,cat,dog,horse,cow,pig,chicken,duck,rabbit,mouse,elephant,giraffe,lion,
+tiger,monkey,snake,turtle,frog,butterfly,spider,bee,snail,octopus,shark,whale,dolphin,penguin,owl,bird,dragon,unicorn,robot,
+ghost,pirate,king,queen,wizard,clown,astronaut,doctor,chef,guitar,piano,drum,trumpet,violin,microphone,headphones,camera,
+television,computer,phone,clock,glasses,hat,shoe,sock,shirt,dress,crown,ring,umbrella,backpack,key,lock,door,window,ladder,
+bridge,castle,tent,lighthouse,rocket,train,bus,truck,tractor,helicopter,submarine,sun,moon,star,cloud,rain,snow,rainbow,
+lightning,tornado,volcano,mountain,island,river,beach,desert,forest,cactus,flower,rose,mushroom,leaf,pumpkin,carrot,corn,pizza,
+burger,sandwich,cake,cookie,donut,ice cream,popcorn,cheese,egg,bread,coffee,milk,candle,lamp,book,pencil,scissors,paint brush,
+envelope,gift,balloon,kite,ball,football,basketball,trophy,medal,dice,puzzle,swing,slide,bed,chair,table,sofa,bath,toothbrush,
+soap,mirror,fridge,spoon,fork,knife,cup,bottle,bucket,hammer,saw,shovel,broom,magnet,battery,light bulb,anchor,compass,map,flag,
+sword,shield,bow,arrow,treasure,skeleton,heart,snowman,igloo,fire,bubble,spaceship,planet,alien,eye,nose,ear,hand,foot,tooth,
+brain,smile,sleep,dance,swim,jump,laugh,sneeze,fishing,camping,skiing,surfing,waterfall,windmill,train track,hot dog,cupcake,
+lollipop,watermelon,cherry,grapes,lemon,strawberry,snowflake,tooth fairy,mermaid,vampire,zombie,knight,ninja,pyramid,statue,
+fountain,ferris wheel,roller coaster,bear,wolf,fox,deer,zebra,kangaroo,koala,panda,camel,hippo,rhino,crocodile,gorilla,squirrel,
+hedgehog,bat,parrot,flamingo,peacock,swan,eagle,crab,lobster,jellyfish,starfish,seahorse,ant,ladybug,caterpillar,worm,scorpion,
+sheep,goat,donkey,llama,sloth,otter,beaver,raccoon,skunk,chameleon,lizard,dinosaur,mosquito,dragonfly,goldfish,puppy,kitten,
+polar bear,orange,pear,pineapple,coconut,avocado,broccoli,potato,tomato,onion,garlic,peas,peanut,pretzel,pancake,waffle,taco,
+burrito,sushi,noodles,spaghetti,soup,salad,french fries,chocolate,candy,honey,pie,muffin,croissant,toast,cereal,milkshake,
+lemonade,tea,popsicle,birthday cake,sausage,cucumber,mango,peach,blueberry,ice cube,candy cane,gingerbread man,toothpaste,comb,
+hairbrush,towel,pillow,blanket,alarm clock,wallet,belt,tie,scarf,gloves,boots,sandals,jacket,pajamas,button,zipper,paper clip,
+stapler,ruler,eraser,crayon,notebook,calculator,keyboard,laptop,remote control,radio,telescope,microscope,binoculars,flashlight,
+lantern,hourglass,calendar,newspaper,stamp,postcard,suitcase,passport,ticket,coin,piggy bank,bandage,thermometer,toolbox,wrench,
+screwdriver,nail,rope,chain,net,cage,basket,barrel,box,trash can,vacuum,iron,washing machine,oven,microwave,toaster,kettle,
+teapot,frying pan,plate,bowl,chopsticks,straw,fan,chimney,fireplace,sink,shower,bunk bed,rocking chair,bench,hammock,seesaw,
+sandbox,trampoline,skateboard,scooter,roller skates,ice skates,sled,snowball,surfboard,canoe,sailboat,ship,raft,parachute,
+hot air balloon,motorcycle,ambulance,fire truck,police car,taxi,van,crane,bulldozer,wheel,traffic light,stop sign,road,tunnel,
+barn,fence,gate,mailbox,doghouse,birdhouse,nest,treehouse,skyscraper,hospital,school,museum,library,zoo,circus,stadium,airport,
+palace,ocean,wave,lake,pond,cave,cliff,iceberg,jungle,hill,sunset,comet,galaxy,earthquake,storm,wind,puddle,icicle,seashell,rock,
+sand castle,coral,palm tree,pine tree,acorn,sunflower,tulip,daisy,grass,bush,log,campfire,princess,prince,fairy,giant,troll,elf,
+witch,superhero,cowboy,firefighter,police officer,nurse,farmer,teacher,painter,singer,baby,scarecrow,magician,genie,phoenix,yeti,
+mummy,monster,gnome,viking,caveman,explorer,detective,lifeguard,juggler,wand,potion,crystal ball,treasure chest,snow globe,
+black hole,time machine,mustache,beard,lips,tongue,finger,thumb,knee,muscle,footprint,fingerprint,run,sing,cry,yawn,clap,climb,
+fly,crawl,kick,dig,cook,read,write,hug,wink,shout,whisper,snore,shiver,bowling,golf,tennis,baseball,hockey,boxing,karate,yoga,
+archery,diving,hiking,gardening,shopping,selfie,picnic,party,wedding,birthday,parade,fireworks,concert,magic trick,tug of war,
+hide and seek,high five,thumbs up,piggyback,sleepwalking,snow angel,jump rope`
   .split(',').map((w) => w.trim()).filter(Boolean);
 
 /* ---------------- doodles the computer can draw ---------------- */
@@ -464,7 +486,7 @@ function draw() {
   region('over', v.over
     ? `<div class="sk-card sk-finalcard"><div class="sk-cardtitle">${icon('trophy')}Final scores</div>${ranked.map((p, i) => `<div class="sk-final ${v.winners.includes(p.id) ? 'win' : ''}"><span class="sk-rank">${i + 1}</span>${face(p.id)}<span class="grow">${esc(p.name)}</span><b>${p.score}</b></div>`).join('')}</div>`
     : v.phase === 'choose' ? (isDrawer
-      ? `<div class="sk-card sk-choosecard"><p>Pick one to draw. Don’t say it out loud!</p><div class="sk-choices">${v.choices.map((w, i) => `<button class="sk-pick" data-do="choose:${i}" style="--r:${[-2.5, 1.5, -1][i % 3]}deg;--t:${['#ff6fae', '#ffd166', '#4cb8ff'][i % 3]}">${IC.pencil}<span>${esc(w)}</span></button>`).join('')}</div></div>`
+      ? `<div class="sk-card sk-choosecard"><p><span class="sk-pickhint">Pick one to draw. </span>Don’t say it out loud!</p><div class="sk-choices">${v.choices.map((w, i) => `<button class="sk-pick" data-do="choose:${i}" style="--r:${[-2.5, 1.5, -1][i % 3]}deg;--t:${['#ff6fae', '#ffd166', '#4cb8ff'][i % 3]}">${IC.pencil}<span>${esc(w)}</span></button>`).join('')}</div></div>`
       : `<div class="sk-card sk-waitcard">${face(drawer.id, 'big')}<p>${esc(drawer.name)} is picking something to draw…</p></div>`)
     : v.phase === 'reveal' ? `<div class="sk-card sk-revealcard"><small>The word was</small><p class="sk-big">${esc(v.word)}</p>${got.length
       ? `<div class="sk-gotlist">${got.map(([id, pts]) => `<div class="sk-gotrow">${face(id)}<span class="grow">${nameOf(id)}</span><b>+${pts}</b></div>`).join('')}<div class="sk-gotrow artist">${face(drawer.id)}<span class="grow">${esc(drawer.name)} <small>drew it</small></span><b>+${got.length * 50}</b></div></div>`
@@ -791,12 +813,18 @@ const STYLE = `
   .sk-final,.sk-gotrow{padding:3px 10px 3px 4px}.sk-final{margin-top:4px}
   .sk-gotlist{gap:4px}
   .sk-final .sk-face,.sk-gotrow .sk-face{width:24px;height:24px}
+  /* The word choices must all fit the short phone board without scrolling (the top bar already says
+     "Choose a word to draw"). */
+  .sk-choosecard p{font-size:.9rem;margin-bottom:8px}.sk-pickhint{display:none}
+  .sk-choices{gap:7px;padding:2px 2px 4px}
+  .sk-pick{min-height:38px;padding:4px 14px 4px 5px;gap:6px;font-size:1rem}.sk-pick .ic{width:26px;height:26px;padding:5px;border-radius:8px}
 }
 @media(max-width:400px){
   .sk-letters{gap:3px}.sk-letters b{width:19px;height:27px;font-size:1rem;border-radius:6px}
   .sk-clock{width:46px;height:46px}.sk-clock .sk-time{width:37px;height:37px;font-size:1rem}
   .sk-size{width:42px;height:42px;min-height:42px}.sk-act{width:42px}
   .sk-swatch{width:40px;height:40px;min-height:40px}
+  .sk-over{padding:8px}.sk-choosecard{padding:8px 12px}.sk-choosecard p{margin-bottom:6px}.sk-choices{gap:6px;padding:0 2px 2px}
 }
 `;
 

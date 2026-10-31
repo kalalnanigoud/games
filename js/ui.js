@@ -77,6 +77,7 @@ document.addEventListener('click', (e) => {
 
 /* ---------------- rendering ---------------- */
 
+let lastScreenKey = '';
 export function render() {
   if (S.screen !== 'game') menuOpen = false;
   if (S.screen !== 'lobby') closePicker();
@@ -85,6 +86,13 @@ export function render() {
   if (S.screen === 'home') renderHome();
   else if (S.screen === 'lobby') renderLobby();
   else renderGame();
+  // A new screen (or the next game of a tournament) opens at the top, not at the scroll depth of the
+  // button that led to it. The first draw is left to the browser's own scroll restoring.
+  const screenKey = S.screen + (S.screen === 'game' ? ':' + S.gameId : '');
+  if (screenKey !== lastScreenKey) {
+    if (lastScreenKey) window.scrollTo(0, 0);
+    lastScreenKey = screenKey;
+  }
 }
 
 // Voice controls: in the top bar on the home and lobby screens, in the game bar during a game.
@@ -108,6 +116,7 @@ export function renderTopbar() {
   // During a game the game bar takes over: one header, with everything else in its menu.
   const inGame = S.screen === 'game' && !!S.role;
   document.body.classList.toggle('in-game', inGame);
+  document.body.classList.toggle('in-room', !!S.role); // phones trim the bar so voice, sound and Leave fit
   if (inGame) {
     topinfo.innerHTML = '';
     const slot = document.getElementById('ghVoice');

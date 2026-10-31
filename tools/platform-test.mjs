@@ -10,7 +10,7 @@ import { createTour, currentMatch, recordResult, standings, tourLine } from '../
 import { diff, apply } from '../js/patch.js';
 // Voice chat needs a microphone and WebRTC; record what the platform asks of it instead.
 const voiceCalls = [];
-const createVoice = () => ({ active: false, muted: false, sync(list) { voiceCalls.push(list); }, leave() {}, answer() {}, toggleMute() {} });
+const createVoice = () => ({ active: false, muted: false, sync(list) { voiceCalls.push(list); }, leave() {}, answer() {}, toggleMute() {}, unreachable(id) { voiceCalls.push(['unreachable', id]); } });
 const storage = () => { const data = new Map(); return { getItem: k => data.get(k) ?? null, setItem: (k,v) => data.set(k,v), removeItem: k => data.delete(k) }; };
 const tasks = new Map(); let nextTimer = 0;
 const loaders = Object.fromEntries(GAMES.map((g) => [g.id, async () => ({ default: g })]));
@@ -29,7 +29,7 @@ function renderTopbar() {}
 function paintNet() {}
 globalThis.test = { S, conns, onHostMessage, onConnClosed, saveSession, resume, parse, cleanup, localRoom, hostRoom, joinRoom, broadcast, requireMultiplayer,
   startGame, armTimer, scheduleBots, onClientMessage, setWatch, applyAction, startTour, playTour, closeTour, loadGame, viewFor, standingIn, scheduleClientRetry,
-  addBot, fitTable, seatLimit, endGame, validTourDraft,
+  addBot, fitTable, seatLimit, endGame, validTourDraft, openClientPeer, roomPeerId,
   get timer() { return turnTimer; } };
 `, context);
 const t = context.test;
@@ -146,7 +146,7 @@ t.S.backupHost='guest'; t.broadcast(); assert.equal(t.S.successor, 'guest');
 runTask(); const backup = back.sent.find((m) => m.t === 'backup');
 assert.ok(backup); assert.equal(backup.data.code, t.S.code); assert.ok(!JSON.stringify(backup).includes(secret), 'the copy holds no reconnect secrets');
 const oldHost = { token: t.S.token, secret: t.S.secret }, game = JSON.stringify(backup.data.game);
-class FakePeer { constructor(id) { this.id = id || 'peer-' + uid(); this.handlers = {}; } on(e, f) { this.handlers[e] = f; } destroy() { this.destroyed = true; } connect() { return { on() {}, send() {}, close() {} }; } }
+class FakePeer { constructor(id) { this.id = id || 'peer-' + uid(); this.handlers = {}; FakePeer.last = this; } on(e, f) { this.handlers[e] = f; } destroy() { this.destroyed = true; } connect() { return { on() {}, send() {}, close() {} }; } }
 context.Peer = FakePeer;
 t.cleanup(); Object.assign(t.S, { role: 'client', token: 'guest', secret, code: backup.data.code, hostId: backup.data.hostId, successor: 'guest', backup: null });
 t.onClientMessage(backup); assert.ok(t.S.backup);
@@ -266,4 +266,15 @@ const big=conn(); t.onHostMessage(big,{t:'hello',token:'bigsender',secret:reconn
 assert.equal(big.pid,undefined,'an oversized message is ignored');
 t.cleanup();tasks.clear();
 console.log('Rate limit passed: bursts above real play are cut off with one warning; oversized messages are ignored.');
+// A voice call to someone who just switched off is reported as "peer unavailable". That must not look
+// like the host vanishing (which would tear down a working connection); only the host's own id may.
+context.Peer = FakePeer;
+Object.assign(t.S, { role: 'client', token: 'guest', code: 'VOICE', status: 'online', synced: true });
+t.openClientPeer(); const clientPeer = FakePeer.last;
+clientPeer.handlers.error({ type: 'peer-unavailable', message: 'Could not connect to peer gone-phone-1' });
+assert.equal(t.S.status, 'online', 'a missing voice member leaves the host connection alone');
+assert.deepEqual(voiceCalls.at(-1), ['unreachable', 'gone-phone-1'], 'voice chat is told that member is gone');
+clientPeer.handlers.error({ type: 'peer-unavailable', message: 'Could not connect to peer ' + t.roomPeerId('VOICE') });
+assert.equal(t.S.status, 'host not found', 'the host itself missing still counts');
+t.cleanup(); tasks.clear(); delete context.Peer;
 console.log('Platform regression checks passed: identity, secret fingerprints, valid reconnect, stale connections, rules enforcement, change-only syncs, version check, saved credentials, legacy sessions, stand-ins, backup host takeover, rematch, local fallback, timers, spectators, game options, voice chat membership and tournaments.');

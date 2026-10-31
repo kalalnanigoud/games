@@ -132,6 +132,30 @@ try {
   await outsider.evaluate(()=>{outsiderPeer.destroy();outsiderMedia.getTracks().forEach(t=>t.stop());});
   console.log('PASS authorized voice, outsider rejection, and voice leave');
 
+  // A phone switched off mid-call: its page just stops, with no goodbye to anyone. The others must drop
+  // the dead link within seconds, a guest's link to the host must not wobble while calls to the gone
+  // phone fail, and someone joining voice afterwards links up with everyone.
+  for(const page of [host,guest,outsider])await page.click('#voiceBtn');
+  for(const page of [host,guest,outsider])await waitFor(page, async()=>(await import('/js/net.js')).voice.links===2,undefined,{timeout:20000});
+  await guest.evaluate(async()=>{
+    const {S}=await import('/js/state.js');const net=await import('/js/net.js');const conn=net.hostConn;globalThis.wobble=[];
+    globalThis.watchHost=setInterval(()=>{if(S.status!=='online'||net.hostConn!==conn)globalThis.wobble.push(S.status);},200);
+  });
+  const switchOff=await outsider.context().newCDPSession(outsider);
+  switchOff.send('Page.crash').catch(()=>{}); // never answers: the page is gone
+  await new Promise(r=>setTimeout(r,500));
+  const dropped=Date.now();
+  for(const page of [host,guest])await waitFor(page, async()=>(await import('/js/net.js')).voice.links===1,undefined,{timeout:20000});
+  const dropSecs=Math.round((Date.now()-dropped)/1000);
+  await new Promise(r=>setTimeout(r,8000)); // redials to the gone phone fail meanwhile
+  assert.deepEqual(await guest.evaluate(()=>{clearInterval(globalThis.watchHost);return globalThis.wobble;}),[],'failed calls to a vanished phone leave the host link alone');
+  const newcomer=await openContext(browser,{permissions:['microphone']});
+  await newcomer.fill('#nameIn','Late talker'); await newcomer.fill('#codeIn',code); await newcomer.click('#joinBtn');
+  await ready(newcomer); await newcomer.click('#voiceBtn');
+  for(const page of [host,guest,newcomer])await waitFor(page, async()=>(await import('/js/net.js')).voice.links===2,undefined,{timeout:20000});
+  for(const page of [host,guest,newcomer])await page.click('#voiceOff');
+  console.log(`PASS voice drops a switched-off phone in ${dropSecs}s, keeps the host link steady, and links up a newcomer`);
+
   await host.reload(); await ready(host);
   await waitFor(host, async() => {
     const { S } = await import('/js/state.js');
