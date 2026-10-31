@@ -32,6 +32,9 @@ const entries = GAMES.map((g) => ({
   cover: coverOf(g), howTo: g.howTo, options: g.options,
   // Flags the lobby needs before the game's code has loaded.
   bot: !!g.bot, onTimeout: !!g.onTimeout, defaultTimer: g.defaultTimer, simultaneous: !!g.simultaneous, keepDom: !!g.keepDom,
+  // Live games (characters moving in a shared world): seats open mid-game, one player per device,
+  // and nothing kept on the device except what players save themselves.
+  ...(g.live ? { live: true, dropIn: !!g.dropIn, soloOnDevice: !!g.soloOnDevice, manualSave: !!g.manualSave } : {}),
 }));
 const hash = crypto.createHash('sha256');
 for (const f of FILES) hash.update(f + '\0' + fs.readFileSync(new URL(f, root), 'utf8').replace(/\r\n/g, '\n'));

@@ -11,6 +11,7 @@ export const GAME_INFO = {
   ember: { category: 'Strategy', minutes: 30, duration: '20–30', difficulty: 'Medium', coop: true },
   keeper: { category: 'Adventure', minutes: 45, duration: '25–45', difficulty: 'Medium', coop: true },
   signal: { category: 'Adventure', minutes: 45, duration: '25–45', difficulty: 'Deep', coop: true },
+  island: { category: 'Adventure', minutes: 90, duration: '30–180', difficulty: 'Medium', coop: true },
 };
 const readList = (key) => {
   try { const list = JSON.parse(localStorage.getItem(key)); return Array.isArray(list) ? [...new Set(list.filter((id) => Object.hasOwn(GAME_INFO, id)))] : []; }
@@ -24,7 +25,7 @@ export function toggleFavorite(id) {
   writeList('gn-favorites', ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
 }
 export function rememberPlayed(id) {
-  if (Object.hasOwn(GAME_INFO, id)) writeList('gn-recent', [id, ...recentGames().filter((x) => x !== id)].slice(0, 11));
+  if (Object.hasOwn(GAME_INFO, id)) writeList('gn-recent', [id, ...recentGames().filter((x) => x !== id)].slice(0, 12));
 }
 export function filterGames(games, filters, saved = favorites(), recent = recentGames()) {
   const query = (filters.query || '').trim().toLowerCase();

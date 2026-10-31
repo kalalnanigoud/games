@@ -79,6 +79,8 @@ export function validTourDraft(draft) {
 }
 // Spectators sit in the room but not at the table.
 export const seated = () => S.players.filter((p) => !p.watch);
+// How many one game seats. A game played by moving characters around (soloOnDevice) has one player per device.
+export const tableLimit = (g) => (S.role === 'local' && g?.soloOnDevice ? 1 : Math.min(MAX_ROOM, g?.maxPlayers ?? MAX_ROOM));
 export const isWatching = (id) => !!S.players.find((p) => p.id === id)?.watch;
 sessionStorage.setItem('gn-token', S.token);
 sessionStorage.setItem('gn-secret', S.secret);
@@ -109,9 +111,12 @@ export function saveSession() {
   clearTimeout(saveTimer);
   saveTimer = null;
   if (!S.role) return;
+  // A game saved only when a player asks (manualSave) keeps the room on this device, never the game itself:
+  // after a refresh the room reopens in the lobby, and players load what they saved.
+  const manual = !!getGame(S.gameId)?.manualSave;
   const data = S.role === 'client'
     ? { role: 'client', code: S.code, token: S.token, secret: S.secret }
-    : { role: S.role, code: S.code, token: S.token, secret: S.secret, credentials: S.credentials, gameId: S.gameId, players: S.players, started: S.started, game: S.game, viewAs: S.viewAs, timerSec: S.timerSec, opts: S.opts, tour: S.tour };
+    : { role: S.role, code: S.code, token: S.token, secret: S.secret, credentials: S.credentials, gameId: S.gameId, players: S.players, started: manual ? false : S.started, game: manual ? null : S.game, viewAs: S.viewAs, timerSec: S.timerSec, opts: S.opts, tour: S.tour };
   if (S.role === 'host') data.backupHost = S.backupHost;
   if (S.role !== 'client') {
     data.lobbyMode = S.lobbyMode === 'tour' ? 'tour' : 'game';

@@ -18,7 +18,10 @@ export default {
   // Prefix for room IDs on the PeerJS broker. Change it if you fork the site
   // so your rooms don't collide with other copies.
   roomPrefix: 'gamenight-v2-',
-  // Anonymous crash reports (js/report.js). Empty = off. To switch on, deploy server/error-reports.js
-  // as a Cloudflare Worker (see README) and put its address here, e.g. 'https://gn-errors.you.workers.dev/report'.
-  errorReports: '',
+  // Anonymous crash reports (js/report.js). Empty = off. node tools/deploy-error-reports.mjs deploys
+  // server/error-reports.js and fills this in, e.g. 'https://gn-errors.you.workers.dev/report'.
+  errorReports: 'https://gn-errors.coopp.workers.dev/report',
+  // Creature Island cloud saves (server/island-saves.js). Empty = players can still save to a file.
+  // node tools/deploy-island-saves.mjs deploys the Worker and fills this in, e.g. 'https://island-saves.you.workers.dev'.
+  islandSaves: 'https://island-saves.coopp.workers.dev',
 };

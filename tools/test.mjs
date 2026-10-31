@@ -21,6 +21,7 @@ for (const dir of ['js', 'games', 'tools', 'server']) {
     if (/\.(js|mjs|cjs)$/.test(file)) run('--check', `${dir}/${file}`);
   }
 }
-for (const file of ['server-test.cjs', 'platform-test.mjs', 'reliability-test.mjs', 'gems-check.mjs', 'bluff-test.mjs', 'mosaic-test.mjs', 'coop-test.mjs', 'escape-test.mjs', 'chess-test.mjs', 'party-test.mjs', 'report-test.mjs', 'levels-test.mjs']) run(`tools/${file}`);
-for (const g of GAMES) for (let n = g.minPlayers; n <= g.maxPlayers; n++) run('tools/sim.mjs', g.id, String(n), String(runs));
+for (const file of ['server-test.cjs', 'platform-test.mjs', 'reliability-test.mjs', 'gems-check.mjs', 'bluff-test.mjs', 'mosaic-test.mjs', 'coop-test.mjs', 'escape-test.mjs', 'chess-test.mjs', 'party-test.mjs', 'report-test.mjs', 'island-saves-test.mjs', 'island-test.mjs', 'levels-test.mjs']) run(`tools/${file}`);
+// Live games (characters moving in real time) have no turns to play out; they have their own checks above.
+for (const g of GAMES) if (!g.live) for (let n = g.minPlayers; n <= g.maxPlayers; n++) run('tools/sim.mjs', g.id, String(n), String(runs));
 console.log('All command-line checks passed. Browser checks: /tools/browser-test.html and /tools/local-boot-test.html');

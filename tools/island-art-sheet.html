@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Creature Island — art contact sheet</title>
+<style>
+  body { margin: 0; background: #0f1530; color: #e8ecff; font: 12px/1.35 system-ui, -apple-system, Segoe UI, sans-serif; }
+  header { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 8px 14px; background: rgba(9, 13, 32, 0.94); border-bottom: 1px solid #263063; }
+  header b { font-size: 14px; margin-right: 8px; }
+  header label { display: flex; gap: 5px; align-items: center; color: #b8c2f0; }
+  select, input { font: inherit; }
+  h2 { margin: 22px 14px 4px; font-size: 17px; color: #fff; }
+  h2 small { font-weight: 400; color: #8f9bd0; font-size: 12px; margin-left: 8px; }
+  h3 { margin: 12px 14px 4px; font-size: 13px; color: #aab4e8; font-weight: 600; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 6px; align-items: flex-start; }
+  .cell { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .cell canvas { display: block; border-radius: 4px; box-shadow: 0 0 0 1px #28326a; }
+  .cell span { font-size: 10px; color: #9aa6d8; white-space: nowrap; }
+  .err { color: #ff8a8a; padding: 4px 14px; font-family: monospace; }
+  .cover { padding: 6px 14px; display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+  .cover div { border-radius: 10px; overflow: hidden; box-shadow: 0 0 0 1px #28326a; line-height: 0; }
+  .icons img { background: #1d2550; border-radius: 6px; }
+  .icons .cell span { max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body>
+<header>
+  <b>Creature Island art</b>
+  <label>Res <select id="res"><option value="1,2.5">1 and 2.5</option><option value="1">1</option><option value="2.5">2.5</option><option value="4">4</option></select></label>
+  <label>Ground <select id="ground"><option>mixed</option><option>grass</option><option>sand</option><option>water</option><option>cave</option></select></label>
+  <label>Show <select id="only"><option>all</option><option>live</option><option>players</option><option>looks</option><option>npcs</option><option>creatures</option><option>bosses</option><option>murkling</option><option>props</option><option>items</option><option>icons</option><option>cover</option></select></label>
+  <label>Species <select id="sp"><option value="">all</option></select></label>
+  <label><input type="checkbox" id="anchor"> anchors</label>
+  <label><input type="checkbox" id="shadow" checked> game shadows</label>
+  <span id="stat"></span>
+</header>
+<main id="out"></main>
+<script type="module">
+import * as ART from '../games/island-art.js';
+
+const q = new URLSearchParams(location.search);
+const $ = (id) => document.getElementById(id);
+const opt = {
+  res: (q.get('res') || '1,2.5').split(',').map(Number).filter((n) => n > 0),
+  ground: q.get('ground') || 'mixed',
+  only: q.get('only') || 'all',
+  sp: q.get('sp') || '',
+  anchor: q.get('anchor') === '1',
+  shadow: q.get('shadow') !== '0',
+};
+const SPECIES = ['mossip', 'emberkit', 'dewpaw', 'nettlebug', 'puffcap', 'clackle', 'gullwisp', 'ripplefin', 'gemmole', 'fizzwing', 'cindermite', 'lunahop'];
+for (const s of SPECIES) $('sp').insertAdjacentHTML('beforeend', `<option>${s}</option>`);
+$('res').value = opt.res.join(','); if (!$('res').value) $('res').value = '1,2.5';
+$('ground').value = opt.ground; $('only').value = opt.only; $('sp').value = opt.sp;
+$('anchor').checked = opt.anchor; $('shadow').checked = opt.shadow;
+for (const id of ['res', 'ground', 'only', 'sp', 'anchor', 'shadow']) $(id).addEventListener('change', () => {
+  const p = new URLSearchParams({ res: $('res').value, ground: $('ground').value, only: $('only').value });
+  if ($('sp').value) p.set('sp', $('sp').value);
+  if ($('anchor').checked) p.set('anchor', '1');
+  if (!$('shadow').checked) p.set('shadow', '0');
+  location.search = p.toString();
+});
+
+const DIRS = ['down', 'up', 'left', 'right'];
+const GROUNDS = ['grass', 'sand', 'water', 'cave'];
+const out = $('out');
+const t0 = performance.now();
+
+// ---- ground tiles (32 world px), drawn at the sheet's res ----
+function rng(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
+const tileCache = new Map();
+function groundTile(kind, res) {
+  const key = kind + res;
+  if (tileCache.has(key)) return tileCache.get(key);
+  const n = Math.round(32 * res), c = document.createElement('canvas');
+  c.width = c.height = n;
+  const x = c.getContext('2d');
+  x.scale(n / 32, n / 32);
+  const r = rng(kind.length * 977 + 13);
+  if (kind === 'grass') {
+    x.fillStyle = '#74bd55'; x.fillRect(0, 0, 32, 32);
+    for (let i = 0; i < 26; i++) { const px = r() * 32, py = r() * 32; x.fillStyle = r() < 0.5 ? '#68b04b' : '#86ca63'; x.beginPath(); x.ellipse(px, py, 2 + r() * 3, 1.2 + r() * 2, 0, 0, Math.PI * 2); x.fill(); }
+    x.strokeStyle = '#5c9f43'; x.lineWidth = 0.7;
+    for (let i = 0; i < 18; i++) { const px = r() * 32, py = r() * 32; x.beginPath(); x.moveTo(px, py); x.lineTo(px - 0.6, py - 2.2); x.moveTo(px + 1, py); x.lineTo(px + 1.6, py - 2); x.stroke(); }
+  } else if (kind === 'sand') {
+    x.fillStyle = '#efd7a0'; x.fillRect(0, 0, 32, 32);
+    for (let i = 0; i < 40; i++) { x.fillStyle = r() < 0.5 ? '#e2c482' : '#f8e7bd'; x.fillRect(r() * 32, r() * 32, 0.9, 0.9); }
+    x.strokeStyle = 'rgba(200,160,90,0.35)'; x.lineWidth = 0.8;
+    for (let i = 0; i < 3; i++) { const py = 6 + i * 10 + r() * 3; x.beginPath(); x.moveTo(0, py); x.quadraticCurveTo(16, py - 2.5, 32, py); x.stroke(); }
+  } else if (kind === 'water') {
+    x.fillStyle = '#4fbfd3'; x.fillRect(0, 0, 32, 32);
+    for (let i = 0; i < 10; i++) { x.fillStyle = 'rgba(40,140,180,0.35)'; x.beginPath(); x.ellipse(r() * 32, r() * 32, 3 + r() * 4, 1.5, 0, 0, Math.PI * 2); x.fill(); }
+    x.strokeStyle = 'rgba(220,250,255,0.6)'; x.lineWidth = 0.8;
+    for (let i = 0; i < 5; i++) { const px = r() * 26, py = r() * 30; x.beginPath(); x.moveTo(px, py); x.quadraticCurveTo(px + 3, py - 1.4, px + 6, py); x.stroke(); }
+  } else {
+    x.fillStyle = '#2a2e44'; x.fillRect(0, 0, 32, 32);
+    for (let i = 0; i < 9; i++) { x.fillStyle = r() < 0.5 ? '#33384f' : '#242739'; x.beginPath(); x.ellipse(r() * 32, r() * 32, 2 + r() * 4, 1.5 + r() * 2.5, r() * 3, 0, Math.PI * 2); x.fill(); }
+    x.strokeStyle = '#1b1e2e'; x.lineWidth = 0.7;
+    for (let i = 0; i < 3; i++) { const px = r() * 32, py = r() * 32; x.beginPath(); x.moveTo(px, py); x.lineTo(px + 3, py + 2); x.lineTo(px + 5, py + 1); x.stroke(); }
+  }
+  tileCache.set(key, c);
+  return c;
+}
+
+// One labelled cell per sprite. Every cell in a group shares extents so the anchors line up across frames.
+function group(title, items, res, o = {}) {
+  if (!items.length) return;
+  if (title) out.insertAdjacentHTML('beforeend', `<h3>${title}</h3>`);
+  const row = document.createElement('div'); row.className = 'row'; out.append(row);
+  let L = 0, R = 0, T = 0, B = 0;
+  for (const it of items) {
+    const s = it.s; if (!s) continue;
+    const b = bounds(s.img), k = s.w / s.img.width;
+    if (!b) { it.edge = 'empty'; continue; }
+    if (b.edge && !it.tile) { it.edge = 'touches edge'; edges++; }
+    L = Math.max(L, s.ax - b.x0 * k); R = Math.max(R, (b.x1 + 1) * k - s.ax); T = Math.max(T, s.ay - b.y0 * k); B = Math.max(B, (b.y1 + 1) * k - s.ay);
+  }
+  const pad = o.pad ?? 4;
+  const W = L + R + pad * 2, H = T + B + pad * 2;
+  for (const it of items) {
+    const d = document.createElement('div'); d.className = 'cell';
+    const cv = document.createElement('canvas');
+    cv.width = Math.ceil(W * res); cv.height = Math.ceil(H * res);
+    const x = cv.getContext('2d');
+    const g = opt.ground === 'mixed' ? it.ground || 'grass' : opt.ground;
+    x.fillStyle = x.createPattern(groundTile(g, res), 'repeat'); x.fillRect(0, 0, cv.width, cv.height);
+    const ax = (pad + L) * res, ay = (pad + T) * res;
+    if (it.s) {
+      if (opt.shadow && o.shadow) { const [rx, ry] = typeof o.shadow === 'function' ? o.shadow(it) : o.shadow; x.fillStyle = 'rgba(16,22,48,0.28)'; x.beginPath(); x.ellipse(ax, ay, rx * res, ry * res, 0, 0, Math.PI * 2); x.fill(); }
+      x.drawImage(it.s.img, ax - it.s.ax * res, ay - it.s.ay * res, it.s.w * res, it.s.h * res);
+      if (opt.anchor) { x.fillStyle = '#ff2bd6'; x.fillRect(ax - 2, ay - 0.5, 4, 1); x.fillRect(ax - 0.5, ay - 2, 1, 4); x.strokeStyle = 'rgba(255,43,214,0.5)'; x.strokeRect(ax - it.s.ax * res + 0.5, ay - it.s.ay * res + 0.5, it.s.w * res - 1, it.s.h * res - 1); }
+    } else { x.fillStyle = '#ff5a5a'; x.font = '10px sans-serif'; x.fillText('error', 4, 14); }
+    d.append(cv);
+    const warn = it.err || it.edge;
+    d.insertAdjacentHTML('beforeend', `<span title="${warn || ''}" style="${warn ? 'color:#ff8a8a' : ''}">${it.label}${warn ? ' (' + (it.err ? 'error' : it.edge) + ')' : ''}${it.s ? ` · ${Math.round(it.s.w)}×${Math.round(it.s.h)}` : ''}</span>`);
+    row.append(d);
+  }
+}
+// Tight alpha bounds of a sprite canvas; edge = true when art reaches the canvas border (it would be clipped).
+function bounds(img) {
+  const w = img.width, h = img.height, d = img.getContext('2d').getImageData(0, 0, w, h).data;
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (d[(y * w + x) * 4 + 3] > 8) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  if (x1 < 0) return null;
+  return { x0, y0, x1, y1, edge: x0 === 0 || y0 === 0 || x1 === w - 1 || y1 === h - 1 };
+}
+let errors = 0, edges = 0;
+function tryS(fn, label, ground) {
+  try { return { s: fn(), label, ground }; } catch (e) { errors++; console.error(label, e); return { s: null, label, ground, err: String(e && e.message || e) }; }
+}
+const show = (k) => opt.only === 'all' || opt.only === k;
+
+function sheet(res) {
+  const A = ART.createArt(res);
+  const F = A.frames;
+  out.insertAdjacentHTML('beforeend', `<h2>res ${res}<small>sprites drawn 1:1 at ${res} device px per world px</small></h2>`);
+  if (show('players')) {
+    out.insertAdjacentHTML('beforeend', `<h2>Players<small>look {skin 0, hair 0, outfit 0}; rows: down/up/left/right on grass/sand/water/cave</small></h2>`);
+    for (const look of [{ skin: 0, hair: 0, outfit: 0 }, { skin: 3, hair: 1, outfit: 1 }]) {
+      for (const anim of Object.keys(F.player)) {
+        const items = [];
+        DIRS.forEach((d, di) => { for (let f = 0; f < F.player[anim]; f++) items.push(tryS(() => A.player(look, d, anim, f), `${anim} ${f} ${d}`, GROUNDS[di])); });
+        group(`${anim} — skin ${look.skin} hair ${look.hair} outfit ${look.outfit}`, items, res, { shadow: [9, 3.4] });
+      }
+    }
+  }
+  if (show('players') || show('looks')) {
+    out.insertAdjacentHTML('beforeend', `<h2>Player looks<small>outfit × hair (skin cycles), idle down; then each skin</small></h2>`);
+    for (let o = 0; o < 4; o++) {
+      const items = [];
+      for (let h = 0; h < 6; h++) items.push(tryS(() => A.player({ skin: (h + o) % 4, hair: h, outfit: o }, 'down', 'idle', 0), `o${o} h${h} s${(h + o) % 4}`, GROUNDS[(h + o) % 4]));
+      for (let h = 0; h < 6; h++) items.push(tryS(() => A.player({ skin: (h + o) % 4, hair: h, outfit: o }, h % 2 ? 'up' : 'left', 'walk', 0), `o${o} h${h} ${h % 2 ? 'up' : 'left'}`, GROUNDS[(h + o + 1) % 4]));
+      group(`outfit ${o}`, items, res, { shadow: [9, 3.4] });
+    }
+    const items = [];
+    for (let s = 0; s < 4; s++) for (const d of DIRS) items.push(tryS(() => A.player({ skin: s, hair: s + 2, outfit: s }, d, 'idle', 0), `skin ${s} ${d}`, GROUNDS[s]));
+    group('skins', items, res, { shadow: [9, 3.4] });
+  }
+  if (show('npcs')) {
+    out.insertAdjacentHTML('beforeend', `<h2>NPCs<small>idle frames 0/1 × 4 directions</small></h2>`);
+    for (const k of ['elder', 'healer', 'merchant', 'kid', 'fisher', 'ranger']) {
+      const items = [];
+      DIRS.forEach((d, di) => { for (let f = 0; f < F.npc; f++) items.push(tryS(() => A.npc(k, d, f), `${d} ${f}`, GROUNDS[di])); });
+      group(k, items, res, { shadow: [10, 3.6] });
+    }
+  }
+  if (show('creatures')) {
+    out.insertAdjacentHTML('beforeend', `<h2>Creatures<small>rows: down/up/left/right; every anim frame</small></h2>`);
+    for (const sp of SPECIES) {
+      if (opt.sp && !opt.sp.split(',').includes(sp)) continue;
+      DIRS.forEach((d, di) => {
+        const items = [];
+        for (const anim of Object.keys(F.creature)) for (let f = 0; f < F.creature[anim]; f++) items.push(tryS(() => A.creature(sp, d, anim, f), `${anim} ${f}`, GROUNDS[di]));
+        group(di === 0 ? `${sp} — ${d}` : d, items, res, { shadow: [8, 3] });
+      });
+    }
+  }
+  if (show('murkling')) {
+    out.insertAdjacentHTML('beforeend', `<h2>Murkling</h2>`);
+    const items = [];
+    for (const anim of Object.keys(F.murkling)) for (let f = 0; f < F.murkling[anim]; f++) GROUNDS.forEach((g) => items.push(tryS(() => A.murkling(anim, f), `${anim} ${f}`, g)));
+    group('', items, res, { shadow: [9, 3.2] });
+  }
+  if (show('bosses')) {
+    out.insertAdjacentHTML('beforeend', `<h2>Bosses<small>flip=false then flip=true</small></h2>`);
+    for (const k of ['mirebrute', 'quartzhulk', 'tempestra']) {
+      if (opt.sp && !opt.sp.split(',').includes(k)) continue;
+      for (const flip of [false, true]) {
+        const items = [];
+        for (const anim of Object.keys(F.boss)) for (let f = 0; f < F.boss[anim]; f++) items.push(tryS(() => A.boss(k, anim, f, flip), `${anim} ${f}${flip ? ' flip' : ''}`, k === 'mirebrute' ? (flip ? 'water' : 'grass') : k === 'quartzhulk' ? 'cave' : (flip ? 'sand' : 'cave')));
+        group(`${k}${flip ? ' (flip)' : ''}`, items, res, { shadow: k === 'tempestra' ? [44, 10] : [40, 10] });
+      }
+    }
+  }
+  if (show('props')) {
+    out.insertAdjacentHTML('beforeend', `<h2>Props<small>variants × frames, baked shadows</small></h2>`);
+    const P = [
+      ['oak', 2], ['pine', 1], ['palm', 1], ['bush', 1], ['flowers', 3], ['rock', 1], ['boulder', 1], ['berrybush', 2], ['mushrooms', 1], ['reeds', 1], ['lily', 1], ['shell', 2], ['driftwood', 1],
+      ['crystal', 2], ['stalagmite', 1], ['cavecrystal', 1], ['house', 3], ['elderhouse', 1], ['healerhut', 1], ['shop', 1], ['ranch', 1], ['well', 1], ['fenceH', 1], ['fenceV', 1], ['sign', 1], ['lantern', 1],
+      ['campfire', 1], ['chest', 2], ['boulderpile', 1], ['stormgate', 1], ['shrine', 2], ['log', 1], ['stump', 1], ['crate', 1], ['barrel', 1], ['tallgrass', 1], ['footprint', 1], ['bridge', 1], ['dock', 1], ['cracked', 1],
+    ];
+    const natural = { lily: 'water', shell: 'sand', driftwood: 'sand', footprint: 'sand', palm: 'sand', crystal: 'cave', stalagmite: 'cave', cavecrystal: 'cave', boulderpile: 'cave', dock: 'water', bridge: 'water', stormgate: 'cave', shrine: 'cave', cracked: 'cave', reeds: 'water' };
+    for (const [k, nv] of P) {
+      if (opt.sp && !opt.sp.split(',').includes(k)) continue;
+      const nf = (F.prop && F.prop[k]) || 1, items = [];
+      for (let v = 0; v < nv; v++) for (let f = 0; f < nf; f++) {
+        const gs = natural[k] ? [natural[k], 'grass'] : ['grass', 'sand'];
+        for (const g of gs) items.push(Object.assign(tryS(() => A.prop(k, v, f), `v${v} f${f}`, g), { tile: ['bridge', 'dock', 'cracked'].includes(k) }));
+      }
+      group(k, items, res, { pad: 3 });
+    }
+    // Tiles side by side, as the map would lay them.
+    out.insertAdjacentHTML('beforeend', `<h3>tiling check: bridge, dock, cracked, tallgrass, fences in a 3×2 run</h3>`);
+    const row = document.createElement('div'); row.className = 'row'; out.append(row);
+    for (const [k, g] of [['bridge', 'water'], ['dock', 'water'], ['cracked', 'cave'], ['tallgrass', 'grass'], ['fenceH', 'grass'], ['fenceV', 'grass']]) {
+      try {
+        const cv = document.createElement('canvas'); cv.width = Math.ceil(112 * res); cv.height = Math.ceil(96 * res);
+        const x = cv.getContext('2d'); x.fillStyle = x.createPattern(groundTile(g, res), 'repeat'); x.fillRect(0, 0, cv.width, cv.height);
+        for (let ty = 0; ty < 2; ty++) for (let tx = 0; tx < 3; tx++) {
+          if (k === 'fenceH' && ty) continue; if (k === 'fenceV' && tx) continue;
+          const s = A.prop(k, 0, (tx + ty) % ((F.prop && F.prop[k]) || 1));
+          const px = 8 + tx * 32 + 16, py = 16 + ty * 32 + 32;
+          x.drawImage(s.img, (px - s.ax) * res, (py - s.ay) * res, s.w * res, s.h * res);
+        }
+        if (k === 'tallgrass') { const c2 = A.creature('mossip', 'down', 'idle', 0); const s = A.prop(k, 0, 1); x.drawImage(c2.img, (56 - c2.ax) * res, (78 - c2.ay) * res, c2.w * res, c2.h * res); x.drawImage(s.img, (56 - s.ax) * res, (80 - s.ay) * res, s.w * res, s.h * res); }
+        const d = document.createElement('div'); d.className = 'cell'; d.append(cv); d.insertAdjacentHTML('beforeend', `<span>${k}</span>`); row.append(d);
+      } catch (e) { errors++; console.error(k, e); }
+    }
+  }
+  if (show('items')) {
+    out.insertAdjacentHTML('beforeend', `<h2>Items<small>~16 world px pickups</small></h2>`);
+    const items = [];
+    const IT = ['sunberry', 'bigberry', 'charm', 'seed', 'shells', 'driftwood', 'mushroom', 'crystal', 'tideshard', 'stoneshard', 'embershard', 'staff', 'bronzeblade', 'crystalblade', 'leafcharm', 'tidecharm', 'feather'];
+    IT.forEach((k, i) => items.push(tryS(() => A.item(k), k, GROUNDS[i % 4])));
+    group('', items, res, { pad: 3 });
+  }
+}
+
+function icons() {
+  if (!show('icons')) return;
+  const A = ART.createArt(1);
+  out.insertAdjacentHTML('beforeend', `<h2>Icons<small>data URLs at 24, 48 and 96 CSS px</small></h2>`);
+  const kinds = ['sunberry', 'bigberry', 'charm', 'seed', 'shells', 'driftwood', 'mushroom', 'crystal', 'tideshard', 'stoneshard', 'embershard', 'staff', 'bronzeblade', 'crystalblade', 'leafcharm', 'tidecharm', 'feather',
+    ...SPECIES.map((s) => 'sp:' + s), ...['leaf', 'tide', 'ember', 'spark', 'stone', 'moon', 'shade', 'storm'].map((e) => 'el:' + e),
+    ...['elder', 'healer', 'merchant', 'kid', 'fisher', 'ranger'].map((n) => 'npc:' + n), 'boss:mirebrute', 'boss:quartzhulk', 'boss:tempestra'];
+  for (const px of [24, 48, 96]) {
+    const row = document.createElement('div'); row.className = 'row icons'; out.append(row);
+    for (const k of kinds) {
+      const d = document.createElement('div'); d.className = 'cell';
+      try { const img = new Image(); img.width = img.height = px; img.src = A.icon(k, px); d.append(img); }
+      catch (e) { errors++; console.error(k, e); d.insertAdjacentHTML('beforeend', '<b style="color:#f66">!</b>'); }
+      d.insertAdjacentHTML('beforeend', `<span>${k}</span>`); row.append(d);
+    }
+  }
+}
+
+function cover() {
+  if (!show('cover')) return;
+  out.insertAdjacentHTML('beforeend', `<h2>Cover<small>COVER_SVG at 960×600 and 320×200</small></h2>`);
+  if (!ART.COVER_SVG) { out.insertAdjacentHTML('beforeend', '<div class="err">COVER_SVG missing</div>'); return; }
+  const wrap = document.createElement('div'); wrap.className = 'cover';
+  for (const [w, h] of [[960, 600], [320, 200]]) { const d = document.createElement('div'); d.innerHTML = ART.COVER_SVG.replace('<svg ', `<svg width="${w}" height="${h}" `); wrap.append(d); }
+  out.append(wrap);
+}
+
+// Live: a few sprites cycling their frames at game-like speeds.
+function live() {
+  if (!(opt.only === 'live' || opt.only === 'all')) return;
+  out.insertAdjacentHTML('beforeend', `<h2>Live<small>frames cycling (walk 8 fps, idle 2 fps)</small></h2>`);
+  const res = 2;
+  const A = ART.createArt(res);
+  const cv = document.createElement('canvas'); cv.width = 1400; cv.height = 820;
+  const wrap = document.createElement('div'); wrap.className = 'row'; wrap.append(cv); out.append(wrap);
+  const x = cv.getContext('2d');
+  const actors = [];
+  DIRS.forEach((d, i) => actors.push({ at: [24 + i * 34, 52], f: (t) => A.player({ skin: i, hair: i + 1, outfit: i }, d, 'walk', Math.floor(t * 8)) }));
+  ['idle', 'attack', 'dodge', 'hurt', 'down'].forEach((a, i) => actors.push({ at: [172 + i * 40, 52], f: (t) => A.player({ skin: 1, hair: 3, outfit: 2 }, 'left', a, Math.floor(t * (a === 'idle' ? 2 : 6))) }));
+  ['elder', 'healer', 'merchant', 'kid', 'fisher', 'ranger'].forEach((k, i) => actors.push({ at: [392 + i * 36, 52], f: (t) => A.npc(k, 'down', Math.floor(t * 2)) }));
+  SPECIES.forEach((s, i) => actors.push({ at: [26 + i * 50, 122], f: (t) => A.creature(s, 'down', 'walk', Math.floor(t * 8)) }));
+  SPECIES.forEach((s, i) => actors.push({ at: [26 + i * 50, 180], f: (t) => A.creature(s, i % 2 ? 'right' : 'left', i % 3 ? 'walk' : 'idle', Math.floor(t * (i % 3 ? 8 : 2))) }));
+  actors.push({ at: [100, 392], shadow: 40, f: (t) => A.boss('mirebrute', 'walk', Math.floor(t * 6), false) });
+  actors.push({ at: [280, 392], shadow: 36, f: (t) => A.boss('quartzhulk', 'idle', Math.floor(t * 2), true) });
+  actors.push({ at: [500, 392], shadow: 44, f: (t) => A.boss('tempestra', 'walk', Math.floor(t * 6), false) });
+  actors.push({ at: [636, 120], f: (t) => A.murkling('walk', Math.floor(t * 8)) });
+  actors.push({ at: [670, 122], f: (t) => A.prop('campfire', 0, Math.floor(t * 8)) });
+  actors.push({ at: [636, 186], f: (t) => A.prop('lantern', 0, Math.floor(t * 4)) });
+  actors.push({ at: [672, 186], f: (t) => A.prop('tallgrass', 0, Math.floor(t * 3)) });
+  actors.push({ at: [646, 300], f: (t) => A.prop('stormgate', 0, Math.floor(t * 4)) });
+  actors.push({ at: [646, 392], f: (t) => A.prop('cavecrystal', 0, Math.floor(t * 2)) });
+  const tile = groundTile('grass', res);
+  const tick = (now) => {
+    const t = now / 1000;
+    x.fillStyle = x.createPattern(tile, 'repeat'); x.fillRect(0, 0, cv.width, cv.height);
+    for (const a of actors) {
+      try {
+        const s = a.f(t); const [wx, wy] = a.at, sr = a.shadow || 8;
+        if (!/prop/.test(a.f.toString())) { x.fillStyle = 'rgba(16,22,48,0.25)'; x.beginPath(); x.ellipse(wx * res, wy * res, sr * res, sr * 0.36 * res, 0, 0, Math.PI * 2); x.fill(); }
+        x.drawImage(s.img, (wx - s.ax) * res, (wy - s.ay) * res, s.w * res, s.h * res);
+      } catch { /* shown in the static sheet */ }
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+try {
+  live();
+  for (const r of opt.res) sheet(r);
+  icons();
+  cover();
+} catch (e) { errors++; console.error(e); out.insertAdjacentHTML('beforeend', `<div class="err">${e && e.stack || e}</div>`); }
+$('stat').textContent = `${Math.round(performance.now() - t0)} ms, ${errors} errors, ${edges} sprites touching their canvas edge`;
+window.__sheetDone = { errors, edges, ms: performance.now() - t0, edgeList: [...document.querySelectorAll('.cell span')].filter((s) => /edge|empty|error/.test(s.textContent)).map((s) => s.closest('.row').previousElementSibling?.textContent + ' / ' + s.textContent).slice(0, 40) };
+</script>
+</body>
+</html>

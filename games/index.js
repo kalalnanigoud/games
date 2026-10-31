@@ -22,7 +22,8 @@ import signal from './signal.js';
 import chess from './chess.js';
 import sketch from './sketch.js';
 import spies from './spies.js';
+import island from './island.js';
 
-export const GAMES = [hexisle, gems, mosaic, bluff, chess, sketch, spies, temple, ember, keeper, signal];
+export const GAMES = [hexisle, gems, mosaic, bluff, chess, sketch, spies, temple, ember, keeper, signal, island];
 
 export const getGame = (id) => GAMES.find((g) => g.id === id) || GAMES[0];

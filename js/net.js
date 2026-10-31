@@ -9,7 +9,7 @@ import { createVoice } from './voice.js';
 import { createTour, currentMatch, recordResult } from './tour.js';
 import { diff, apply } from './patch.js';
 import { rememberPlayed } from './library.js';
-import { MAX_ROOM, MAX_WATCHERS, BOT_NAMES, S, VERSION, getGame, gameReady, loadGame, defaultTimer, defaultOpts, validOpts, validTourDraft, seated, isWatching, adoptToken, myId, playerName, isBot, newerVersion, saveSession, queueSessionSave, flushSessionSave, clearSession } from './state.js';
+import { MAX_ROOM, MAX_WATCHERS, BOT_NAMES, S, VERSION, getGame, gameReady, loadGame, defaultTimer, defaultOpts, validOpts, validTourDraft, seated, tableLimit, isWatching, adoptToken, myId, playerName, isBot, newerVersion, saveSession, queueSessionSave, flushSessionSave, clearSession } from './state.js';
 import { render, renderTopbar, paintNet } from './ui.js';
 
 const TAKEOVER_MS = 15000; // how long the backup host waits for the host to come back before taking over
@@ -50,6 +50,7 @@ export function resume(session) {
 
 export function cleanup() {
   flushSessionSave();
+  stopLive();
   voice.leave();
   S.voice = [];
   clearTimeout(botTimer);
@@ -72,8 +73,16 @@ export function cleanup() {
   if (oldPeer) try { oldPeer.destroy(); } catch {}
 }
 
-export function leave() {
-  if (S.role === 'host' && S.started && !confirm('Leave and close this room for everyone?')) return;
+export function leave(confirmed = false) {
+  if (confirmed !== true && askExit('leave', () => leave(true))) return;
+  if (confirmed !== true && S.role === 'host' && S.started && !confirm('Leave and close this room for everyone?')) return;
+  // In a drop-in game, leaving frees the seat for someone else at once instead of holding it for a reconnect.
+  if (S.role === 'client' && S.started && getGame(S.gameId).dropIn && hostConn?.open) {
+    const c = hostConn, p = peer;
+    hostConn = null; peer = null;
+    try { c.send({ t: 'bye' }); } catch {}
+    setTimeout(() => { try { c.close(); } catch {} try { p?.destroy(); } catch {} }, 400);
+  }
   cleanup();
   clearSession();
   Object.assign(S, { screen: 'home', role: null, code: null, players: [], started: false, game: null, view: null, status: '', tour: null, backup: null, update: null });
@@ -88,7 +97,7 @@ function whenLoaded() {
   loadGame(id).then(() => {
     if (!S.role || S.gameId !== id) return;
     // Clients already received their private view; they have no authoritative game.
-    if (S.role === 'client') render(); else broadcast();
+    if (S.role === 'client') { syncLive(); render(); } else broadcast();
   })
     .catch(() => toast('Could not load the game. Check your connection and reload.'));
 }
@@ -228,9 +237,11 @@ export function onHostMessage(conn, msg) {
     let seatedOut = false;
     if (!p) {
       // Someone arriving after the start, or when the chosen game's table is full, joins as a spectator.
-      const watching = S.started || !!S.tour || seated().length >= seatLimit();
+      // A drop-in game (characters in a shared world) seats them mid-game while there is room.
+      const dropIn = !!getGame(S.gameId).dropIn;
+      const watching = (S.started && !dropIn) || !!S.tour || seated().length >= seatLimit();
       if (watching && S.players.length >= MAX_ROOM + MAX_WATCHERS) return reject(conn, 'Room is full.');
-      seatedOut = watching && !S.started;
+      seatedOut = watching && (!S.started || dropIn);
       p = { id: String(msg.token), name, connected: true, ...(watching ? { watch: true } : {}) };
       S.players.push(p);
       S.credentials.push([p.id, proof]);
@@ -250,6 +261,10 @@ export function onHostMessage(conn, msg) {
     if (seatedOut && conn.open) conn.send({ t: 'notice', msg: S.tour ? 'This tournament already has its entrants. You can watch until it finishes.' : `${getGame(S.gameId).name} seats ${seatLimit()}, so you're watching for now. Tap "Take a seat" if one frees up.` });
   } else if (!ownConn(conn)) {
     return;
+  } else if (msg.t === 'rt') {
+    if (liveGame && !isWatching(conn.pid)) liveGame.hostMessage?.(conn.pid, msg.d);
+  } else if (msg.t === 'bye') {
+    if (S.started && getGame(S.gameId).dropIn) dropSeat(conn.pid);
   } else if (msg.t === 'action') {
     const err = applyAction(conn.pid, msg.action);
     if (err) conn.open && conn.send({ t: 'error', msg: err });
@@ -280,7 +295,7 @@ export function setVoiceMember(pid, peerId) {
 export function setWatch(pid, on) {
   const p = S.players.find((x) => x.id === pid);
   if (!p || p.bot) return 'Only people can watch.';
-  if (S.started) return 'Wait until this game ends to change seats.';
+  if (S.started && (on || !getGame(S.gameId).dropIn)) return 'Wait until this game ends to change seats.';
   if (S.tour) return 'Tournament seats are assigned by the bracket. Wait until the tournament closes to change seats.';
   if (!on && seated().length >= seatLimit()) return `The table is full: ${getGame(S.gameId).name} seats ${seatLimit()}.`;
   if (on) p.watch = true; else delete p.watch;
@@ -454,6 +469,7 @@ export function broadcast() {
     if (c && c.open) c.send(syncFor(c, p.id, now));
   }
   if (S.role === 'host') { voice.sync(S.voice, peer); queueBackup(); }
+  syncLive();
   refreshLocalView();
   render();
   scheduleBots();
@@ -465,6 +481,9 @@ export function broadcast() {
 // It includes hidden cards and puzzle answers. Migration is off until a successor is chosen.
 
 function pickSuccessor() {
+  // A live world changes many times a second, so it isn't copied to a backup host: if the host leaves,
+  // the room reopens in the lobby and everyone continues from what they saved.
+  if (getGame(S.gameId).live) return null;
   const live = S.players.filter((p) => p.id !== S.token && !p.bot && p.connected && conns.get(p.id)?.open);
   return live.find((p) => p.id === S.backupHost)?.id || null;
 }
@@ -503,7 +522,7 @@ function ping() {
 // How many can sit at the table: the chosen game's limit, or the whole room while a tournament is
 // set up or played (each of its games seats its own players).
 export function seatLimit() {
-  return S.tour || S.lobbyMode === 'tour' ? MAX_ROOM : Math.min(MAX_ROOM, getGame(S.gameId).maxPlayers);
+  return S.tour || S.lobbyMode === 'tour' ? MAX_ROOM : tableLimit(getGame(S.gameId));
 }
 // After the host picks a game with fewer seats: computer players leave first (newest first), then the
 // newest arrivals move to watching. The host keeps their seat; one-device players are never removed.
@@ -595,8 +614,9 @@ export function closeTour() {
   broadcast();
 }
 
-export function endGame() {
-  if (!confirm('End this game and go back to the lobby?')) return;
+export function endGame(confirmed = false) {
+  if (confirmed !== true && askExit('lobby', () => endGame(true))) return;
+  if (confirmed !== true && !confirm('End this game and go back to the lobby?')) return;
   S.started = false;
   S.game = null;
   S.screen = 'lobby';
@@ -613,7 +633,7 @@ export function localRoom(gameId, resume = null) {
     credentials: [],
     code: null,
     gameId: resume?.gameId || gameId,
-    players: resume?.players || [{ id: 'L1', name: S.name || 'Player 1', connected: true }, { id: 'L2', name: 'Player 2', connected: true }],
+    players: resume?.players || [{ id: 'L1', name: S.name || 'Player 1', connected: true }, ...(getGame(resume?.gameId || gameId).soloOnDevice ? [] : [{ id: 'L2', name: 'Player 2', connected: true }])],
     started: resume?.started || false,
     timerSec: resume?.timerSec ?? defaultTimer(getGame(resume?.gameId || gameId)),
     opts: validOpts(getGame(resume?.gameId || gameId), resume?.opts),
@@ -763,7 +783,10 @@ export function onClientMessage(msg) {
     if (msg.now) clockSkew = msg.now - Date.now();
     S.screen = S.started ? 'game' : 'lobby';
     if (S.started) whenLoaded();
+    syncLive();
     render();
+  } else if (msg.t === 'rt') {
+    if (liveGame) liveGame.guestMessage?.(msg.d);
   } else if (msg.t === 'ping') {
     hostConn?.open && hostConn.send({ t: 'pong', ts: msg.ts });
     if (msg.net && typeof msg.net === 'object') { S.net = msg.net; paintNet(); }
@@ -793,6 +816,68 @@ export function send(action) {
       if (err) toast(err);
     });
   }
+}
+
+/* ---------------- live games ---------------- */
+// A game with live: true (characters moving around a world) runs that world on the host's device
+// (startHost), streams what each player sees straight to them as {t:'rt'} messages and takes their inputs
+// back, alongside the turn-by-turn sync above, which then only carries the room and a small summary.
+let liveKey = '', liveGame = null;
+const hostApi = {
+  post(pid, d) { const c = conns.get(pid); if (c?.open) c.send({ t: 'rt', d }); },
+  notice,
+  freeSeat,
+};
+export function syncLive() {
+  const g = S.started && gameReady(S.gameId) ? getGame(S.gameId) : null;
+  const sid = S.role === 'client' ? S.view?.sid : S.game?.sid;
+  const key = g?.live && sid ? `${S.role}:${S.gameId}:${sid}` : '';
+  if (liveKey && liveKey !== key) stopLive();
+  if (!key) return;
+  if (!liveKey) {
+    liveKey = key; liveGame = g;
+    if (S.role !== 'client') try { g.startHost?.(hostApi, S.game); } catch (e) { console.error(e); }
+  }
+  if (S.role !== 'client') g.hostRoom?.(seated().map((p) => ({ id: p.id, name: p.name, connected: S.role === 'local' || p.id === S.token || !!p.connected })));
+}
+export function stopLive() {
+  const g = liveGame;
+  liveKey = ''; liveGame = null;
+  try { g?.stopLive?.(); } catch (e) { console.warn(e); }
+}
+// From the game's screen: an input or request on its way to the world (on this device, if we host it).
+export function liveSend(d) {
+  if (S.role === 'client') {
+    if (!hostConn?.open) return false;
+    hostConn.send({ t: 'rt', d });
+    return true;
+  }
+  if (!liveGame) return false;
+  liveGame.hostMessage?.(myId(), d);
+  return true;
+}
+// Leaving, going back to the lobby or restarting: a game may ask first (true = it will call proceed itself).
+export function askExit(kind, proceed) {
+  const g = S.started && gameReady(S.gameId) ? getGame(S.gameId) : null;
+  try { return !!g?.beforeExit?.(kind, proceed); } catch (e) { console.warn(e); return false; }
+}
+// Host: a player who left a drop-in game, or whose empty seat the host frees for someone else.
+function dropSeat(pid) {
+  S.players = S.players.filter((p) => p.id !== pid);
+  S.credentials = S.credentials.filter(([id]) => id !== pid);
+  const c = conns.get(pid);
+  conns.delete(pid);
+  if (c) try { c.close(); } catch {}
+  delete S.net[pid];
+  S.voice = S.voice.filter(([id]) => id !== pid);
+  saveSession();
+  broadcast();
+}
+function freeSeat(pid) {
+  const p = S.players.find((x) => x.id === pid);
+  if (!p || p.id === S.token || p.connected || p.bot) return false;
+  dropSeat(pid);
+  return true;
 }
 
 /* ---------------- voice chat ---------------- */

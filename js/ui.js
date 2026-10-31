@@ -9,8 +9,8 @@ import { openModal, closeModal } from './dialog.js';
 import { report } from './report.js';
 import { GAME_INFO, favorites, toggleFavorite, filterGames } from './library.js';
 import { standings, tourLine } from './tour.js';
-import { MAX_ROOM, S, GAMES, FILES, getGame, gameReady, loadGame, defaultTimer, defaultOpts, seated, isWatching, myId, playerName, isBot, saveSession, loadSession, clearSession } from './state.js';
-import { clockSkew, voice, resume, leave, hostRoom, refreshLocalView, broadcast, addBot, fitTable, startGame, requestRematch, standingIn, startTour, playTour, closeTour, endGame, localRoom, joinRoom, send, joinVoice, leaveVoice, toggleWatch } from './net.js';
+import { MAX_ROOM, S, GAMES, FILES, getGame, gameReady, loadGame, defaultTimer, defaultOpts, seated, tableLimit, isWatching, myId, playerName, isBot, saveSession, loadSession, clearSession } from './state.js';
+import { clockSkew, voice, resume, leave, hostRoom, refreshLocalView, broadcast, addBot, fitTable, startGame, requestRematch, standingIn, startTour, playTour, closeTour, endGame, localRoom, joinRoom, send, joinVoice, leaveVoice, toggleWatch, liveSend, askExit } from './net.js';
 
 export const app = document.getElementById('app');
 export const topinfo = document.getElementById('topinfo');
@@ -209,7 +209,7 @@ function gameCard(g, saved) {
       <h3>${esc(g.name)}</h3>
       <div class="game-meta"><span>${icon('users')}${range(g)} players</span><span>${icon('clock')}${info.duration} min</span><span>${icon('level')}${info.difficulty}</span></div>
       <p>${esc(g.description)}</p>
-      <div class="card-actions"><button class="primary" data-host="${g.id}">${icon('globe')}Host online</button><button data-local="${g.id}" title="Pass one device around, or play against computer players">${icon('phone')}One device</button></div>
+      <div class="card-actions"><button class="primary" data-host="${g.id}">${icon('globe')}Host online</button>${g.soloOnDevice ? `<button data-local="${g.id}" title="Play on your own on this device">${icon('phone')}Play solo</button>` : `<button data-local="${g.id}" title="Pass one device around, or play against computer players">${icon('phone')}One device</button>`}</div>
     </div></article>`;
 }
 
@@ -487,11 +487,11 @@ export function renderLobby() {
   const t = S.tour;
   const tourMode = !!t || S.lobbyMode === 'tour';
   // The table holds as many seats as the chosen game; a tournament may use the whole room.
-  const limit = tourMode ? MAX_ROOM : Math.min(MAX_ROOM, g.maxPlayers);
+  const limit = tourMode ? MAX_ROOM : tableLimit(g);
   const canStart = n >= g.minPlayers && n <= g.maxPlayers;
   const me = S.players.find((p) => p.id === S.token);
   const watchers = S.players.filter((p) => p.watch);
-  const seats = Math.min(MAX_ROOM, Math.max(tourMode ? 4 : 2, tourMode ? n : g.maxPlayers, n));
+  const seats = Math.min(MAX_ROOM, Math.max(tourMode ? 4 : Math.min(2, limit), tourMode ? n : limit, n));
   const full = n >= limit;
   const openAction = !isHost || full ? '' : S.role === 'local' ? 'player' : g.bot || tourMode ? 'bot' : '';
   const hostName = playerName(S.hostId);
@@ -770,6 +770,8 @@ export function renderGame() {
     send,
     isHost,
     local: S.role === 'local',
+    // Games played live (characters moving in a world): inputs to the host's world, and taking a free seat.
+    live: { send: liveSend, takeSeat: () => toggleWatch(false) },
   };
   const box = app.querySelector('#gamebox');
   try {
@@ -823,6 +825,7 @@ export function renderGame() {
       S.started = false; S.game = null; S.screen = 'lobby'; saveSession(); broadcast();
     } else if (b.id === 'restartBtn') {
       closeMenu();
+      if (askExit('restart', () => startGame())) return;
       if (!S.view.over && !confirm('Restart the game from the beginning?')) return;
       startGame();
     } else if (b.id === 'lobbyBtn') { closeMenu(); endGame(); }

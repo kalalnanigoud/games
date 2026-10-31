@@ -51,6 +51,17 @@ skips the "your turn" chime and title. Bots in such games should usually return 
 (the escape rooms use `{ type: 'think' }`); the platform doesn't save or resend a state that didn't change.
 Escape rooms themselves are built from data with `games/escape-kit.js`; see `keeper.js` and `signal.js`.
 
+### Live games (optional, advanced)
+A game played in real time (characters moving in a shared world, like `games/island.js`) sets `live: true`.
+- **Messages:** the platform carries its messages beside the normal sync. On the host, `startHost(api, state)` starts the
+  world, `hostRoom(seated)` reports who is at the table, `hostMessage(pid, data)` delivers a player's input, and
+  `api.post(pid, data)` sends to one player. Players receive it in `guestMessage(data)` and send with `ctx.live.send(data)`.
+- **Lifecycle:** `stopLive()` must stop every timer.
+- **Leaving:** `beforeExit(kind, proceed)` may show its own leave prompt (return `true`, then call `proceed`).
+- **Flags:** `dropIn` seats newcomers mid-game while there is room. `soloOnDevice` keeps one-device play to one person.
+  `manualSave` keeps the game out of the browser's saved session, so a refresh returns to the lobby.
+- **What isn't used:** the state from `setup` stays a tiny summary (with a `sid`), and `act`, `turnOf` and bots aren't used.
+
 ### Turn timer (optional)
 Export `onTimeout(view, pid)` (and optionally `defaultTimer: 30`) to give your game a per-move clock.
 The host picks the length in the lobby. When a human's time runs out, the host plays

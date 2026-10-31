@@ -40,6 +40,8 @@ jobs:
         run: node tools/browser-ci.mjs
       - name: Multiplayer and WebKit touch checks
         run: node tools/multiplayer-ci.mjs
+      - name: Creature Island with four live players
+        run: node tools/island-ci.mjs
       - name: Upload browser traces and screenshots
         if: always()
         uses: actions/upload-artifact@v4

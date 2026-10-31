@@ -121,14 +121,51 @@ positions in two copies of the site and compares the boards pixel by pixel (see 
 When switched on, the site sends an anonymous report if something breaks on a player's device: the error,
 the screen and game, the site version and the browser. It never sends names, room codes, chat or game
 contents, sends each problem once per visit (at most five per visit), and stores nothing about IP addresses.
-It is off until you set it up (free, about five minutes):
-1. In a free Cloudflare account, create a KV namespace (Storage & Databases → KV), e.g. `gn-error-reports`.
-2. Create a Worker (Workers & Pages → Create → Worker), open **Edit code**, paste `server/error-reports.js`, deploy.
-3. In the Worker's Settings, bind the KV namespace with the variable name `REPORTS`, and add a secret
-   `VIEW_KEY` (a long random password).
-4. Put `https://<your-worker>.workers.dev/report` into `errorReports` in `js/config.js` and push.
-Read the latest reports at `https://<your-worker>.workers.dev/recent?key=<VIEW_KEY>`. Reports expire after
-30 days. `node tools/report-test.mjs` checks the Worker.
+It is off until you set it up. One command does it, on the free plan, with the same API token permissions
+as the cloud saves below:
+
+    node tools/deploy-error-reports.mjs
+
+It asks for the token (typing stays hidden) and never stores it. Then it:
+1. creates the `gn-error-reports` D1 database;
+2. uploads `server/error-reports.js` as the `gn-errors` Worker, with the database bound as `DB`;
+3. makes a private reading key (`VIEW_KEY`);
+4. switches on the Worker's workers.dev address and checks that it answers;
+5. writes the address into `errorReports` in `js/config.js`.
+
+The reading link is shown once. Keep it in a password manager, then commit and push `js/config.js`.
+Running the command again keeps the key, and `--new-key` replaces a lost one. To set it up by hand
+instead, follow the steps at the top of `server/error-reports.js`.
+
+Reports expire after 30 days. At most 60 are accepted a minute: each one is counted in a single database
+step, so the cap holds even when many arrive at once. `node tools/report-test.mjs` checks the Worker and
+the setup.
+
+## Cloud saves for Creature Island (optional)
+
+Creature Island players can keep their explorer (their character, creatures, items and story progress) in a
+free Cloudflare Worker with a D1 database. Nothing is saved until a player chooses **Save adventure**; live
+play never touches the service. Each device keeps a private key in the browser, and the service stores only
+its SHA-256 and the save itself, never IP addresses. Without the service, players can still save to a file.
+
+One command sets it up. It needs a Cloudflare API token with Account · Workers Scripts · Edit,
+Account · D1 · Edit and Account · Account Settings · Read:
+
+    node tools/deploy-island-saves.mjs
+
+It asks for the token (typing stays hidden) and never stores it. Then it:
+1. creates the `island-saves` D1 database;
+2. uploads `server/island-saves.js` as a Worker, with the database bound as `DB`;
+3. switches on its workers.dev address and checks that it answers;
+4. writes the address into `islandSaves` in `js/config.js`.
+
+Commit and push `js/config.js` to switch cloud saves on for everyone. Run the command again to update the
+Worker; `--check` checks the saved address again. To set it up by hand instead, follow the steps at the top
+of `server/island-saves.js`.
+
+Free limits are 100,000 requests and 100,000 writes a day, and 5 GB of storage. Past them, a save fails with
+a clear message and play carries on. `node tools/island-saves-test.mjs` checks the Worker, the game's save
+client and the deploy script.
 
 ## Playing a game
 
@@ -238,6 +275,52 @@ Both games are built on `games/escape-kit.js`, which takes rooms, objects, items
 
 `node tools/escape-test.mjs` plays bot teams of every size, checks that answers and other players' private
 clues never appear in a player's view, and runs scripted solves with wrong tries, locked rooms and hints.
+
+## Creature Island
+
+**Creature Island** (1–4) is a top-down adventure played live: up to four friends explore one island at the
+same time, each with their own explorer and creature companion, and can split up and regroup freely.
+- **Where:** Brightwater Village, Whispering Woods, Sunsand Shore, Mirror Lake and its marsh, Glowdeep Cave
+  and Stormcrown Peak.
+- **What:** befriend 12 original creatures, fight in real time with readable warnings on the ground, and
+  raise companions with their own special moves.
+- **The story:** quests for the villagers, two minibosses, a raid on the village and a final boss. It is
+  designed for 2–3 hours of first play; that length hasn't been playtested yet.
+
+**Controls**
+- **Computer:** WASD or the arrow keys move; J, Space or a click attacks; K or Shift dodges; L or Q is the
+  companion's move; E talks, gathers and revives; C befriends; B opens the bag.
+- **Phone:** a thumb stick appears anywhere on the left half of the screen, with large action buttons on the right.
+
+**How it runs**
+- The host's browser runs the world 20 times a second; players send only their inputs.
+- Each player's own explorer moves the moment they press, and everyone else glides between the host's updates.
+- Seats open mid-adventure: a fifth person watches until someone leaves. A friend who drops out gets the
+  same explorer back when they reconnect.
+- If the host closes their page, the island closes. Nothing is copied to a backup host, because the world
+  changes many times a second.
+
+**Saving is manual**
+- Each player saves their own explorer from the bag: level, creatures, items and story progress. They can
+  bring that explorer to any friend's island later.
+- Nothing is saved automatically, and the island is never kept in the browser's storage. Leaving with
+  unsaved progress asks to save first.
+- Saves go to the optional cloud service above or to a file. A save is captured at one moment, so anything
+  that happens while it uploads stays marked as unsaved.
+- The host checks every save before loading it, so a save edited by hand can't break the island.
+
+`node tools/island-test.mjs` covers:
+- four explorers moving at once, and movement prediction matching the host exactly;
+- the story from the first companion to the final boss, befriending, gates opening in story order and the
+  village raid;
+- what a save captures, and how forged saves are cleaned up.
+
+`node tools/island-ci.mjs` plays it in real browsers (four players over WebRTC, one on a phone-sized
+touch screen). It covers moving at once, a fifth watcher, reconnecting, cloud saving and the leave prompt.
+
+A live game exports `live: true` and the hooks in `games/island.js`: `startHost`, `hostRoom`,
+`hostMessage`, `guestMessage`, `stopLive` and `beforeExit`. The platform (`liveSend`/`syncLive` in
+`js/net.js`) carries its messages beside the normal turn-by-turn sync.
 
 ## Adding another game
 Each game is one file in `games/`. See the comment at the top of `games/index.js` for the format,
