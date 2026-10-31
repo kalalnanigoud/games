@@ -14,6 +14,9 @@
 
 const KEEP_MS = 30 * 24 * 60 * 60 * 1000;
 const PER_MINUTE = 60; // a broken release can't fill the storage
+// At most this many a day (set REPORTS_PER_DAY to change it). Database writes are shared by the whole
+// account (100,000 a day on the free plan, cloud saves included), so crash reports must never use them up.
+const PER_DAY = 2000;
 const text = (value, max) => String(value ?? '').slice(0, max);
 const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, data TEXT NOT NULL)',
@@ -50,11 +53,20 @@ export default {
       try { r = JSON.parse(body); } catch { return new Response('bad report', { status: 400, headers: cors }); }
       if (!r || typeof r !== 'object' || Array.isArray(r)) return new Response('bad report', { status: 400, headers: cors });
       const now = Date.now();
-      const minute = new Date(now).toISOString().slice(0, 16);
-      // Counting is one atomic statement: reports arriving together each get their own number, so the
-      // cap holds however many come at once.
-      const count = await withTables(env, () => env.DB.prepare('INSERT INTO report_counts (minute, n) VALUES (?, 1) ON CONFLICT (minute) DO UPDATE SET n = n + 1 RETURNING n').bind(minute).first());
-      if (!count || count.n > PER_MINUTE) return new Response('busy', { status: 429, headers: cors });
+      const minute = new Date(now).toISOString().slice(0, 16), day = 'day:' + minute.slice(0, 10);
+      const perDay = Number(env.REPORTS_PER_DAY) > 0 ? Number(env.REPORTS_PER_DAY) : PER_DAY;
+      const busy = () => new Response('busy', { status: 429, headers: cors });
+      // Over a cap, a report is turned away after only reading the counters: a flood from a broken release
+      // costs no database writes at all.
+      const seen = await withTables(env, () => env.DB.prepare('SELECT minute, n FROM report_counts WHERE minute IN (?, ?)').bind(minute, day).all());
+      const was = Object.fromEntries((seen?.results || []).map((row) => [row.minute, Number(row.n)]));
+      if ((was[minute] || 0) >= PER_MINUTE || (was[day] || 0) >= perDay) return busy();
+      // Counting is one atomic statement: reports arriving together each get their own numbers, so both
+      // caps hold however many come at once.
+      const counted = await env.DB.prepare('INSERT INTO report_counts (minute, n) VALUES (?, 1), (?, 1) ON CONFLICT (minute) DO UPDATE SET n = n + 1 RETURNING minute, n').bind(minute, day).all();
+      const n = Object.fromEntries((counted?.results || []).map((row) => [row.minute, Number(row.n)]));
+      if (!(n[minute] <= PER_MINUTE) || !(n[day] <= perDay)) return busy();
+      const count = { n: n[minute] };
       const report = {
         version: text(r.v, 40), where: text(r.where, 40), message: text(r.message, 400), stack: text(r.stack, 2000),
         screen: text(r.screen, 20), game: text(r.game, 20), role: text(r.role, 10), started: !!r.started,
@@ -64,7 +76,9 @@ export default {
       // The first report of each minute tidies up: old reports, and counters from minutes gone by.
       if (count.n === 1) {
         await env.DB.prepare('DELETE FROM reports WHERE at < ?').bind(now - KEEP_MS).run();
-        await env.DB.prepare('DELETE FROM report_counts WHERE minute < ?').bind(new Date(now - 10 * 60000).toISOString().slice(0, 16)).run();
+        // ('day:…' keys sort after the plain minutes, so the first test never touches them.)
+        await env.DB.prepare("DELETE FROM report_counts WHERE minute < ? OR (minute LIKE 'day:%' AND minute < ?)")
+          .bind(new Date(now - 10 * 60000).toISOString().slice(0, 16), 'day:' + new Date(now - 2 * 86400000).toISOString().slice(0, 10)).run();
       }
       return new Response('ok', { headers: cors });
     }

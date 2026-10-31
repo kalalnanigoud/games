@@ -10,6 +10,7 @@ import { DatabaseSync } from 'node:sqlite';
 import worker from '../server/error-reports.js';
 import { fakeD1 } from './fake-d1.mjs';
 import { fakeCloudflare, fakeWorkerHost, runScript } from './fake-cloudflare.mjs';
+const PER_DAY_DEFAULT = Number(/const PER_DAY = (\d+);/.exec(fs.readFileSync(new URL('../server/error-reports.js', import.meta.url), 'utf8'))?.[1]);
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const db = new DatabaseSync(':memory:');
@@ -50,9 +51,30 @@ clock += 31 * 24 * 3600 * 1000;
 assert.equal((await post(JSON.stringify({ ...good, message: 'a month later' }))).status, 200);
 list = await (await recent('secret-view-key')).json();
 assert.deepEqual(list.map((r) => r.message), ['a month later'], 'reports older than 30 days are gone');
-assert.equal(db.prepare('SELECT COUNT(*) AS n FROM report_counts').get().n, 1, 'old per-minute counters are removed');
+assert.deepEqual(db.prepare('SELECT minute FROM report_counts ORDER BY minute').all().map((row) => row.minute.startsWith('day:') ? 'day' : 'minute'), ['minute', 'day'], 'old minute and day counters are removed');
 assert.ok(!JSON.stringify(db.prepare('SELECT * FROM reports').all()).match(/\d+\.\d+\.\d+\.\d+/), 'no IP addresses are stored');
 assert.equal((await worker.fetch(new Request('https://w.test/report', { method: 'POST', body: '{}' }), {})).status, 503, 'no database bound');
+
+// A daily cap (2,000 normally; 100 here): once reached, reports are turned away without any database
+// writes, so a broken release can never use up the account's daily writes that cloud saves need.
+{
+  const capDb = new DatabaseSync(':memory:');
+  const capEnv = { DB: fakeD1(capDb), VIEW_KEY: 'k', REPORTS_PER_DAY: '100' };
+  const send = () => worker.fetch(new Request('https://w.test/report', { method: 'POST', body: JSON.stringify(good) }), capEnv).then((r) => r.status);
+  clock = Date.parse('2026-11-02T08:00:05Z');
+  let stored = 0;
+  for (let m = 0; m < 3 && stored < 100; m++, clock += 60000) for (let i = 0; i < 60 && stored < 100; i++) if ((await send()) === 200) stored++;
+  assert.equal(stored, 100, 'up to the daily cap, across minutes');
+  assert.equal(await send(), 429, 'then reports are turned away for the rest of the day');
+  const snapshot = () => JSON.stringify([capDb.prepare('SELECT COUNT(*) AS n FROM reports').get(), capDb.prepare('SELECT * FROM report_counts ORDER BY minute').all()]);
+  const before = snapshot();
+  const flood = await Promise.all(Array.from({ length: 200 }, send));
+  assert.ok(flood.every((s) => s === 429));
+  assert.equal(snapshot(), before, 'a flood after the cap writes nothing at all');
+  clock = Date.parse('2026-11-03T00:00:30Z');
+  assert.equal(await send(), 200, 'a new day (midnight UTC) starts afresh');
+  assert.equal(PER_DAY_DEFAULT, 2000);
+}
 Date.now = realNow;
 
 // The one-command setup.
@@ -95,4 +117,4 @@ run = await deploy();
 assert.equal(run.code, 1);
 assert.match(run.out, /D1 · Edit/, 'a token without D1 rights is told which permission to add');
 cf.close(); live.close();
-console.log('Crash-report checks passed: storage, size and format limits (null and other non-objects refused), allowed fields only, newest first, private reading, a per-minute cap that holds under 100 simultaneous reports, 30-day expiry; one-command setup (database, Worker, reading key kept or replaced, config, missing permissions).');
+console.log('Crash-report checks passed: storage, size and format limits (null and other non-objects refused), allowed fields only, newest first, private reading, a per-minute cap that holds under 100 simultaneous reports, a daily cap that writes nothing once reached, 30-day expiry; one-command setup (database, Worker, reading key kept or replaced, config, missing permissions).');

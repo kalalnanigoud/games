@@ -137,8 +137,12 @@ The reading link is shown once. Keep it in a password manager, then commit and p
 Running the command again keeps the key, and `--new-key` replaces a lost one. To set it up by hand
 instead, follow the steps at the top of `server/error-reports.js`.
 
-Reports expire after 30 days. At most 60 are accepted a minute: each one is counted in a single database
-step, so the cap holds even when many arrive at once. `node tools/report-test.mjs` checks the Worker and
+Reports expire after 30 days. At most 60 are accepted a minute and 2,000 a day (midnight UTC to midnight
+UTC). Each one is counted in a single database step, so the caps hold even when many arrive at once.
+
+The daily cap protects cloud saves: the free plan's 100,000 database writes a day are shared by the whole
+account. Once a cap is reached, further reports are turned away without writing anything, so even a broken
+release that crashes for every visitor can't use up the writes that saves need. `node tools/report-test.mjs` checks the Worker and
 the setup.
 
 ## Cloud saves for Creature Island (optional)
