@@ -2,10 +2,11 @@
 // Rules, bot and rendering all live in this one module (see GAME_GUIDE.md).
 
 import { esc, rand, shuffle, d6, log, addFx } from '../js/util.js';
-import { injectCSS, dieHTML, rollDice, changed } from '../js/fx.js';
+import { injectCSS, dieHTML, rollDice, changed, morph } from '../js/fx.js';
 import { sound } from '../js/sound.js';
 import { icon } from '../js/icons.js';
 import { portrait } from '../js/avatar.js';
+import { levelOption, levelOf } from '../js/levels.js';
 
 const ID = 'hexisle';
 const RES = ['lumber', 'brick', 'wool', 'grain', 'ore'];
@@ -598,7 +599,7 @@ function actInner(s, pid, a) {
   throw new Error('That move is not possible now.');
 }
 
-function setup(players) {
+function setup(players, opts) {
   const order = players.map((p) => p.id);
   const hexes = makeBoard();
   const types = shuffle(['any', 'any', 'any', 'any', ...RES]);
@@ -616,6 +617,7 @@ function setup(players) {
     dice: [3, 4], rollSeq: 0, lastRoll: 0, devUsed: false, discard: {}, after: 'main', victims: [], free: 0,
     trade: null, tradeSeq: 0, longest: null, army: null, roadLen: {}, devSeq: 0, lastDev: null,
     log: [], fx: [], fxSeq: 0, over: false, winners: [],
+    level: levelOf(opts), // computer difficulty, public: every view carries it to the bots
   };
   log(s, `Welcome to the Isle of Hexes! ${nameOf(s, order[0])} places the first settlement.`);
   return s;
@@ -877,7 +879,8 @@ function botReply(s, pid) {
   const done = [COST.city, COST.settlement, COST.dev].some((c) => !hasRes(res, c) && hasRes(after, c));
   return { type: 'reply', yes: done ? gainV >= lossV * 0.8 : gainV > lossV + 0.2 };
 }
-function bot(s, pid) {
+// Normal level: the original computer player.
+function botNormal(s, pid) {
   const due = turnOf(s);
   if (!due.includes(pid)) return null;
   if (s.phase === 'discard') return botDiscard(s, pid);
@@ -899,6 +902,292 @@ function bot(s, pid) {
     case 'main': return botMain(s, pid);
   }
   return { type: 'end' };
+}
+
+/* ---- Easy: no plan. Settles almost anywhere, builds whatever it happens to afford at a random
+   spot, never trades with the bank and often just ends its turn. ---- */
+const pick = (a) => a[rand(a.length)];
+function botEasy(s, pid) {
+  if (!turnOf(s).includes(pid)) return null;
+  const P = s.ps[pid];
+  if (s.phase === 'discard') {
+    const res = { ...P.res }, out = zeroRes();
+    for (let i = 0; i < s.discard[pid]; i++) { const r = pick(RES.filter((x) => res[x] > 0)); res[r]--; out[r]++; }
+    return { type: 'discard', cards: out };
+  }
+  if (s.phase === 'main' && s.trade && s.trade.replies[pid] === null) return { type: 'reply', yes: hasRes(P.res, s.trade.want) && Math.random() < 0.5 };
+  switch (s.phase) {
+    case 'setup':
+      if (s.sub === 'settle') return Math.random() < 0.3 ? botSetup(s, pid) : { type: 'settle', v: pick(settleSpots(s, pid, true)) };
+      return { type: 'road', e: pick(VERTS[s.last].edges.filter((e) => s.rd[e] === null)) ?? null };
+    case 'roll': return { type: 'roll' };
+    case 'robber': return Math.random() < 0.5 ? botRobber(s, pid) : { type: 'robber', h: pick(HEXES.map((_, i) => i).filter((i) => i !== s.robber)) };
+    case 'steal': return { type: 'steal', target: pick(s.victims) };
+    case 'roads': { const sp = roadSpots(s, pid); return sp.length ? { type: 'build', what: 'road', at: pick(sp) } : { type: 'skip' }; }
+    case 'main': {
+      if (s.trade) return { type: 'cancel' };
+      if (Math.random() < 0.3) return { type: 'end' };
+      const res = P.res, u = used(s, pid), opts = [];
+      const towns = []; s.vb.forEach((b, v) => { if (b && b.p === pid && !b.city) towns.push(v); });
+      if (hasRes(res, COST.city) && u.city < LIMIT.city && towns.length) opts.push({ type: 'build', what: 'city', at: pick(towns) });
+      const spots = hasRes(res, COST.settlement) && u.settlement < LIMIT.settlement ? settleSpots(s, pid, false) : [];
+      if (spots.length) opts.push({ type: 'build', what: 'settlement', at: pick(spots) });
+      const roads = hasRes(res, COST.road) ? roadSpots(s, pid) : [];
+      if (roads.length) opts.push({ type: 'build', what: 'road', at: pick(roads) });
+      if (hasRes(res, COST.dev) && s.deckCount > 0) opts.push({ type: 'buydev' });
+      if (canPlay(s, pid, 'knight')) opts.push({ type: 'play', card: 'knight' });
+      return opts.length ? pick(opts) : { type: 'end' };
+    }
+  }
+  return { type: 'end' };
+}
+
+/* ---- Hard: plans its island. Judges spots by expected production (weighted by what each resource
+   builds), looks two roads ahead, trades with the bank to finish builds and to keep its hand under
+   the robber's limit, blocks the leader, and keeps the right cards when it must discard. ---- */
+const H_WEIGHT = { lumber: 1.1, brick: 1.15, wool: 0.85, grain: 1.05, ore: 1.05 };
+function prodOf(s, pid) {
+  const p = zeroRes();
+  s.vb.forEach((b, v) => {
+    if (!b || b.p !== pid) return;
+    for (const h of VERTS[v].hexes) { const r = TER[s.hexes[h].t]; if (r) p[r] += pipsOf(s.hexes[h].n) * (b.city ? 2 : 1) * (h === s.robber ? 0.3 : 1); }
+  });
+  return p;
+}
+function hardSpot(s, v, pid, prod) {
+  let sc = 0;
+  const nums = new Set();
+  for (const h of VERTS[v].hexes) {
+    const r = TER[s.hexes[h].t];
+    if (!r) continue;
+    const p = pipsOf(s.hexes[h].n) * (h === s.robber ? 0.3 : 1);
+    // A resource we barely produce is worth more than one we already have plenty of.
+    sc += p * H_WEIGHT[r] * (prod[r] < 1 ? 1.45 : prod[r] < 4 ? 1.1 : 0.85);
+    nums.add(s.hexes[h].n);
+  }
+  sc += nums.size * 0.4;
+  for (const hb of harborAt(s, v)) {
+    if (hb.t === 'any') sc += 1;
+    else sc += Math.min(3, (prod[hb.t] || 0) * 0.45 + (VERTS[v].hexes.some((h) => TER[s.hexes[h].t] === hb.t) ? 1.2 : 0));
+  }
+  return sc;
+}
+// Best spot reachable from edge e: one road away counts fully, two roads away a little less.
+function hardRoadValue(s, pid, e, prod) {
+  const E = EDGES[e];
+  let best = 0;
+  for (const v of [E.a, E.b]) {
+    if (s.vb[v] && s.vb[v].p !== pid) continue;
+    if (canSettle(s, pid, v, true)) best = Math.max(best, hardSpot(s, v, pid, prod));
+    for (const w of VERTS[v].adj) {
+      if (canSettle(s, pid, w, true)) best = Math.max(best, 0.62 * hardSpot(s, w, pid, prod));
+      for (const x of VERTS[w].adj) if (x !== v && canSettle(s, pid, x, true)) best = Math.max(best, 0.3 * hardSpot(s, x, pid, prod));
+    }
+  }
+  return best;
+}
+function hardBestRoad(s, pid, mustAim) {
+  const spots = roadSpots(s, pid);
+  if (!spots.length) return null;
+  const prod = prodOf(s, pid);
+  const base = longestFor(s, pid);
+  let best = null, bs = -Infinity;
+  for (const e of spots) {
+    let sc = hardRoadValue(s, pid, e, prod);
+    if (sc <= 0 && mustAim) continue;
+    s.rd[e] = pid;
+    const len = longestFor(s, pid);
+    s.rd[e] = null;
+    // Racing for the Longest Road matters once someone is close to it.
+    const rival = Math.max(0, ...s.order.filter((p) => p !== pid).map((p) => s.roadLen[p] || 0));
+    sc += (len - base) * (len >= 4 && len >= rival ? 1.2 : 0.3);
+    sc += Math.random() * 0.05;
+    if (sc > bs) { bs = sc; best = e; }
+  }
+  return best;
+}
+function hardSetup(s, pid) {
+  const prod = s.step >= s.order.length ? prodOf(s, pid) : zeroRes();
+  if (s.sub === 'settle') {
+    let best = null, bs = -Infinity;
+    for (const v of settleSpots(s, pid, true)) {
+      let sc = hardSpot(s, v, pid, prod);
+      // First round: also count the best spot still likely to be free for our second settlement.
+      if (s.step < s.order.length) {
+        const kinds = new Set(VERTS[v].hexes.map((h) => TER[s.hexes[h].t]).filter(Boolean));
+        sc += kinds.size * 0.5 + (kinds.has('lumber') && kinds.has('brick') ? 1 : 0);
+      } else {
+        const after = zeroRes();
+        RES.forEach((r) => (after[r] = prod[r]));
+        VERTS[v].hexes.forEach((h) => { const r = TER[s.hexes[h].t]; if (r) after[r] += pipsOf(s.hexes[h].n); });
+        sc += RES.filter((r) => after[r] > 0).length * 0.9; // covering all five resources is strong
+      }
+      sc += Math.random() * 0.05;
+      if (sc > bs) { bs = sc; best = v; }
+    }
+    return { type: 'settle', v: best };
+  }
+  let best = null, bs = -Infinity;
+  for (const e of VERTS[s.last].edges) {
+    if (s.rd[e] !== null) continue;
+    const sc = hardRoadValue(s, pid, e, prod) + Math.random() * 0.05;
+    if (sc > bs) { bs = sc; best = e; }
+  }
+  return { type: 'road', e: best };
+}
+function hardRobber(s, pid) {
+  const vps = {};
+  s.order.forEach((p) => (vps[p] = vpOf(s, p, p === pid)));
+  const top = Math.max(...s.order.filter((p) => p !== pid).map((p) => vps[p]));
+  let best = -1, bs = -Infinity;
+  HEXES.forEach((h, i) => {
+    if (i === s.robber) return;
+    let sc = 0, mine = 0;
+    const pips = pipsOf(s.hexes[i].n);
+    h.v.forEach((v) => {
+      const b = s.vb[v];
+      if (!b) return;
+      if (b.p === pid) { mine += b.city ? 2 : 1; return; }
+      const lead = vps[b.p] === top ? 1.6 + 0.15 * vps[b.p] : 1;
+      sc += (b.city ? 2 : 1) * pips * lead + ((s.ps[b.p].nRes || 0) > 0 ? 1.5 : 0);
+    });
+    sc -= mine * (pips + 2) * 3;
+    sc += Math.random() * 0.05;
+    if (sc > bs) { bs = sc; best = i; }
+  });
+  return { type: 'robber', h: best };
+}
+// What the hard bot is saving for, nearest first.
+function hardTargets(s, pid) {
+  const res = s.ps[pid].res, u = used(s, pid);
+  const t = [];
+  if (u.settlement > 0 && u.city < LIMIT.city) t.push(COST.city);
+  if (u.settlement < LIMIT.settlement && settleSpots(s, pid, false).length) t.push(COST.settlement);
+  if (u.settlement < LIMIT.settlement && u.road < LIMIT.road && hardBestRoad(s, pid, true) !== null) t.push(COST.road);
+  if (s.deckCount > 0) t.push(COST.dev);
+  return t.sort((a, b) => total(missing(res, a)) - total(missing(res, b)));
+}
+function hardDiscard(s, pid) {
+  const res = { ...s.ps[pid].res };
+  const out = zeroRes();
+  const goals = hardTargets(s, pid);
+  for (let i = 0; i < s.discard[pid]; i++) {
+    let best = null, bs = Infinity;
+    for (const r of RES) {
+      if (res[r] <= 0) continue;
+      res[r]--;
+      // keep the hand closest to the cheapest goals
+      const sc = goals.reduce((a, c, k) => a + total(missing(res, c)) / (k + 1), 0) - res[r] * 0.05;
+      res[r]++;
+      if (sc < bs) { bs = sc; best = r; }
+    }
+    res[best]--;
+    out[best]++;
+  }
+  return { type: 'discard', cards: out };
+}
+function hardTrade(s, pid) {
+  const res = s.ps[pid].res, rt = rates(s, pid);
+  const goals = hardTargets(s, pid);
+  for (const cost of goals) {
+    const miss = missing(res, cost), nMiss = total(miss);
+    if (nMiss === 0) continue;
+    // What we could pay without touching this goal's own cards.
+    const spare = RES.reduce((a, r) => a + Math.floor(Math.max(0, res[r] - (cost[r] || 0)) / rt[r]), 0);
+    if (spare < nMiss) continue;
+    const need = RES.filter((r) => miss[r] > 0 && s.bank[r] > 0).sort((a, b) => miss[b] - miss[a])[0];
+    if (!need) continue;
+    const give = RES.filter((r) => r !== need && res[r] - (cost[r] || 0) >= rt[r])
+      .sort((a, b) => (res[b] - (cost[b] || 0)) / rt[b] - (res[a] - (cost[a] || 0)) / rt[a])[0];
+    if (give) return { type: 'bank', give, get: need };
+  }
+  return null;
+}
+function hardMain(s, pid) {
+  if (s.trade) return { type: 'cancel' };
+  const P = s.ps[pid], res = P.res;
+  const u = used(s, pid);
+  const prod = prodOf(s, pid);
+  if (canPlay(s, pid, 'knight') && (robberOnMe(s, pid) || (P.knights + 1 >= 3 && s.army !== pid && (!s.army || s.ps[s.army].knights < P.knights + 1)))) return { type: 'play', card: 'knight' };
+  if (canPlay(s, pid, 'road') && u.road <= LIMIT.road - 2 && hardBestRoad(s, pid, true) !== null) return { type: 'play', card: 'road' };
+  if (canPlay(s, pid, 'plenty')) {
+    const goal = hardTargets(s, pid)[0] || COST.city;
+    const miss = missing(res, goal), take = [];
+    RES.forEach((r) => { for (let i = 0; i < miss[r]; i++) take.push(r); });
+    while (take.length < 2) take.push(RES.slice().sort((a, b) => prod[a] - prod[b] || res[a] - res[b])[0]);
+    const pickd = take.slice(0, 2), need = zeroRes();
+    pickd.forEach((r) => need[r]++);
+    if (hasRes(s.bank, need)) return { type: 'play', card: 'plenty', res: pickd };
+  }
+  if (canPlay(s, pid, 'monopoly')) {
+    const others = s.order.filter((p) => p !== pid).reduce((a, p) => a + (s.ps[p].nRes || 0), 0);
+    if (others >= 5) {
+      // Name what we produce least: rivals are most likely to hold it and we need it most.
+      const r = RES.slice().sort((a, b) => prod[a] - prod[b] - (needWeights(s, pid)[b] - needWeights(s, pid)[a]) * 0.5)[0];
+      return { type: 'play', card: 'monopoly', res: r };
+    }
+  }
+  if (hasRes(res, COST.city) && u.city < LIMIT.city) {
+    let best = null, bs = -1;
+    s.vb.forEach((b, v) => { if (b && b.p === pid && !b.city) { const sc = hardSpot(s, v, pid, zeroRes()); if (sc > bs) { bs = sc; best = v; } } });
+    if (best !== null) return { type: 'build', what: 'city', at: best };
+  }
+  const spots = u.settlement < LIMIT.settlement ? settleSpots(s, pid, false) : [];
+  if (spots.length && hasRes(res, COST.settlement)) {
+    let best = spots[0], bs = -Infinity;
+    for (const v of spots) { const sc = hardSpot(s, v, pid, prod); if (sc > bs) { bs = sc; best = v; } }
+    return { type: 'build', what: 'settlement', at: best };
+  }
+  const aimRoad = !spots.length && u.settlement < LIMIT.settlement && u.road < LIMIT.road ? hardBestRoad(s, pid, true) : null;
+  if (aimRoad !== null && hasRes(res, COST.road)) return { type: 'build', what: 'road', at: aimRoad };
+  const tr = hardTrade(s, pid);
+  if (tr) return tr;
+  if (hasRes(res, COST.dev) && s.deckCount > 0) {
+    const after = { ...res };
+    RES.forEach((r) => (after[r] -= COST.dev[r] || 0));
+    const near = [COST.city, COST.settlement].some((c) => (c !== COST.city || u.settlement > 0) && (c !== COST.settlement || spots.length) && total(missing(res, c)) <= 2 && total(missing(after, c)) > total(missing(res, c)));
+    if (!near || total(res) > 7) return { type: 'buydev' };
+  }
+  // A plain road for the Longest Road race, or to spend a hand the robber would halve.
+  if (hasRes(res, COST.road) && u.road < LIMIT.road && (total(res) > 7 || (s.roadLen[pid] || 0) >= 4)) {
+    const e = hardBestRoad(s, pid, false);
+    if (e !== null) return { type: 'build', what: 'road', at: e };
+  }
+  // Over the robber's limit: swap the biggest pile for what we lack most.
+  if (total(res) > 7) {
+    const rt = rates(s, pid);
+    const give = RES.filter((r) => res[r] >= rt[r]).sort((a, b) => res[b] / rt[b] - res[a] / rt[a])[0];
+    const get = give && RES.filter((r) => r !== give && s.bank[r] > 0).sort((a, b) => res[a] + prod[a] * 0.1 - (res[b] + prod[b] * 0.1))[0];
+    if (give && get && total(res) - rt[give] + 1 >= 4) return { type: 'bank', give, get };
+  }
+  return { type: 'end' };
+}
+function botHard(s, pid) {
+  if (!turnOf(s).includes(pid)) return null;
+  if (s.phase === 'discard') return hardDiscard(s, pid);
+  if (s.phase === 'main' && s.trade && s.trade.replies[pid] === null) return botReply(s, pid);
+  switch (s.phase) {
+    case 'setup': return hardSetup(s, pid);
+    case 'roll':
+      if (canPlay(s, pid, 'knight') && robberOnMe(s, pid)) return { type: 'play', card: 'knight' };
+      return { type: 'roll' };
+    case 'robber': return hardRobber(s, pid);
+    case 'steal': {
+      const t = s.victims.slice().sort((a, b) => (vpOf(s, b, false) * 2 + (s.ps[b].nRes || 0)) - (vpOf(s, a, false) * 2 + (s.ps[a].nRes || 0)))[0];
+      return { type: 'steal', target: t };
+    }
+    case 'roads': {
+      const e = hardBestRoad(s, pid, false);
+      return e === null ? { type: 'skip' } : { type: 'build', what: 'road', at: e };
+    }
+    case 'main': return hardMain(s, pid);
+  }
+  return { type: 'end' };
+}
+function bot(s, pid) {
+  if (s.level === 'easy') return botEasy(s, pid);
+  if (s.level === 'hard') return botHard(s, pid);
+  return botNormal(s, pid);
 }
 
 /* ---------------- art ---------------- */
@@ -1036,8 +1325,6 @@ function boardDefs() {
     <linearGradient id="hx-clay" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e58a55"/><stop offset="1" stop-color="#93421c"/></linearGradient>
     <linearGradient id="hx-robg" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#5a5466"/><stop offset=".45" stop-color="#2a2633"/><stop offset="1" stop-color="#0d0b12"/></linearGradient>
     ${grads}${seats}
-    <filter id="hx-blur6" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="7"/></filter>
-    <filter id="hx-blur3" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="3"/></filter>
     <g id="hx-pine"><ellipse cx="2" cy="0" rx="9" ry="3" fill="#000" opacity=".28"/><rect x="-1.8" y="-5" width="3.6" height="6" fill="#5b3a1e"/>
       <path d="M0,-28 L7,-17 L4,-17 L10,-9 L6,-9 L12,-2 L-12,-2 L-6,-9 L-10,-9 L-4,-17 L-7,-17Z" fill="url(#hx-pineg)" stroke="#123d17" stroke-width=".8" stroke-linejoin="round"/>
       <path d="M0,-28 L-7,-17 L-4,-17 L-10,-9 L-6,-9 L-12,-2 L-3,-2 L-2,-20Z" fill="#b6f08a" opacity=".2"/></g>
@@ -1260,8 +1547,15 @@ const CSS = `
 .hexisle-win .ic { width: 1em; height: 1em; vertical-align: -.12em; }
 .hexisle-win .hexisle-face { width: 40px; height: 40px; }
 .hexisle-board svg { width: 100%; height: auto; max-height: max(440px, calc(100vh - 250px)); display: block; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+/* The board's layers share exactly the box the single board SVG had, so each maps the viewBox the same way. */
+.hexisle-stage { position: relative; width: 100%; aspect-ratio: 640 / 592; max-height: max(440px, calc(100vh - 250px)); container-type: size;
+  touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.hexisle-board .hexisle-stage > svg, .hexisle-stage > .hexisle-bake { position: absolute; left: 0; top: 0; width: 100%; height: 100%; max-height: none; display: block; }
+.hexisle-stage > .hexisle-bake { object-fit: contain; }
+.hexisle-stage > :not(.hexisle-marks) { pointer-events: none; }
+/* Waves drift by board units: min(...) is one viewBox unit in px. */
 .hexisle-wave { animation: hexisle-wave 5.5s ease-in-out infinite; }
-@keyframes hexisle-wave { 0%, 100% { transform: translateX(-5px); opacity: .18; } 50% { transform: translateX(6px); opacity: .6; } }
+@keyframes hexisle-wave { 0%, 100% { transform: translateX(calc(-5 * min(100cqw / 640, 100cqh / 592))); opacity: .18; } 50% { transform: translateX(calc(6 * min(100cqw / 640, 100cqh / 592))); opacity: .6; } }
 .hexisle-glint { animation: hexisle-glint 7s ease-in-out infinite; }
 @keyframes hexisle-glint { 0%, 100% { opacity: .05; } 50% { opacity: .22; } }
 .hexisle-drop { animation: hexisle-drop .75s cubic-bezier(.3,1.5,.5,1) both; transform-box: fill-box; transform-origin: 50% 100%; }
@@ -1269,7 +1563,9 @@ const CSS = `
 .hexisle-flash { animation: hexisle-flash 1.9s ease-out both; pointer-events: none; }
 @keyframes hexisle-flash { 0% { opacity: 0; } 12% { opacity: .8; } 30% { opacity: .15; } 48% { opacity: .65; } 100% { opacity: 0; } }
 .hexisle-tokpop { animation: hexisle-tokpop .9s cubic-bezier(.3,1.6,.5,1) both; transform-box: fill-box; transform-origin: center; }
+.hexisle-tokpop.hexisle-alt { animation-name: hexisle-tokpop2; } /* the next roll's pop restarts on a kept token */
 @keyframes hexisle-tokpop { 0% { transform: scale(1); } 30% { transform: scale(1.35); } 100% { transform: scale(1); } }
+@keyframes hexisle-tokpop2 { 0% { transform: scale(1); } 30% { transform: scale(1.35); } 100% { transform: scale(1); } }
 /* Legal targets: a crisp rim per spot, one soft halo layer breathing behind them (opacity only). */
 .hexisle-halos { pointer-events: none; animation: hexisle-breathe 2.6s ease-in-out infinite; }
 @keyframes hexisle-breathe { 50% { opacity: .3; } }
@@ -1396,13 +1692,24 @@ button.hexisle-devbtn:active:not(:disabled) { transform: translateY(-2px) scale(
 .hexisle-plist { display: flex; flex-direction: column; gap: 8px; }
 .hexisle-players h3 { margin: 0; display: flex; align-items: center; gap: 7px; font-family: var(--font-body); font-weight: 800; color: var(--muted); font-size: .74rem; letter-spacing: .12em; text-transform: uppercase; }
 .hexisle-players h3 .ic { width: 16px; height: 16px; color: var(--brand-2); }
-.hexisle-chip { display: block; position: relative; overflow: hidden; padding: 11px 11px 9px; }
-.hexisle-chip::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--pc); opacity: .9; }
+.hexisle-chip { display: block; position: relative; padding: 0; min-width: 0; }
+.hexisle-chipin { position: relative; overflow: hidden; border-radius: 11px; padding: 11px 11px 9px; }
+.hexisle-chipin::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--pc); opacity: .9; }
 .hexisle-chip.hexisle-me { background: rgba(76, 184, 255, .08); border-color: rgba(76, 184, 255, .32); }
-.hexisle-chip.hexisle-scored { animation: hexisle-scored 1.2s ease-out .5s; }
-@keyframes hexisle-scored { 20% { box-shadow: 0 0 0 2px #fff3b0, 0 0 28px 6px rgba(255, 214, 90, .55); } }
+/* The turn ring and the "scored" flash are glows drawn once on pseudo-elements; only their opacity changes. */
+.hexisle-chip.turn { box-shadow: none; }
+.hexisle-chip::before, .hexisle-chip::after { content: ''; position: absolute; inset: -1px; border-radius: 12px; pointer-events: none; opacity: 0; }
+.hexisle-chip::after { box-shadow: 0 0 0 2px var(--gold), 0 0 18px rgba(255, 207, 92, .35); transition: opacity .3s; }
+.hexisle-chip.turn::after { opacity: 1; }
+.hexisle-chip::before { box-shadow: 0 0 0 2px #fff3b0, 0 0 28px 6px rgba(255, 214, 90, .55); }
+.hexisle-chip.hexisle-scored::before { animation: hexisle-scored 1.2s ease-out .5s; }
+.hexisle-chip.hexisle-scored.hexisle-alt::before { animation-name: hexisle-scored2; }
+@keyframes hexisle-scored { 20% { opacity: 1; } }
+@keyframes hexisle-scored2 { 20% { opacity: 1; } }
 .hexisle-scored .hexisle-vp { animation: hexisle-vpop .7s var(--spring) .5s; }
+.hexisle-scored.hexisle-alt .hexisle-vp { animation-name: hexisle-vpop2; }
 @keyframes hexisle-vpop { 30% { transform: scale(1.35); } }
+@keyframes hexisle-vpop2 { 30% { transform: scale(1.35); } }
 .hexisle-chiptop { display: flex; align-items: center; gap: 8px; }
 .hexisle-chiptop .hexisle-seat { flex: none; }
 .hexisle-chip .hexisle-pname { font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
@@ -1469,7 +1776,7 @@ button.hexisle-devbtn:active:not(:disabled) { transform: translateY(-2px) scale(
   .hexisle-logbox { order: 3; }
   .hexisle-side .hexisle-card { width: 58px; height: 80px; }
   .hexisle-players .hexisle-plist { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-  .hexisle-board svg { max-height: none; }
+  .hexisle-board svg, .hexisle-stage { max-height: none; }
 }
 @media (max-width: 480px) {
   .hexisle-felt { padding: 6px; }
@@ -1485,7 +1792,7 @@ button.hexisle-devbtn:active:not(:disabled) { transform: translateY(-2px) scale(
   .hexisle-cost { gap: 0; }
   .hexisle-cost .hexisle-card.mini { width: 12px; height: 17px; }
   .hexisle-players { padding: 8px; }
-  .hexisle-players .pchip { padding: 9px 7px 6px; gap: 6px; }
+  .hexisle-players .hexisle-chipin { padding: 9px 7px 6px; }
   .hexisle-chip .hexisle-pname { font-size: .82rem; }
   .hexisle-chiptop { gap: 6px; }
   .hexisle-chip .hexisle-face { width: 26px; height: 26px; }
@@ -1554,32 +1861,143 @@ function harborSVG(hb, i) {
     <circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="14" fill="url(#hx-badge)" stroke="#3a2412" stroke-width=".8"/>${inner}</g>`;
 }
 
+/* The blurred shallows, beach and tile shadows never change (the hexes always sit in the same
+   places), so they are blurred once into bitmaps instead of by live SVG filters on every paint.
+   1 bitmap pixel per board unit: the content is soft, so scaling it up looks the same. */
+const BAKES = {};
+// Software canvases: a GPU canvas would get a compositor layer of its own and push the board above it
+// into layers too, which changes how its text is smoothed.
+const CPU = { willReadFrequently: true };
+// Some browsers (older Safari) ignore canvas filters; there the blur is done in script instead.
+let canvasBlur = null;
+function hasCanvasBlur() {
+  if (canvasBlur === null) {
+    const x = Object.assign(document.createElement('canvas'), { width: 9, height: 9 }).getContext('2d', CPU);
+    x.filter = 'blur(2px)';
+    x.fillRect(5, 0, 4, 9);
+    canvasBlur = x.getImageData(3, 4, 1, 1).data[3] > 0; // blurred: the edge has spread to here
+  }
+  return canvasBlur;
+}
+// One box-blur pass over `lines` lines of `len` values (radius r, outside counts as transparent).
+function boxPass(src, dst, lines, len, lineStep, step, r) {
+  const k = 1 / (2 * r + 1);
+  for (let l = 0; l < lines; l++) {
+    const o = l * lineStep;
+    let acc = 0;
+    for (let i = 0; i <= r && i < len; i++) acc += src[o + i * step];
+    for (let i = 0; i < len; i++) {
+      dst[o + i * step] = acc * k;
+      if (i + r + 1 < len) acc += src[o + (i + r + 1) * step];
+      if (i - r >= 0) acc -= src[o + (i - r) * step];
+    }
+  }
+}
+// Three box blurs in a row give a Gaussian blur of standard deviation sigma, closely enough for soft shapes.
+function blurMask(a, w, h, sigma) {
+  let wl = Math.floor(Math.sqrt(4 * sigma * sigma + 1));
+  if (wl % 2 === 0) wl--;
+  const m = Math.round((12 * sigma * sigma - 3 * wl * wl - 12 * wl - 9) / (-4 * wl - 4));
+  const tmp = new Float32Array(a.length);
+  for (let i = 0; i < 3; i++) {
+    const r = ((i < m ? wl : wl + 2) - 1) / 2;
+    boxPass(a, tmp, h, w, w, 1, r); // rows
+    boxPass(tmp, a, w, h, 1, w, r); // columns
+  }
+  return a;
+}
+function bakeCanvas(kind) {
+  if (BAKES[kind]) return BAKES[kind];
+  const W = 640, H = 592;
+  const c = Object.assign(document.createElement('canvas'), { width: W, height: H });
+  const g = c.getContext('2d', CPU);
+  // One path for all 19 hexes, so they blur (and fade) as one shape, like a filtered SVG group.
+  const path = (x, r, dx, dy) => {
+    x.beginPath();
+    for (const h of HEXES) {
+      hexPts(r, h.x + dx, h.y + dy).split(' ').forEach((p, i) => { const [px, py] = p.split(',').map(Number); x[i ? 'lineTo' : 'moveTo'](px + 320, py + 296); });
+      x.closePath();
+    }
+  };
+  const layer = (r, dx, dy, color, blur, alpha) => {
+    g.save();
+    g.globalAlpha = alpha;
+    if (hasCanvasBlur()) {
+      g.filter = `blur(${blur}px)`;
+      g.fillStyle = color;
+      path(g, r, dx, dy);
+      g.fill();
+    } else {
+      // Draw the shape's mask, blur it, and paint it in the colour.
+      const t = Object.assign(document.createElement('canvas'), { width: W, height: H }), x = t.getContext('2d', CPU);
+      path(x, r, dx, dy);
+      x.fill();
+      const img = x.getImageData(0, 0, W, H), d = img.data;
+      const a = new Float32Array(W * H);
+      for (let i = 0; i < a.length; i++) a[i] = d[i * 4 + 3];
+      blurMask(a, W, H, blur);
+      const [cr, cg, cb] = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16));
+      for (let i = 0; i < a.length; i++) { d[i * 4] = cr; d[i * 4 + 1] = cg; d[i * 4 + 2] = cb; d[i * 4 + 3] = a[i]; }
+      x.putImageData(img, 0, 0);
+      g.drawImage(t, 0, 0);
+    }
+    g.restore();
+  };
+  if (kind === 'shore') { layer(84, 0, 0, '#7fd3ec', 7, 0.6); layer(69, 0, 0, '#ecd9a2', 3, 1); }
+  else layer(60, 2, 9, '#1a0f05', 3, 0.5);
+  return (BAKES[kind] = c);
+}
+// Each board shows the bitmaps in two canvas layers, copied from the baked ones (a cheap copy, no image
+// encoding). Redraws keep the canvases, so this happens once per board. "contain" maps them like the viewBox.
+const painted = new WeakSet();
+function paintBakes(el) {
+  for (const cv of el.querySelectorAll('canvas.hexisle-bake')) {
+    if (painted.has(cv)) continue;
+    painted.add(cv);
+    const kind = cv.dataset.bake;
+    const paint = () => { const x = cv.getContext('2d', CPU); x.clearRect(0, 0, cv.width, cv.height); x.drawImage(bakeCanvas(kind), 0, 0); };
+    cv.oncontextrestored = () => { delete BAKES[kind]; paint(); }; // the GPU dropped the bitmaps: bake again
+    paint();
+  }
+}
+const BAKE_DIV = (kind) => `<canvas class="hexisle-bake hexisle-${kind}" data-bake="${kind}" width="640" height="592" aria-hidden="true"></canvas>`;
+
+/* The board is a stack of layers that share one viewBox: sea, glints, waves, shore, harbors, tile
+   shadows, the island itself, then target halos and tap targets. The endless glints, waves and the
+   halo breathing each animate a whole layer's opacity/transform, which the compositor does on its
+   own, so the island is not repainted 60 times a second. */
+const VB = '-320 -296 640 592';
+const layerSVG = (cls, body, attrs = ' aria-hidden="true"') => `<svg viewBox="${VB}" xmlns="http://www.w3.org/2000/svg" class="${cls}"${attrs}>${body}</svg>`;
+const SEA_LAYERS = [
+  layerSVG('hexisle-sea', `<rect x="-316" y="-292" width="632" height="584" rx="44" fill="url(#hx-sea)" stroke="url(#hx-wood)" stroke-width="8"/>
+    <rect x="-310" y="-286" width="620" height="572" rx="39" fill="none" stroke="#000" stroke-opacity=".35" stroke-width="3"/>`),
+  layerSVG('hexisle-glint', '<ellipse cx="-150" cy="-190" rx="120" ry="40" fill="#fff"/>'),
+  layerSVG('hexisle-glint', '<ellipse cx="170" cy="200" rx="110" ry="34" fill="#fff"/>', ' style="animation-delay:-3s" aria-hidden="true"'),
+  ...SEA_SPOTS.map(([x, y], i) => layerSVG('hexisle-wave',
+    `<path d="M${(x - 16).toFixed(0)},${y.toFixed(0)} q8,-6 16,0 t16,0" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>`,
+    ` style="animation-delay:${(-i * 0.73).toFixed(2)}s" aria-hidden="true"`)),
+  BAKE_DIV('shore'),
+].join('');
+
 function boardSVG(v, T, me) {
-  const out = [`<svg viewBox="-320 -296 640 592" xmlns="http://www.w3.org/2000/svg" class="hexisle-svg" role="img" aria-label="Island board">`, boardDefs(),
+  const out = ['<div class="hexisle-stage">', SEA_LAYERS, layerSVG('hexisle-harbors', v.harbors.map(harborSVG).join('')), BAKE_DIV('shade'),
+    `<svg viewBox="${VB}" xmlns="http://www.w3.org/2000/svg" class="hexisle-svg" role="img" aria-label="Island board">`, boardDefs(),
     `<defs><clipPath id="hx-clip"><polygon points="${hexPts(57.5)}"/></clipPath></defs>`];
-  out.push(`<rect x="-316" y="-292" width="632" height="584" rx="44" fill="url(#hx-sea)" stroke="url(#hx-wood)" stroke-width="8"/>
-    <rect x="-310" y="-286" width="620" height="572" rx="39" fill="none" stroke="#000" stroke-opacity=".35" stroke-width="3"/>
-    <ellipse class="hexisle-glint" cx="-150" cy="-190" rx="120" ry="40" fill="#fff"/><ellipse class="hexisle-glint" style="animation-delay:-3s" cx="170" cy="200" rx="110" ry="34" fill="#fff"/>`);
-  out.push(`<g stroke="#fff" stroke-width="2.2" fill="none" stroke-linecap="round">${SEA_SPOTS.map(([x, y], i) =>
-    `<path class="hexisle-wave" style="animation-delay:${(-i * 0.73).toFixed(2)}s" d="M${(x - 16).toFixed(0)},${y.toFixed(0)} q8,-6 16,0 t16,0"/>`).join('')}</g>`);
-  out.push(`<g filter="url(#hx-blur6)" opacity=".6">${HEXES.map((h) => `<polygon points="${hexPts(84, h.x, h.y)}" fill="#7fd3ec"/>`).join('')}</g>`);
-  out.push(`<g filter="url(#hx-blur3)">${HEXES.map((h) => `<polygon points="${hexPts(69, h.x, h.y)}" fill="#ecd9a2"/>`).join('')}</g>`);
-  out.push(v.harbors.map(harborSVG).join(''));
-  out.push(`<g opacity=".5" filter="url(#hx-blur3)">${HEXES.map((h) => `<polygon points="${hexPts(60, h.x + 2, h.y + 9)}" fill="#1a0f05"/>`).join('')}</g>`);
   const fl = ui.flash && Date.now() - ui.flash.at < 2900 ? ui.flash : null;
+  // Kept nodes keep their running animation, so the delay is the one they were created with.
+  const fdelay = fl ? fl.delay : 0;
   HEXES.forEach((h, i) => {
     const hx = v.hexes[i];
     const flashing = fl && fl.hexes.includes(i);
-    const fdelay = fl ? 1050 - (Date.now() - fl.at) : 0;
     out.push(`<g transform="translate(${h.x.toFixed(1)},${h.y.toFixed(1)})">
       <polygon points="${hexPts(58.5, 0, 6)}" fill="${TCOL[hx.t][2]}"/>
       <polygon points="${hexPts(58.5)}" fill="url(#hx-t-${hx.t})" data-a="hex-${i}"/>
       <g clip-path="url(#hx-clip)">${terrainArt(hx.t)}</g>
       <polygon points="${hexPts(58.5)}" fill="url(#hx-sheen)"/>
       <polygon points="${hexPts(57)}" fill="none" stroke="url(#hx-bevel)" stroke-width="3"/>
-      ${i === v.robber ? `<polygon points="${hexPts(58.5)}" fill="#120a1a" opacity=".28"/>` : ''}
-      ${flashing ? `<polygon class="hexisle-flash" style="animation-delay:${fdelay}ms" points="${hexPts(58)}" fill="#fff4b8"/>` : ''}
-      ${hx.n ? `<g${flashing ? ` class="hexisle-tokpop" style="animation-delay:${fdelay}ms"` : ''}>${tokenSVG(hx.n)}</g>` : ''}
+      ${i === v.robber ? `<polygon id="hx-robshade" points="${hexPts(58.5)}" fill="#120a1a" opacity=".28"/>` : ''}
+      ${flashing ? `<polygon id="hx-flash-${i}-${fl.seq}" class="hexisle-flash" style="animation-delay:${fdelay}ms" points="${hexPts(58)}" fill="#fff4b8"/>` : ''}
+      ${hx.n ? `<g${flashing ? ` class="hexisle-tokpop${fl.seq % 2 ? ' hexisle-alt' : ''}" style="animation-delay:${fdelay}ms"` : ''}>${tokenSVG(hx.n)}</g>` : ''}
     </g>`);
   });
   // roads, then buildings, then the robber
@@ -1632,16 +2050,18 @@ function boardSVG(v, T, me) {
     marks.push(`<circle class="hexisle-hit" data-hit="s:${idx}" cx="${V.x}" cy="${V.y}" r="30"/>
       <g class="hexisle-mark"><circle cx="${V.x}" cy="${V.y - 2}" r="19" fill="none" stroke="#0e1530" stroke-opacity=".45" stroke-width="6"/><circle cx="${V.x}" cy="${V.y - 2}" r="19" fill="none" stroke="#ff9a7a" stroke-width="3.5"/></g>`);
   });
-  if (halos.length) out.push(`<g class="hexisle-halos">${halos.join('')}</g>`);
-  out.push(marks.join(''));
-  void me;
   out.push('</svg>');
+  if (halos.length) out.push(layerSVG('hexisle-halos', halos.join('')));
+  if (marks.length) out.push(layerSVG('hexisle-marks', marks.join('')));
+  void me;
+  out.push('</div>');
   return out.join('');
 }
 
 /* ---------------- side panel & dock ---------------- */
 const ui = { key: '', mode: null, modal: null, tab: 'bank', bGive: null, bGet: null, give: zeroRes(), want: zeroRes(), disc: zeroRes(), plenty: [], prevKeys: null, flash: null };
 let prevVP = new Map(); // player id -> VP at the last render, for the "scored" flash
+const scoreAlt = {}; // player id -> which of the two flash animations plays next
 let logOpen = typeof matchMedia === 'function' ? matchMedia('(min-width: 901px)').matches : true;
 
 const SMALL = {
@@ -1689,14 +2109,16 @@ function chipsHTML(v, me, ctx) {
     const vp = vpOf(v, p, true);
     const had = prevVP.get(p);
     const scored = had != null && vp > had; // one-off flash when this player's points go up
+    // Redraws keep the chip, so a second flash in a row switches animation name to play again.
+    if (scored) scoreAlt[p] = !scoreAlt[p];
     const badges = [v.longest === p ? `<span class="hexisle-badge">${SMALL.road}Longest Road</span>` : '', v.army === p ? `<span class="hexisle-badge">${SMALL.sword}Largest Army</span>` : '',
       v.phase === 'discard' && v.discard[p] ? '<span class="hexisle-wait">discarding…</span>' : '',
       v.trade && v.trade.replies[p] === 'yes' ? '<span class="hexisle-wait">accepted</span>' : ''].join('');
-    return `<div class="pchip hexisle-chip${due.includes(p) && !v.over ? ' turn' : ''}${p === me ? ' hexisle-me' : ''}${scored ? ' hexisle-scored' : ''}" style="--pc:${PCOL[P.seat % 4].c}">
+    return `<div class="pchip hexisle-chip${due.includes(p) && !v.over ? ' turn' : ''}${p === me ? ' hexisle-me' : ''}${scored ? ` hexisle-scored${scoreAlt[p] ? ' hexisle-alt' : ''}` : ''}" style="--pc:${PCOL[P.seat % 4].c}"><div class="hexisle-chipin">
       <div class="hexisle-chiptop">${faceHTML(v, p, ctx)}<span class="hexisle-pname">${esc(P.name)}</span>${p === me ? '<span class="tag t-you">You</span>' : ''}
         <span class="hexisle-vp" data-a="p-${p}-vp">${vp}<small>VP</small></span></div>
       <div class="hexisle-stats"><span data-a="p-${p}-hand" title="Resource cards">${SMALL.cards}${P.nRes}</span><span data-a="p-${p}-dev" title="Development cards">${SMALL.dev}${P.nDev}</span><span title="Knights played">${SMALL.sword}${P.knights}</span><span title="Longest road">${SMALL.road}${v.roadLen[p] || 0}</span></div>
-      ${badges ? `<div class="hexisle-badges">${badges}</div>` : ''}</div>`;
+      ${badges ? `<div class="hexisle-badges">${badges}</div>` : ''}</div></div>`;
   }).join('');
 }
 
@@ -1844,7 +2266,11 @@ function render(el, v, ctx) {
   if (P && ui.mode && !hasRes(P.res, COST[ui.mode])) ui.mode = null;
 
   const rolled = changed('hexisle-roll', v.rollSeq) && v.rollSeq > 0;
-  if (rolled && v.lastRoll !== 7) ui.flash = { at: Date.now(), hexes: v.hexes.map((h, i) => (h.n === v.lastRoll && i !== v.robber ? i : -1)).filter((i) => i >= 0) };
+  if (rolled && v.lastRoll !== 7) ui.flash = { at: Date.now(), seq: v.rollSeq, delay: null, hexes: v.hexes.map((h, i) => (h.n === v.lastRoll && i !== v.robber ? i : -1)).filter((i) => i >= 0) };
+  // The flash starts 1.05 s after the roll. Its nodes are kept between redraws (and keep their running
+  // animation), so the delay is fixed when they are first drawn.
+  const fl = ui.flash && Date.now() - ui.flash.at < 2900 ? ui.flash : null;
+  if (fl && (fl.delay == null || (fl.hexes.length && !el.querySelector(`#hx-flash-${fl.hexes[0]}-${fl.seq}`)))) fl.delay = 1050 - (Date.now() - fl.at);
   const devPlayed = changed('hexisle-dev', v.devSeq) && v.devSeq > 0;
 
   const T = { v: [], e: [], h: [], c: [], s: [] };
@@ -1865,7 +2291,8 @@ function render(el, v, ctx) {
   const [st, hint] = statusOf(v, me);
   const sum = v.dice[0] + v.dice[1];
   const banner = v.over ? `<div class="winner-banner hexisle-win">${faceHTML(v, v.winners[0], ctx)}<span>${icon('trophy')} ${esc(nameOf(v, v.winners[0]))} wins with ${vpOf(v, v.winners[0])} VP!</span></div>` : '';
-  el.innerHTML = `<div class="game-layout hexisle">
+  // Redraw only what changed: morph keeps every node that is already right.
+  morph(el, `<div class="game-layout hexisle">
     <div class="hexisle-main">
       <div class="felt hexisle-felt">
         <div class="hexisle-bar">
@@ -1885,17 +2312,20 @@ function render(el, v, ctx) {
       <details class="panel drawer hexisle-logbox" ${logOpen ? 'open' : ''}><summary>${icon('book')}<span>Island log</span><span class="note">${esc(v.log[0] || '')}</span>${icon('chevron', 'chev')}</summary>
         <div class="drawer-body"><div class="log">${v.log.map((l) => `<div>${esc(l)}</div>`).join('')}</div></div></details>
     </div>
-  </div>${modalHTML(v, me)}`;
+  </div>${modalHTML(v, me)}`);
+  paintBakes(el);
 
   // The log folds away on phones so the island gets the screen; it stays as the player left it.
-  el.querySelector('.hexisle-logbox')?.addEventListener('toggle', (e) => { logOpen = e.currentTarget.open; });
+  // Handlers are properties: the nodes are kept between redraws, so listeners would pile up.
+  const logbox = el.querySelector('.hexisle-logbox');
+  if (logbox) logbox.ontoggle = (e) => { logOpen = e.currentTarget.open; };
   prevVP = new Map(v.order.map((p) => [p, vpOf(v, p, true)]));
   if (rolled) { const tray = el.querySelector('.hexisle-dice'); if (tray) rollDice(tray); }
   if (devPlayed) showDevPlayed(el, v);
 
   const send = (a) => ctx.send(a);
-  const svg = el.querySelector('.hexisle-svg');
-  svg?.addEventListener('click', (e) => {
+  const hits = el.querySelector('.hexisle-marks');
+  if (hits) hits.onclick = (e) => {
     const t = e.target.closest('[data-hit]');
     if (!t) return;
     const [k, val] = t.dataset.hit.split(':');
@@ -1907,7 +2337,7 @@ function render(el, v, ctx) {
     else if (k === 'c') send({ type: 'build', what: 'city', at: n });
     else if (k === 'h') send({ type: 'robber', h: n });
     else if (k === 's') send({ type: 'steal', target: v.victims[n] });
-  });
+  };
   const on = (sel, fn) => el.querySelectorAll(sel).forEach((b) => (b.onclick = (e) => { sound('click'); fn(b, e); }));
   const rerender = () => render(el, v, ctx);
   on('#hx-roll', () => send({ type: 'roll' }));
@@ -1976,6 +2406,7 @@ export default {
   minPlayers: 2,
   maxPlayers: 4,
   cover: COVER,
+  options: [levelOption()],
   setup,
   act(s, pid, a) { actInner(s, pid, a); checkWin(s); },
   turnOf,
@@ -2011,5 +2442,5 @@ function onTimeout(v, pid) {
   }
   if (v.phase === 'roads') return { type: 'skip' };
   if (v.phase === 'roll') return { type: 'roll' };
-  return bot(v, pid); // setup placement, discarding, robber, steal: let the computer choose
+  return botNormal(v, pid); // setup placement, discarding, robber, steal: let the computer choose (as before, whatever the computer level)
 }

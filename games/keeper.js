@@ -112,12 +112,18 @@ function study(v) {
     <path d="M0 210H400V250H0Z" fill="url(#kp-floor)"/><ellipse cx="200" cy="232" rx="150" ry="14" fill="#6a2a24" opacity=".75"/>${shelf}${windowArt}${desk}${ladder}${fire}`;
 }
 
+// The gear train [cx, cy, radius, teeth, spin]; the last gear is the spare one the team fits.
+const TRAIN = [[152, 82, 42, 12, 'kp-spin'], [222, 56, 28, 9, 'kp-spin-r'], [262, 112, 30, 10, 'kp-spin'], [206, 122, 22, 8, 'kp-spin-r']];
+// Once the clock runs its gears turn, each as its own layer above the picture (escape-kit room layers),
+// so the compositor spins them without repainting the whole room on every frame.
+const gearLayers = (v) => (restarted(v) ? TRAIN.map(([x, y, r, n, cls]) => ({ id: `gear-${x}-${y}`, box: [x - r, y - r, 2 * r, 2 * r], cls, svg: gear(x, y, r, n, 'url(#kp-brass)') })) : []);
+
 function gearroom(v) {
   const f = v.flags, running = f.gearSet && f.oiled && f.wound;
-  const spin = running ? 'kp-spin' : '';
   const pend = `<path d="M63 20V172" stroke="${f.oiled ? 'url(#kp-brass)' : '#7a4a2a'}" stroke-width="4"/><circle cx="63" cy="190" r="22" fill="${f.oiled ? 'url(#kp-brass)' : '#8a4a24'}" stroke="#2a170a" stroke-width="2"/>${f.oiled ? '' : '<circle cx="56" cy="184" r="5" fill="#5a2a10" opacity=".7"/><circle cx="70" cy="196" r="4" fill="#5a2a10" opacity=".7"/>'}`;
-  const train = `${gear(152, 82, 42, 12, 'url(#kp-brass)', spin)}${gear(222, 56, 28, 9, 'url(#kp-brass)', spin ? 'kp-spin-r' : '')}${gear(262, 112, 30, 10, 'url(#kp-brass)', spin)}
-    ${f.gearSet ? gear(206, 122, 22, 8, 'url(#kp-brass)', spin ? 'kp-spin-r' : '') : '<circle cx="206" cy="122" r="22" fill="none" stroke="#e9d6a0" stroke-width="2" stroke-dasharray="4 4" opacity=".6"/><circle cx="206" cy="122" r="4" fill="#2a170a" stroke="#d9b56a"/>'}`;
+  // Standing still, the gears are part of the picture; turning, they are drawn by gearLayers instead.
+  const train = `${running ? '' : TRAIN.filter((t, i) => i < 3 || f.gearSet).map(([x, y, r, n]) => gear(x, y, r, n, 'url(#kp-brass)')).join('')}
+    ${f.gearSet ? '' : '<circle cx="206" cy="122" r="22" fill="none" stroke="#e9d6a0" stroke-width="2" stroke-dasharray="4 4" opacity=".6"/><circle cx="206" cy="122" r="4" fill="#2a170a" stroke="#d9b56a"/>'}`;
   const weights = `<rect x="330" y="40" width="26" height="18" rx="3" fill="url(#kp-iron)" stroke="#1d1d22"/><rect x="338" y="44" width="10" height="10" fill="#141418" stroke="#d9b56a"/>
     ${[318, 368].map((x) => { const y = f.wound ? 92 : 172; return `<path d="M${x} 58V${y}" stroke="#8a8a90" stroke-width="2" stroke-dasharray="3 2"/><rect x="${x - 11}" y="${y}" width="22" height="40" rx="3" fill="url(#kp-iron)" stroke="#1d1d22" stroke-width="2"/>`; }).join('')}`;
   const chalk = `<rect x="196" y="180" width="96" height="52" rx="3" fill="#2a2420"/><text x="202" y="192" font-size="8" fill="#f3efe3" font-style="italic" font-family="Georgia" opacity=".9">stopped at…</text><g opacity=".85">${tally(v.facts.minute, 204, 198, 0.42)}</g>`;
@@ -333,7 +339,7 @@ export default escapeRoom({
   rooms: [
     { id: 'workshop', name: 'Workshop', blurb: 'The ground floor, where Elias built and mended his mechanisms.', art: workshop },
     { id: 'study', name: 'Study', blurb: 'Elias’s private room above the workshop, lit by a stained-glass window.', art: study },
-    { id: 'gears', name: 'Gear Loft', blurb: 'The heart of the clock: gears, weights and a long pendulum.', art: gearroom },
+    { id: 'gears', name: 'Gear Loft', blurb: 'The heart of the clock: gears, weights and a long pendulum.', art: gearroom, layers: gearLayers },
     { id: 'belfry', name: 'Belfry', blurb: 'The top of the tower, behind the great clock face, beside the bell.', art: belfry },
   ],
   items,

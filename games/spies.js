@@ -3,10 +3,11 @@
 // teammates reveal words. Hitting the other team's word or a bystander ends your turn,
 // and the assassin loses the game on the spot.
 import { esc, log, addFx, rand, shuffle } from '../js/util.js';
-import { injectCSS } from '../js/fx.js';
+import { injectCSS, morph } from '../js/fx.js';
 import { sound } from '../js/sound.js';
 import { icon } from '../js/icons.js';
 import { portrait } from '../js/avatar.js';
+import { levelOption, levelOf } from '../js/levels.js';
 
 const browser = typeof document !== 'undefined';
 
@@ -55,7 +56,7 @@ const other = (t) => (t === 'r' ? 'b' : 'r');
 
 /* ---------------- rules ---------------- */
 
-function setup(players) {
+function setup(players, opts = {}) {
   if (players.length < 4 || players.length > 8) throw Error('Word Spies needs 4–8 players.');
   const first = rand(2) ? 'r' : 'b';
   const seats = shuffle(players.slice());
@@ -64,6 +65,7 @@ function setup(players) {
     phase: 'clue', over: false, winners: [], turn: first, clue: null, left: 0, clues: [], log: [],
     players: seats.map((p, i) => ({ id: p.id, name: p.name, team: i % 2 ? 'b' : 'r', spy: i < 2 })),
     words: shuffle(WORDS.slice()).slice(0, 25), key, open: Array(25).fill(false),
+    level: levelOf(opts), // how sharp the computer players are; public, so it is in every view
   };
   log(s, `${TEAM[first]} team starts and has 9 agents to find. ${TEAM[other(first)]} has 8.`);
   return s;
@@ -132,10 +134,14 @@ function view(s, pid) {
 
 // Spymaster: clue the theme that covers the most of our words and none of the dangerous ones.
 // Guessers: follow a theme clue; for a clue they don't know, take a guess or pass.
+// That is the Normal level; Easy and Hard (v.level) play the helpers below instead.
 function bot(v, pid) {
   const me = v.players.find((p) => p.id === pid);
   const idle = browser ? 0.75 : 0.3;
+  const level = v.level === 'easy' || v.level === 'hard' ? v.level : 'normal';
   if (v.phase === 'clue') {
+    const pick = level === 'easy' ? easyClue(v, me) : level === 'hard' ? hardClue(v, me) : null;
+    if (pick) return pick;
     let best = null;
     for (const [t, list] of Object.entries(THEMES)) {
       if (clueProblem(v, t)) continue;
@@ -151,12 +157,133 @@ function bot(v, pid) {
     return { type: 'clue', word: fallback, n: 1 };
   }
   if (Math.random() < idle) return { type: 'think' };
+  if (level !== 'normal') return levelGuess(v, me, level);
   const list = THEMES[v.clue.word];
   const fits = v.words.map((w, i) => (!v.open[i] && list?.includes(w) ? i : -1)).filter((i) => i >= 0);
   const used = v.clue.n + 1 - v.left;
   if (fits.length && used < v.clue.n) return { type: 'guess', card: fits[rand(fits.length)] };
   if (!list && used === 0) { const hidden = v.open.map((o, i) => (o ? -1 : i)).filter((i) => i >= 0); return { type: 'guess', card: hidden[rand(hidden.length)] }; }
   return { type: 'pass' };
+}
+
+// What a clue points at: a theme's words or, for a word that belongs to several themes (MOON: space, night,
+// round), the words of all of them. Hard spymasters clue such words; hard agents (and people) follow them.
+const themeNamed = (w) => (Object.prototype.hasOwnProperty.call(THEMES, w) ? THEMES[w] : null);
+const LINKED = new Map();
+function pointsAt(word) {
+  if (themeNamed(word)) return themeNamed(word);
+  if (!LINKED.has(word)) LINKED.set(word, [...new Set(themesOf(word).flatMap((t) => THEMES[t]))]);
+  return LINKED.get(word);
+}
+const LINKS = WORDS.filter((w) => themesOf(w).length > 1);
+const under = (words, word) => { const list = pointsAt(word); return words.map((w) => list.includes(w)); };
+
+// Easy spymaster: any theme with one of our words in it, never minding the other team's words or bystanders.
+function easyClue(v, me) {
+  const ok = Object.keys(THEMES).filter((t) => {
+    if (clueProblem(v, t)) return false;
+    const on = under(v.words, t), hidden = (k) => v.key.some((x, i) => x === k && on[i] && !v.open[i]);
+    return hidden(me.team) && !hidden('x');
+  });
+  if (!ok.length) return null;
+  const t = ok[rand(ok.length)], on = under(v.words, t);
+  return { type: 'clue', word: t, n: v.key.filter((k, i) => k === me.team && on[i] && !v.open[i]).length };
+}
+
+// Hard agents read the clues so far: "MOON, 2" said that 2 of the hidden words MOON points at were the clue
+// giver's. The giver's cards revealed under it since use that up, so for a word still hidden there,
+// (n - revealed) / hidden is a floor on the chance that it is the giver's. Public information only: a board
+// `b` has the revealed cards' colours in `known`, the clues, and `on[j]`, the words clue j points at.
+function readClues(b, team) {
+  const mine = Array(25).fill(0), theirs = Array(25).fill(0);
+  b.clues.forEach((c, j) => {
+    const on = b.on[j];
+    let hidden = 0, found = 0;
+    for (let i = 0; i < 25; i++) if (on[i]) { if (!b.open[i]) hidden++; else if (b.known[i] === c.team) found++; }
+    const p = hidden ? Math.max(0, c.n - found) / hidden : 0, into = c.team === team ? mine : theirs;
+    for (let i = 0; i < 25; i++) if (on[i] && !b.open[i] && p > into[i]) into[i] = p;
+  });
+  return { mine, theirs };
+}
+// The cards hard agents choose between (at random), or none to end the turn: the likeliest of the words the clue
+// points at, then with the extra guess a word an earlier clue of theirs still points at when it is probably theirs.
+function hardChoices(b, team) {
+  const { mine, theirs } = readClues(b, team);
+  const odds = (i) => mine[i] - theirs[i] * 1.5;
+  const likeliest = (cards) => { const top = Math.max(...cards.map(odds)); return cards.filter((i) => odds(i) === top); };
+  const clue = b.clues.at(-1), on = b.on.at(-1), used = clue.n + 1 - b.left;
+  const hidden = [], fits = [];
+  for (let i = 0; i < 25; i++) if (!b.open[i]) { hidden.push(i); if (on[i]) fits.push(i); }
+  if (fits.length && used < clue.n) return likeliest(fits);
+  const spare = hidden.filter((i) => mine[i] >= 0.5 && theirs[i] === 0);
+  if (spare.length) return likeliest(spare);
+  if (!themeNamed(clue.word) && !fits.length && used === 0) return likeliest(hidden);
+  return [];
+}
+const board = (v, clues, known) => ({ open: v.open.slice(), known, clues, on: clues.map((c) => under(v.words, c.word)), left: v.left });
+
+// Hard spymaster: plays each possible clue (every theme, and every word that links several themes) through its
+// agents' reasoning above and gives the one they will do best with: agents found now (the last one wins the
+// game), words of ours the clues will still point at for later, minus the other team's agents handed over.
+// The assassin is never under the clue unless every clue for the words left risks it.
+function hardClue(v, me) {
+  const rival = other(me.team), hiddenOf = (t) => v.key.filter((k, i) => k === t && !v.open[i]).length;
+  const base = board(v, v.clues, v.key.map((k, i) => (v.open[i] ? k : null)));
+  const reveal = (b, i, left) => { const open = b.open.slice(), known = b.known.slice(); open[i] = true; known[i] = v.key[i]; return { ...b, open, known, left }; };
+  // Leftovers the agents can pick up with a later extra guess.
+  const later = (b) => {
+    const { mine, theirs } = readClues(b, me.team);
+    let sum = 0;
+    for (let i = 0; i < 25; i++) if (!b.open[i] && mine[i] >= 0.5 && !theirs[i]) sum += v.key[i] === me.team ? 0.7 : v.key[i] === 'n' ? 0 : -0.7;
+    return sum;
+  };
+  const outcome = (b, ours, rivals) => {
+    const cards = hardChoices(b, me.team);
+    if (!cards.length) return later(b);
+    let sum = 0;
+    for (const i of cards) {
+      const k = v.key[i];
+      if (k === me.team) sum += ours === 1 ? 20 : 1 + (b.left <= 1 ? later(reveal(b, i, 0)) : outcome(reveal(b, i, b.left - 1), ours - 1, rivals));
+      else if (k === 'x' || (k === rival && rivals === 1)) sum -= 20;
+      else sum += (k === 'n' ? 0 : -1.5) + later(reveal(b, i, 0));
+    }
+    return sum / cards.length;
+  };
+  const tryClue = (t, n, on) => outcome({ ...base, clues: [...base.clues, { team: me.team, word: t, n }], on: [...base.on, on], left: n + 1 }, hiddenOf(me.team), hiddenOf(rival));
+  let best = null, risky = null;
+  for (const t of [...Object.keys(THEMES), ...LINKS]) {
+    if (clueProblem(v, t)) continue;
+    const on = under(v.words, t);
+    let own = 0, x = false;
+    v.key.forEach((k, i) => { if (on[i] && !v.open[i]) { if (k === me.team) own++; if (k === 'x') x = true; } });
+    if (!own) continue;
+    const score = tryClue(t, own, on);
+    if (!x && (!best || score > best.score)) best = { t, n: own, score };
+    if (x && (!risky || score > risky.score)) risky = { t, n: own, score };
+  }
+  if (best) return { type: 'clue', word: best.t, n: best.n };
+  // Every clue for our last words also points at the assassin: weigh the best of those against a clue that
+  // points at nothing, after which the agents go by the earlier clues.
+  const blank = ['thing', 'object', 'stuff'].find((t) => !clueProblem(v, t));
+  const blankScore = blank ? tryClue(blank, 1, under(v.words, blank)) : -Infinity;
+  if (risky && risky.score > blankScore) return { type: 'clue', word: risky.t, n: risky.n };
+  return blank ? { type: 'clue', word: blank, n: 1 } : null;
+}
+
+// Agents at the Easy and Hard levels, from public information only (the board, revealed cards and the clues).
+// Easy agents often tap any hidden word.
+function levelGuess(v, me, level) {
+  const used = v.clue.n + 1 - v.left, list = themeNamed(v.clue.word);
+  const guess = (cards) => ({ type: 'guess', card: cards[rand(cards.length)] });
+  if (level === 'easy') {
+    const hidden = v.open.map((o, i) => (o ? -1 : i)).filter((i) => i >= 0);
+    const fits = list ? hidden.filter((i) => list.includes(v.words[i])) : [];
+    if (fits.length && used < v.clue.n) return guess(Math.random() < 0.25 ? hidden : fits);
+    if (!list && used === 0) return guess(hidden);
+    return { type: 'pass' };
+  }
+  const cards = hardChoices(board(v, v.clues, v.key.map((k, i) => (v.open[i] ? k : null))), me.team);
+  return cards.length ? guess(cards) : { type: 'pass' };
 }
 
 /* ---------------- interface ---------------- */
@@ -202,14 +329,16 @@ function render(el, v, ctx) {
   const left = { r: hiddenOf('r'), b: hiddenOf('b') };
   const same = prev?.key === key;
   const found = { r: same && left.r < prev.left.r, b: same && left.b < prev.left.b };
+  // A counter that flashed last time too gets the twin keyframes (spy-again), so the kept counter flashes again.
+  const again = { r: found.r && prev.found.r && !prev.again.r, b: found.b && prev.found.b && !prev.again.b };
   const flipIn = new Set(same ? v.open.map((o, i) => (o && !prev.open[i] ? i : -1)).filter((i) => i >= 0) : []);
   const newClue = same && v.clues.length > prev.clues;
-  prev = { key, left, open: v.open.slice(), clues: v.clues.length };
+  prev = { key, left, open: v.open.slice(), clues: v.clues.length, found, again };
   const face = (p, t) => `<span class="spy-face" style="--tc:${TCOL[t]}">${portrait({ id: p.id, bot: !!ctx.isBot?.(p.id) })}</span>`;
   const guesses = (n) => `${n} guess${n === 1 ? '' : 'es'} left`;
 
   // ---- the operations desk: both teams' counters around whose turn it is ----
-  const score = (t) => `<div class="spy-score ${t} ${!v.over && v.turn === t ? 'on' : ''} ${v.over && v.winner === t ? 'win' : ''} ${found[t] ? 'spy-scored' : ''}" data-a="spy-left-${t}" title="${left[t]} ${TEAM[t]} agent${left[t] === 1 ? '' : 's'} still hidden">`
+  const score = (t) => `<div class="spy-score ${t} ${!v.over && v.turn === t ? 'on' : ''} ${v.over && v.winner === t ? 'win' : ''} ${found[t] ? (again[t] ? 'spy-scored spy-again' : 'spy-scored') : ''}" data-a="spy-left-${t}" title="${left[t]} ${TEAM[t]} agent${left[t] === 1 ? '' : 's'} still hidden">`
     + `<i>${MARK[t]}</i><b>${left[t]}</b><small>${TEAM[t]}<span> left</span></small></div>`;
   const status = v.over ? `${TEAM[v.winner]} team wins!`
     : v.phase === 'clue' ? (cluing ? 'Your team is waiting for your clue' : `${face(spy, v.turn)}<span>${esc(spy.name)} (${TEAM[v.turn]} spymaster) is thinking of a clue…</span>`)
@@ -238,7 +367,11 @@ function render(el, v, ctx) {
 
   const active = typeof document !== 'undefined' ? document.activeElement : null;
   const typing = active && active.id === 'spyClue' && el.contains(active) ? [active.selectionStart, active.selectionEnd] : null;
-  el.innerHTML = `<div class="spy-root"><div class="game-layout spy-layout">
+  // The drawers stay as the player left them, even if this update comes before their toggle event.
+  teamsOpen = el.querySelector('.spy-teams')?.open ?? teamsOpen;
+  logOpen = el.querySelector('.spy-logbook')?.open ?? logOpen;
+  // Only what changed is redrawn: the cards, their breathing rims and the radar sweep are kept between updates.
+  morph(el, `<div class="spy-root"><div class="game-layout spy-layout">
     <div class="spy-main felt spy-felt">
       ${v.over ? `<div class="winner-banner">${icon('trophy')}${me ? (me.team === v.winner ? 'Your team wins!' : `${TEAM[v.winner]} team wins`) : `${TEAM[v.winner]} team wins`}</div>` : ''}
       <div class="spy-hud">${score('r')}<div class="spy-bar ${v.over ? v.winner : v.turn}"><span class="spy-turn">${turn}</span><span class="spy-status">${status}</span>${slip}</div>${score('b')}</div>
@@ -255,10 +388,12 @@ function render(el, v, ctx) {
       <details class="panel drawer spy-logbook" ${logOpen ? 'open' : ''}><summary>${icon('book')}<span>Mission log</span><span class="note">${last ? esc(last.word.toUpperCase()) + ' ' + last.n : ''}</span>${icon('chevron', 'chev')}</summary>
         <div class="drawer-body"><div class="spy-clues">${clues}</div><div class="parchment log">${v.log.slice(0, 8).map((l) => `<div>${esc(l)}</div>`).join('')}</div></div></details>
     </div>
-  </div></div>`;
+  </div></div>`);
 
-  el.querySelector('.spy-teams')?.addEventListener('toggle', (e) => { teamsOpen = e.currentTarget.open; });
-  el.querySelector('.spy-logbook')?.addEventListener('toggle', (e) => { logOpen = e.currentTarget.open; });
+  // Kept elements keep their handlers, so they are set as properties (replaced, not stacked, on each update).
+  const teamsEl = el.querySelector('.spy-teams'), logEl = el.querySelector('.spy-logbook');
+  teamsEl.ontoggle = () => { teamsOpen = teamsEl.open; };
+  logEl.ontoggle = () => { logOpen = logEl.open; };
   el.querySelectorAll('[data-card]').forEach((b) => (b.onclick = () => {
     if (!guessing) return;
     const i = +b.dataset.card;
@@ -266,8 +401,9 @@ function render(el, v, ctx) {
     if (UI.pick === i) { UI.pick = null; return ctx.send({ type: 'guess', card: i }); } // a second tap confirms
     UI.pick = i; sound('click'); render(el, v, ctx);
   }));
-  el.querySelector('#spyGo')?.addEventListener('click', () => { const i = UI.pick; UI.pick = null; ctx.send({ type: 'guess', card: i }); });
-  el.querySelector('#spyPass')?.addEventListener('click', () => ctx.send({ type: 'pass' }));
+  const go = el.querySelector('#spyGo'), pass = el.querySelector('#spyPass');
+  if (go) go.onclick = () => { const i = UI.pick; UI.pick = null; ctx.send({ type: 'guess', card: i }); };
+  if (pass) pass.onclick = () => ctx.send({ type: 'pass' });
   const form = el.querySelector('.spy-clue');
   if (form) {
     const input = form.querySelector('#spyClue'), sel = form.querySelector('#spyN');
@@ -371,19 +507,26 @@ const STYLE = `
 
 /* the desk: counters and the current clue */
 .spy-hud{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:stretch}
-.spy-score{--tc:#ff5a6a;--tl:#ffb3ba;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-width:84px;padding:8px 10px;border-radius:16px;background:rgba(5,9,28,.65);border:1px solid rgba(255,255,255,.08);transition:box-shadow .3s,border-color .3s}
+.spy-score{--tc:#ff5a6a;--tl:#ffb3ba;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-width:84px;padding:8px 10px;border-radius:16px;background:rgba(5,9,28,.65);border:1px solid rgba(255,255,255,.08);transition:border-color .3s}
 .spy-score.b{--tc:#4d94ff;--tl:#b8d4ff}
 .spy-score i{display:block;width:16px;height:16px;color:var(--tc)}
 .spy-score i svg,.spy-card i svg,.spy-note i svg{display:block;width:100%;height:100%}
 .spy-score b{display:inline-block;font:700 1.9rem/1 var(--font-display);color:var(--tl)}
 .spy-score small{font-size:.62rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+/* The glow of the team whose turn it is switches at once, as it always has: the counters are kept between
+   updates now, and a transition would repaint the blurred shadow on every frame of the fade. */
 .spy-score.on{border-color:var(--tc);box-shadow:0 0 0 1px var(--tc),0 0 24px -4px var(--tc)}
 .spy-score.win{border-color:var(--gold);background:linear-gradient(180deg,rgba(255,207,92,.22),rgba(5,9,28,.65));box-shadow:0 0 0 1px var(--gold),0 0 24px -4px var(--gold)}
-/* A team found one of its agents: its counter flashes and the number pops. */
+/* A team found one of its agents: its counter flashes and the number pops. The counter is kept between
+   updates, so a second find in a row switches to twin keyframes (spy-again) to play the flash again. */
 .spy-score.spy-scored b{animation:spy-pop .7s var(--spring) .15s}
 .spy-score.spy-scored::after{content:'';position:absolute;inset:-3px;border-radius:18px;pointer-events:none;box-shadow:0 0 0 2px var(--tc),0 0 28px 6px var(--tc);opacity:0;animation:spy-flash 1.3s ease-out .1s}
+.spy-score.spy-again b{animation-name:spy-pop2}
+.spy-score.spy-again::after{animation-name:spy-flash2}
 @keyframes spy-pop{40%{transform:scale(1.45)}}
+@keyframes spy-pop2{40%{transform:scale(1.45)}}
 @keyframes spy-flash{20%{opacity:.85}}
+@keyframes spy-flash2{20%{opacity:.85}}
 .spy-bar{--tc:#8a93b5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-width:0;padding:9px 12px;border-radius:16px;text-align:center;background:rgba(5,9,28,.6);border:1px solid rgba(255,255,255,.08);box-shadow:inset 0 3px 0 var(--tc)}
 .spy-bar.r{--tc:#ff5a6a}.spy-bar.b{--tc:#4d94ff}
 .spy-turn{display:inline-flex;align-items:center;gap:7px;font:700 .76rem/1 var(--font-display);letter-spacing:.12em;text-transform:uppercase;color:#cfd8ff}
@@ -419,7 +562,7 @@ const STYLE = `
 .spy-card{position:relative;container-type:inline-size;display:grid;place-items:center;min-width:0;width:100%;aspect-ratio:2/1.1;min-height:0;padding:0 3px;border:0;border-radius:11px;color:var(--ink);text-shadow:none;
   background:linear-gradient(180deg,#ffffff 0%,#edf1fc 60%,#dfe5f7 100%);
   box-shadow:inset 0 1px 0 #fff,inset 0 -2px 0 rgba(27,35,71,.08),0 3px 0 #7f8cc4,0 7px 14px rgba(2,4,16,.45);
-  transition:transform .2s var(--ease),box-shadow .2s;-webkit-user-select:none;user-select:none}
+  transition:transform .2s var(--ease);-webkit-user-select:none;user-select:none}
 .spy-card:hover:not(:disabled){background-color:transparent}
 .spy-card span{position:relative;z-index:1;max-width:100%;font:600 clamp(.56rem,14.5cqw,1.02rem)/1.05 var(--font-display);letter-spacing:.04em;text-transform:uppercase;overflow-wrap:anywhere}
 .spy-card.long span{font-size:clamp(.5rem,12cqw,.92rem);letter-spacing:.01em}
@@ -450,9 +593,10 @@ const STYLE = `
 .spy-card.open.n i{color:#5b6078}.spy-card.open.x i{color:#ff6b81}
 .spy-sil{position:absolute;left:0;top:7%;width:100%;height:58%;fill:currentColor;opacity:.32;pointer-events:none}
 .spy-card.open.x .spy-sil{opacity:.9;color:#ff6b81}
-/* A fresh reveal: the paper face folds away and the agent appears. */
-.spy-card.spy-flip::before{content:'';position:absolute;inset:0;z-index:3;border-radius:inherit;pointer-events:none;background:linear-gradient(180deg,#ffffff,#dfe5f7);animation:spy-flip .45s cubic-bezier(.5,0,.75,.4) forwards}
-@keyframes spy-flip{to{transform:perspective(500px) rotateY(90deg)}}
+/* A fresh reveal: the paper face folds away and the agent appears. The face shows only while it folds; once
+   edge-on it is gone (opacity 0) instead of held there, so no 3D layer is left on the card until the next update. */
+.spy-card.spy-flip::before{content:'';position:absolute;inset:0;z-index:3;border-radius:inherit;pointer-events:none;background:linear-gradient(180deg,#ffffff,#dfe5f7);opacity:0;animation:spy-flip .45s cubic-bezier(.5,0,.75,.4)}
+@keyframes spy-flip{from{opacity:1}to{opacity:1;transform:perspective(500px) rotateY(90deg)}}
 .spy-card.spy-flip > *{animation:spy-flipin .4s var(--spring) .38s backwards}
 @keyframes spy-flipin{from{transform:scale(.5);opacity:0}}
 
@@ -515,7 +659,7 @@ export default {
   id: 'spies', name: 'Word Spies',
   description: 'Two teams, 25 words, one secret key. Spymasters give one-word clues and teammates hunt for their agents. Avoid the assassin! For 4–8.',
   minPlayers: 4, maxPlayers: 8,
-  keepDom: true, // let render() capture and restore the active clue input
+  options: [levelOption()],
   cover: coverSVG(),
   howTo: {
     goal: 'Be the first team to find all of your agents on the board, without ever touching the assassin.',

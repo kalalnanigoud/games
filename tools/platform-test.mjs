@@ -253,4 +253,17 @@ assert.deepEqual(t.S.game.players.map(p=>p.id).sort(),expectedSeats);
 assert.equal(t.S.players.find(p=>p.id==='visitor').watch,true);
 t.cleanup();tasks.clear();
 console.log('Tournament regressions passed: failed loads/setup, duplicate starts, draft restore/validation, late arrivals and legacy seating repair.');
+// One device can't flood the host: a burst well above real play is cut off with a single warning,
+// and an oversized message is ignored.
+t.S.role='host'; t.S.started=false; t.S.tour=null; t.S.gameId='gems'; t.S.players=[{id:t.S.token,name:'Host',connected:true}];
+const flood=conn(), floodSecret=reconnectSecret(); t.onHostMessage(flood,{t:'hello',token:'flooder',secret:floodSecret,name:'Flood'});
+assert.equal(flood.pid,'flooder');
+let watchToggles=0; const realSetWatch=t.S.players.find(p=>p.id==='flooder');
+for(let i=0;i<200;i++){ const before=!!realSetWatch.watch; t.onHostMessage(flood,{t:'watch',on:!before}); if(!!realSetWatch.watch!==before) watchToggles++; }
+assert.ok(watchToggles>=50 && watchToggles<=62,`a burst is allowed, then cut off (${watchToggles} of 200 got through)`);
+assert.equal(flood.sent.filter(m=>m.t==='error'&&/Too many messages/.test(m.msg)).length,1,'one warning, not one per dropped message');
+const big=conn(); t.onHostMessage(big,{t:'hello',token:'bigsender',secret:reconnectSecret(),name:'Big',pad:'x'.repeat(200000)});
+assert.equal(big.pid,undefined,'an oversized message is ignored');
+t.cleanup();tasks.clear();
+console.log('Rate limit passed: bursts above real play are cut off with one warning; oversized messages are ignored.');
 console.log('Platform regression checks passed: identity, secret fingerprints, valid reconnect, stale connections, rules enforcement, change-only syncs, version check, saved credentials, legacy sessions, stand-ins, backup host takeover, rematch, local fallback, timers, spectators, game options, voice chat membership and tournaments.');

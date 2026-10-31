@@ -18,4 +18,7 @@ export default {
   // Prefix for room IDs on the PeerJS broker. Change it if you fork the site
   // so your rooms don't collide with other copies.
   roomPrefix: 'gamenight-v2-',
+  // Anonymous crash reports (js/report.js). Empty = off. To switch on, deploy server/error-reports.js
+  // as a Cloudflare Worker (see README) and put its address here, e.g. 'https://gn-errors.you.workers.dev/report'.
+  errorReports: '',
 };

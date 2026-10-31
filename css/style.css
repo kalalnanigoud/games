@@ -204,7 +204,9 @@ input[type="checkbox"] { accent-color: var(--brand); min-height: 0; box-shadow: 
 /* ---------- loading ---------- */
 .loader { display: grid; place-items: center; gap: 14px; text-align: center; padding: 48px 16px; color: var(--muted); }
 .loader-art { width: min(280px, 70vw); aspect-ratio: 16 / 10; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-lg); }
-.loader-art > svg { width: 100%; height: 100%; display: block; }
+/* Pre-rendered cover images (tools/build-covers.mjs) crop like the illustrations did: centred, filling the frame. */
+.cover-img { object-fit: cover; object-position: center; }
+.loader-art > svg, .loader-art > img { width: 100%; height: 100%; display: block; }
 .spinner { display: inline-flex; gap: 6px; }
 .spinner i { width: 9px; height: 9px; border-radius: 50%; background: var(--brand-2); animation: hop 1s ease-in-out infinite; }
 .spinner i:nth-child(2) { animation-delay: .15s; background: var(--brand); }
@@ -251,10 +253,10 @@ input[type="checkbox"] { accent-color: var(--brand); min-height: 0; box-shadow: 
 }
 @media (hover: hover) {
   .game-card:hover { transform: translateY(-6px); border-color: rgba(170, 190, 255, .3); box-shadow: var(--shadow-lg), 0 0 0 1px rgba(124, 108, 255, .2); }
-  .game-card:hover .cover > svg { transform: scale(1.05); }
+  .game-card:hover .cover > svg, .game-card:hover .cover > img { transform: scale(1.05); }
 }
 .game-card .cover { position: relative; aspect-ratio: 16 / 11; overflow: hidden; background: #0d1531; }
-.game-card .cover > svg { width: 100%; height: 100%; display: block; transition: transform .7s var(--ease); }
+.game-card .cover > svg, .game-card .cover > img { width: 100%; height: 100%; display: block; transition: transform .7s var(--ease); }
 .game-card .cover::after { content: ''; position: absolute; inset: auto 0 0; height: 38%; background: linear-gradient(180deg, transparent, rgba(19, 28, 62, .9)); pointer-events: none; }
 .cover-tools { position: absolute; inset: 12px 12px auto; display: flex; justify-content: space-between; align-items: flex-start; z-index: 2; pointer-events: none; }
 .cover-tools > * { pointer-events: auto; }
@@ -310,7 +312,7 @@ input[type="checkbox"] { accent-color: var(--brand); min-height: 0; box-shadow: 
   box-shadow: inset 0 0 0 8px rgba(255, 255, 255, .03), inset 0 -10px 30px rgba(0, 0, 0, .35), 0 20px 50px rgba(2, 4, 16, .5);
 }
 .table-cover { width: 58%; aspect-ratio: 16 / 10; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0, 0, 0, .5), 0 0 0 3px rgba(255, 255, 255, .1); }
-.table-cover > svg { width: 100%; height: 100%; display: block; }
+.table-cover > svg, .table-cover > img { width: 100%; height: 100%; display: block; }
 .seat {
   position: absolute; left: var(--x); top: var(--y); transform: translate(-50%, -50%);
   width: 104px; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center;
@@ -370,7 +372,7 @@ button.seat:active:not(:disabled) { transform: translate(-50%, -50%) scale(.95);
 /* The current game in Game settings; tapping it opens the picker. */
 .game-current { display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 14px 8px 8px; text-align: left; border-radius: 14px; }
 .gc-cover { width: 76px; aspect-ratio: 16 / 10; border-radius: 10px; overflow: hidden; flex: none; background: #0d1531; }
-.gc-cover > svg { width: 100%; height: 100%; display: block; }
+.gc-cover > svg, .gc-cover > img { width: 100%; height: 100%; display: block; }
 .gc-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .gc-text .eyebrow { font-size: .66rem; }
 .gc-text b { font-family: var(--font-display); font-weight: 600; font-size: 1.05rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -386,7 +388,7 @@ button.seat:active:not(:disabled) { transform: translate(-50%, -50%) scale(.95);
 .picker-grid { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); grid-auto-rows: max-content; align-content: start; gap: 12px; padding: 6px 20px max(20px, calc(12px + env(safe-area-inset-bottom))); }
 .pick-card { display: flex; flex-direction: column; align-items: stretch; padding: 0; min-height: 0; overflow: hidden; border-radius: 16px; text-align: left; background: #1c2853; }
 .pick-cover { display: block; aspect-ratio: 16 / 10; overflow: hidden; background: #0d1531; }
-.pick-cover > svg { width: 100%; height: 100%; display: block; }
+.pick-cover > svg, .pick-cover > img { width: 100%; height: 100%; display: block; }
 .pick-body { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px 10px; }
 .pick-name { font-family: var(--font-display); font-weight: 600; font-size: 1rem; }
 .pick-meta { font-size: .78rem; color: var(--muted); font-weight: 700; }
@@ -480,7 +482,7 @@ body.in-game #topbar { display: none; }
   background: var(--surface); border: 1px solid var(--line-2); color: var(--text);
 }
 .turn-timer[hidden] { display: none; }
-.turn-timer .tt-bar { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(124, 108, 255, .3); transition: width 1s linear; z-index: 0; }
+.turn-timer .tt-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; transform-origin: 0 50%; background: rgba(124, 108, 255, .3); transition: transform 1s linear; z-index: 0; }
 .turn-timer span, .turn-timer b { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 6px; }
 .turn-timer b { font-family: var(--font-display); min-width: 2.4em; justify-content: flex-end; }
 .turn-timer.mine { border-color: var(--gold); color: var(--gold); }
@@ -575,7 +577,7 @@ body.in-game #topbar { display: none; }
   .help-steps { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .help-steps li { margin-bottom: 0; }
 }
-.help-cover > svg { width: 100%; height: 100%; display: block; object-fit: cover; }
+.help-cover > svg, .help-cover > img { width: 100%; height: 100%; display: block; object-fit: cover; }
 .help h2 { margin-top: 4px; padding-right: 44px; }
 .help h3 { margin: 18px 0 8px; color: var(--text); }
 .help-goal b { display: inline-flex; align-items: center; gap: 6px; }

@@ -1,0 +1,68 @@
+{
+  "bluff": {
+    "hash": "e1e83ed5a9",
+    "file": "bluff-e1e83ed5a9.webp",
+    "width": 960,
+    "height": 600
+  },
+  "chess": {
+    "hash": "ff71e9bdb3",
+    "file": "chess-ff71e9bdb3.webp",
+    "width": 960,
+    "height": 600
+  },
+  "ember": {
+    "hash": "6b2c866eaf",
+    "file": "ember-6b2c866eaf.webp",
+    "width": 960,
+    "height": 600
+  },
+  "gems": {
+    "hash": "d3edc8740b",
+    "file": "gems-d3edc8740b.webp",
+    "width": 960,
+    "height": 600
+  },
+  "hexisle": {
+    "hash": "68eb45a6cf",
+    "file": "hexisle-68eb45a6cf.webp",
+    "width": 960,
+    "height": 600
+  },
+  "keeper": {
+    "hash": "b3e29365e7",
+    "file": "keeper-b3e29365e7.webp",
+    "width": 960,
+    "height": 600
+  },
+  "mosaic": {
+    "hash": "4f2933d049",
+    "file": "mosaic-4f2933d049.webp",
+    "width": 960,
+    "height": 600
+  },
+  "signal": {
+    "hash": "75b16667a4",
+    "file": "signal-75b16667a4.webp",
+    "width": 960,
+    "height": 600
+  },
+  "sketch": {
+    "hash": "234bc6fafb",
+    "file": "sketch-234bc6fafb.webp",
+    "width": 960,
+    "height": 600
+  },
+  "spies": {
+    "hash": "2dfae08b59",
+    "file": "spies-2dfae08b59.webp",
+    "width": 960,
+    "height": 600
+  },
+  "temple": {
+    "hash": "067f55c1a4",
+    "file": "temple-067f55c1a4.webp",
+    "width": 960,
+    "height": 600
+  }
+}

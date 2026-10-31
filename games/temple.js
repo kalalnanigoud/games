@@ -1,4 +1,4 @@
-import { cooperative, action, distance, finish, glyph, chip, colour } from './coop-kit.js';
+import { cooperative, action, distance, finish, glyph, chip, colour, layer } from './coop-kit.js';
 import { rand, esc } from '../js/util.js';
 const names=['Landing','Mosaic Hall','West Steps','Moon Well','Courtyard','Echo Vault','Sun Shrine','Aqueduct','Old Library','Stone Gate','Jade Chamber','Deep Stairs','Observatory','Root Garden','Royal Crypt','Star Altar'];
 const relics=[5,10,15];
@@ -39,7 +39,7 @@ const ROOM = {
   vault: base() + '<path d="M12 74V40q38-36 76 0v34z" fill="#17292e"/><path d="M12 40q38-36 76 0" stroke="#a9c0ba" stroke-width="3.5" fill="none"/><g fill="none" stroke="#7fe3d8" stroke-opacity=".35"><path d="M30 33q20-14 40 0"/><path d="M23 39q27-21 54 0"/></g>',
   shrine: base() + '<circle cx="50" cy="34" r="22" fill="url(#ctm-glow)" opacity=".5"/><g stroke="#ffd27a" stroke-width="2.2" stroke-linecap="round" opacity=".85"><path d="M50 14V8M50 60v-6M28 34h-6M78 34h-6M34.5 18.5l-4-4M65.5 18.5l4-4M34.5 49.5l-4 4M65.5 49.5l4 4"/></g>' +
     '<circle cx="50" cy="34" r="12" fill="url(#ctm-gold)" stroke="#a86f12"/><circle cx="50" cy="34" r="6" fill="none" stroke="#a86f12" stroke-opacity=".6"/><path d="M30 74V62h40v12z" fill="#7f9796"/><path d="M27 62h46l-3-4H30z" fill="#b2c8c1"/><path d="M30 67h40" stroke="#5a7071"/>',
-  aqueduct: base() + '<path d="M0 24h100v10H0z" fill="#8aa29c"/><path d="M0 19h100v5H0z" fill="#3fd0c4" opacity=".85"/><path class="coop-wave" d="M-50 19.5q12.5-2 25 0t25 0t25 0t25 0t25 0t25 0t25 0t25 0V22H-50z" fill="#c8fff6" opacity=".5"/>' +
+  aqueduct: base() + '<path d="M0 24h100v10H0z" fill="#8aa29c"/><path d="M0 19h100v5H0z" fill="#3fd0c4" opacity=".85"/>' +
     '<path d="M0 34h100v40H0z" fill="#61797a"/><path d="M5 74V54q11-14 22 0v20zM39 74V54q11-14 22 0v20zM73 74V54q11-14 22 0v20z" fill="#0e2025"/><path d="M47 25q4 12 2 49" stroke="#8ff5e6" stroke-width="3" fill="none" opacity=".6"/>',
   library: base() + '<rect x="10" y="16" width="80" height="58" rx="2" fill="#3b2c22"/><rect x="13" y="19" width="74" height="52" fill="#231912"/>' + books(35, 0) + books(53, 2) + books(71, 4) +
     '<path d="M13 36h74M13 54h74" stroke="#5c4330" stroke-width="3"/><circle cx="72" cy="49" r="3.4" fill="#e9dcc0"/><circle cx="78" cy="50" r="3" fill="#d8c8a6"/>',
@@ -67,14 +67,20 @@ const RELIC_ART = {
 };
 const EMPTY = '<path d="M50 38l2.2 5.3 5.3 2.2-5.3 2.2L50 53l-2.2-5.3-5.3-2.2 5.3-2.2z" fill="none" stroke="#ffe7a3" stroke-opacity=".75" stroke-width="1.2"/>';
 const WATER_TOP = [100, 72, 56, 40, 24];
+const VIGNETTE = '<rect width="100" height="100" fill="url(#ctm-vig)"/>';
+// Waves roll in layers of their own (coop-kit layer()), so the compositor moves them without repainting the room.
+// Nothing still in the scene overlaps a wave band except the surface line, which reads the same under it.
+const AQUEDUCT_WAVE = layer('coop-wave', '', '<path d="M-50 19.5q12.5-2 25 0t25 0t25 0t25 0t25 0t25 0t25 0t25 0V22H-50z" fill="#c8fff6" opacity=".5"/>');
 
 function water(level, i) {
-  if (!level) return '';
+  if (!level) return { art: '', fx: '' };
   const y = WATER_TOP[level];
-  return `<rect y="${y}" width="100" height="${100 - y}" fill="url(#ctm-water)"/>` +
-    `<path class="coop-wave" style="animation-delay:-${(i % 5) * .6}s" d="M-50 ${y + 1}q12.5-3.5 25 0t25 0t25 0t25 0t25 0t25 0t25 0t25 0V${y + 5}H-50z" fill="#b7fff4" opacity=".35"/>` +
-    `<path d="M0 ${y + .6}h100" stroke="#dcfffa" stroke-opacity=".55"/><path d="M14 ${y + 9}h14M60 ${y + 14}h20M30 ${y + 22}h12" stroke="#c8fff6" stroke-opacity=".25" stroke-linecap="round"/>` +
-    (level >= 3 ? `<g fill="none" stroke="#dcfffa" stroke-opacity=".6"><circle cx="28" cy="${y + 20}" r="1.6"/><circle cx="70" cy="${y + 32}" r="1.2"/><circle cx="62" cy="${y + 12}" r="1"/></g>` : '');
+  return {
+    art: `<rect y="${y}" width="100" height="${100 - y}" fill="url(#ctm-water)"/>` +
+      `<path d="M0 ${y + .6}h100" stroke="#dcfffa" stroke-opacity=".55"/><path d="M14 ${y + 9}h14M60 ${y + 14}h20M30 ${y + 22}h12" stroke="#c8fff6" stroke-opacity=".25" stroke-linecap="round"/>` +
+      (level >= 3 ? `<g fill="none" stroke="#dcfffa" stroke-opacity=".6"><circle cx="28" cy="${y + 20}" r="1.6"/><circle cx="70" cy="${y + 32}" r="1.2"/><circle cx="62" cy="${y + 12}" r="1"/></g>` : ''),
+    fx: layer('coop-wave', `animation-delay:-${(i % 5) * .6}s`, `<path d="M-50 ${y + 1}q12.5-3.5 25 0t25 0t25 0t25 0t25 0t25 0t25 0t25 0V${y + 5}H-50z" fill="#b7fff4" opacity=".35"/>`),
+  };
 }
 
 function landing(s) {
@@ -87,14 +93,16 @@ function landing(s) {
     '<path d="M12 69V53" stroke="#5a3a1a" stroke-width="2"/><circle cx="12" cy="50" r="11" fill="url(#ctm-glow)" opacity=".8"/><rect x="9.5" y="47" width="5" height="6" rx="1" fill="#ffd27a"/>' + found;
 }
 
+// { art, fx, top }: the still scene, its moving waves, and the vignette over both (coop-kit tileHTML).
 function roomArt(s, i) {
   const r = s.rooms[i];
-  if (i === 0) return landing(s);
+  if (i === 0) return { art: landing(s), fx: '', top: '' };
   let out = ROOM[KIND[i]];
   // Excavation progress shows as three gold studs on the pedestal.
   if (relics.includes(i)) out += PEDESTAL + (r.relic ? `<circle cx="50" cy="44" r="22" fill="url(#ctm-glow)"/>${RELIC_ART[i]}${spark(63, 33, 3.4)}${spark(37, 51, 2.4)}` +
     [0, 1, 2].map((k) => `<path d="M${44 + k * 6} 61.4l2.2 2.2-2.2 2.2-2.2-2.2z" fill="${k < r.work ? '#ffd27a' : '#2c3d3f'}" stroke="#fff2b8" stroke-opacity="${k < r.work ? .9 : .3}" stroke-width=".6"/>`).join('') : EMPTY);
-  return out + water(r.water, i) + '<rect width="100" height="100" fill="url(#ctm-vig)"/>';
+  const w = water(r.water, i);
+  return { art: out + w.art, fx: (KIND[i] === 'aqueduct' ? AQUEDUCT_WAVE : '') + w.fx, top: VIGNETTE };
 }
 
 // Counters drawn as things in the temple: a shelf of relics, a flood tube, the boat, an hourglass.
@@ -123,6 +131,19 @@ function hourglass(frac) {
   return `<svg viewBox="0 0 28 44"><path d="M7 4.5c0 10 6.5 12 6.5 17.5S7 29.5 7 39.5h14c0-10-6.5-12-6.5-17.5S21 14.5 21 4.5z" fill="rgba(160,240,230,.08)" stroke="#9fd8d0" stroke-width="1.4"/>` +
     (p < 1 ? `<path d="M${(8.4 + 4.6 * p).toFixed(1)} ${(7 + 13 * p).toFixed(1)}H${(19.6 - 4.6 * p).toFixed(1)}L14 21.5z" fill="#ffd27a"/><path d="M14 21.5V39" stroke="#ffd27a" stroke-width=".8"/>` : '') +
     `<path d="M7.6 39.5Q14 ${(39.5 - 15 * p).toFixed(1)} 20.4 39.5z" fill="#ffd27a"/><path d="M5 3h18M5 41h18" stroke="#c9a463" stroke-width="3" stroke-linecap="round"/></svg>`;
+}
+
+// The flood across the room (0..1) follows the flood pressure. When it changes, the water glides to its new
+// height by a transform the compositor runs, rather than by animating its height (layout and paint every frame).
+const floodOf = (s) => Math.min(1, s.pressure / 30).toFixed(2);
+let shownFlood = null;
+function riseFlood(el, s) {
+  const f = +floodOf(s), was = shownFlood;
+  shownFlood = s.phase === 'briefing' ? null : f;
+  const pool = el.querySelector('.coop-flood');
+  if (was == null || was === f || !pool?.animate) return;
+  // The layer is (45 + 38f)% of the room tall, and its surface moved by 38% × (f - was) of the room.
+  pool.animate([{ transform: `translateY(${((f - was) * 38 / (45 + 38 * f) * 100).toFixed(3)}%)` }, { transform: 'none' }], { duration: 800, easing: 'cubic-bezier(.2, .8, .2, 1)' });
 }
 
 /* Cover: two explorers wade out of the flooding temple; one lifts the golden idol while a third hauls
@@ -191,6 +212,53 @@ function coverSVG() {
     '<g fill="#e8fffb" opacity=".7"><circle cx="182" cy="147" r="1.4"/><circle cx="232" cy="147" r="1.2"/><circle cx="122" cy="146" r="1.2"/><circle cx="170" cy="145" r="1.4"/></g></svg>';
 }
 
+/* ===================== Expert teammates (computer level 'hard') ===================== */
+
+// Expert teammates plan the whole expedition: they try every way to split the relics between them (and every
+// order to visit them), take the plan that brings the last explorer home soonest, secure the flood gates only
+// when the round would otherwise end at 30 (or when they have time to spare), and walk straight home.
+const speedOf = (p) => (p.role === 'Explorer' ? 2 : 1);
+const steps = (p, from, to) => Math.ceil(distance(from, to) / speedOf(p));
+// Actions p needs in relic room i: drain it until digging is allowed, then dig the rest.
+function workAt(s, p, i) {
+  const r = s.rooms[i], drains = p.role === 'Diver' ? 0 : Math.ceil(Math.max(0, r.water - 2) / (p.role === 'Engineer' ? 2 : 1));
+  return drains + Math.ceil((3 - r.work) / (p.role === 'Scholar' ? 2 : 1));
+}
+// Actions p needs to recover the relics in `list`, in that order, and reach the landing.
+function tour(s, p, list) {
+  let at = p.pos, t = 0;
+  for (const i of list) { t += steps(p, at, i) + workAt(s, p, i); at = i; }
+  return t + steps(p, at, 0);
+}
+const orders = (list) => (list.length < 2 ? [list] : list.flatMap((x, k) => orders(list.filter((_, j) => j !== k)).map((rest) => [x, ...rest])));
+function plan(s) {
+  const left = relics.filter((i) => s.rooms[i].relic), n = s.players.length;
+  let best = null;
+  for (let code = 0; code < n ** left.length; code++) {
+    const lists = s.players.map(() => []);
+    left.forEach((i, k) => lists[Math.floor(code / n ** k) % n].push(i));
+    const routes = s.players.map((p, j) => orders(lists[j]).map((o) => ({ o, t: tour(s, p, o) })).reduce((a, b) => (b.t < a.t ? b : a)));
+    const span = Math.max(...routes.map((r) => r.t)), sum = routes.reduce((a, r) => a + r.t, 0);
+    if (!best || span < best.span || (span === best.span && sum < best.sum)) best = { span, sum, routes };
+  }
+  return best;
+}
+function expert(s, p, moves) {
+  const pick = (type, to) => moves.find((m) => m.type === type && (to == null || m.to === to));
+  const toward = (goal) => moves.filter((m) => m.type === 'move').reduce((a, b) => (distance(b.to, goal) < distance(a.to, goal) ? b : a));
+  // The last explorer home ends the game at once, before the water rises again.
+  if (s.recovered === 3 && s.players.every((q) => q === p || q.pos === 0) && pick('move', 0)) return pick('move', 0);
+  // Teammates still to act this round can each secure the gates once; rest now only if they could not hold it below 30.
+  const after = s.players.length - 1 - s.cur;
+  if (Math.ceil((s.pressure + s.difficulty + 1 - 29) / 3) > after) return pick('rest');
+  const { span, routes } = plan(s), mine = routes[s.cur], goal = mine.o[0];
+  // With time to spare (nothing to dig, or already waiting at the landing), lower the pressure for the others.
+  if ((mine.t < span || (p.pos === 0 && goal == null)) && s.pressure >= 3) return pick('rest');
+  if (goal == null) return p.pos === 0 ? pick('wait') || pick('rest') : toward(0);
+  if (p.pos === goal) return pick('dig') || pick('drain') || pick('rest');
+  return toward(goal);
+}
+
 /* ===================== rules ===================== */
 
 export default cooperative({
@@ -215,10 +283,13 @@ export default cooperative({
   event(s){const n=2+s.difficulty;for(let k=0;k<n;k++){const i=1+rand(15);s.rooms[i].water=Math.min(4,s.rooms[i].water+1);}s.pressure+=s.difficulty+1;s.event=`A deep tremor floods ${n} chambers. Flood pressure rises by ${s.difficulty+1}.`;},
   check(s){if(s.recovered===3&&s.players.every(p=>p.pos===0))finish(s,true,'Three relics recovered. Every explorer reached the landing safely.');else if(s.pressure>=30)finish(s,false,'The flood gates failed. The team had to abandon the relics.');},
   hint:(s,p)=>s.recovered===3?'Return to the landing.':'Recover relics and keep flood pressure below 30.',
+  expert,
 
   /* ---- presentation ---- */
   cover: coverSVG(), defs, placeWord: 'room', eventGlyph: 'wave',
-  mood: (s) => `--flood:${Math.min(1, s.pressure / 30).toFixed(2)}`,
+  mood: (s) => `--flood:${floodOf(s)}`,
+  backdrop: '<i class="coop-flood"></i>',
+  drawn: riseFlood,
   gauges(s) {
     const ashore = s.players.filter((p) => p.pos === 0).length;
     return [
@@ -233,7 +304,7 @@ export default cooperative({
     const chips = [i === 0 ? chip('anchor', 'Dry', 'coop-ok') : r.water ? chip('wave', `${r.water}/4`, r.water >= 3 ? 'coop-warn' : '') : '<span></span>'];
     if (relicRoom) chips.push(r.relic ? chip('relic', `${r.work}/3`, 'coop-gold' + ui.look('work-' + i, r.work)) : chip('check', '', 'coop-ok'));
     const label = `${r.name}${relicRoom ? (r.relic ? `, relic ${r.work} of 3 excavated` : ', relic recovered') : ''}${i === 0 ? ', the dry landing' : `, water ${r.water} of 4`}`;
-    return { name: r.name, level: r.water, marker: relicRoom && r.relic, chips, label, art: roomArt(s, i) };
+    return { name: r.name, level: r.water, marker: relicRoom && r.relic, chips, label, ...roomArt(s, i) };
   },
   personal: (s, p) => `<span class="coop-stat">${glyph('pin')}${esc(names[p.pos])}</span>`,
 });

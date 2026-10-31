@@ -1,8 +1,9 @@
 // Shared presentation and turn handling for the cooperative collection.
-import { esc, log, addFx, PLAYER_COLORS } from '../js/util.js';
-import { injectCSS } from '../js/fx.js';
+import { esc, log, addFx, rand, PLAYER_COLORS } from '../js/util.js';
+import { injectCSS, morph } from '../js/fx.js';
 import { icon } from '../js/icons.js';
 import { portrait } from '../js/avatar.js';
+import { teammateOption, levelOf } from '../js/levels.js';
 
 export const distance = (a, b, width = 4) => Math.abs(a % width - b % width) + Math.abs(Math.floor(a / width) - Math.floor(b / width));
 export const action = (type, label, score, extra = {}) => ({ type, label, score, ...extra });
@@ -70,19 +71,30 @@ const wideScreen = typeof matchMedia === 'function' ? matchMedia('(min-width: 90
 const drawers = { guide: wideScreen, journal: wideScreen };
 
 // Numbers seen at the last render, so a rise or fall flashes once ("relic recovered", "water rose").
-let seen = { sig: '', round: 0, nums: new Map() };
+let seen = { sig: '', round: 0, nums: new Map(), alt: new Map() };
 function tracker(s) {
   const sig = s.theme + '|' + s.players.map(p => p.id).join(',');
   const fresh = seen.sig !== sig || s.phase === 'briefing' || s.round < seen.round;
   const prev = fresh ? new Map() : seen.nums, next = new Map();
-  // look(key, n, dir): ' coop-gain' when n moved the good way (dir 1: up is good, -1: down is good).
-  const look = (key, n, dir = 1) => {
+  const prevAlt = fresh ? new Map() : seen.alt, nextAlt = new Map();
+  // diff(key, n, dir): ' coop-gain' when n moved the good way (dir 1: up is good, -1: down is good).
+  const diff = (key, n, dir = 1) => {
     next.set(key, n);
     const was = prev.get(key);
     if (was == null || was === n) return '';
     return (n - was) * dir > 0 ? ' coop-gain' : ' coop-loss';
   };
-  look.commit = () => { seen = { sig, round: s.round, nums: next }; };
+  // The board is patched in place (morph), so an element that flashed last time too gets twin keyframes
+  // (coop-alt) this time: a changed animation name makes the browser play the flash again.
+  const mark = (key, cls) => {
+    if (!cls) return '';
+    const alt = prevAlt.get(key) === false;
+    nextAlt.set(key, alt);
+    return cls + (alt ? ' coop-alt' : '');
+  };
+  const look = (key, n, dir = 1) => mark(key, diff(key, n, dir));
+  look.diff = diff; look.mark = mark;
+  look.commit = () => { seen = { sig, round: s.round, nums: next, alt: nextAlt }; };
   return look;
 }
 
@@ -139,6 +151,9 @@ const styles = `
 @container coopfelt (min-width: 760px) {
   .coop-table { grid-template-columns: minmax(0, 1fr) 236px; grid-template-areas: "hud hud" "board status" "board actions" "board event"; grid-template-rows: auto auto auto 1fr; align-items: start; }
 }
+/* The ambience (drifting motes, the temple flood) reads the mood variables; they live on this boxless wrapper
+   so a change restyles only the ambience, not the whole board. */
+.coop-mood { display: contents; }
 .coop-motes { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
 .coop-motes i { position: absolute; left: var(--x); top: 100%; width: 8px; height: 100%; opacity: 0; animation: coop-drift var(--t, 9s) linear var(--d, 0s) infinite; }
 .coop-motes i::before { content: ''; position: absolute; left: 0; top: 0; width: var(--s, 4px); height: var(--s, 4px); border-radius: 50%; }
@@ -158,8 +173,13 @@ const styles = `
 .coop-meter.coop-gain::after, .coop-meter.coop-loss::after { content: ''; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none; opacity: 0; animation: coop-flash 1.2s ease-out .1s; }
 .coop-meter.coop-gain::after { box-shadow: 0 0 0 2px var(--gain-2), 0 0 22px 4px var(--gain-1); }
 .coop-meter.coop-loss::after { box-shadow: 0 0 0 2px var(--loss), 0 0 20px 2px var(--loss); }
+.coop-meter.coop-gain.coop-alt > b { animation-name: coop-num-b; }
+.coop-meter.coop-alt::after { animation-name: coop-flash-b; }
 @keyframes coop-num { 40% { transform: scale(1.35); } }
-.coop-vane { transform-box: view-box; transform-origin: 22px 22px; animation: coop-sway 3.4s ease-in-out infinite; }
+@keyframes coop-num-b { 40% { transform: scale(1.35); } }
+/* A gauge's moving part is a second drawing stacked on the first, so the compositor can sway it. */
+.coop-gauge > svg { grid-area: 1 / 1; }
+.coop-gauge > .coop-vane { animation: coop-sway 3.4s ease-in-out infinite; }
 @keyframes coop-sway { 50% { transform: rotate(7deg); } }
 
 /* whose turn */
@@ -170,6 +190,12 @@ const styles = `
 .coop-turn { min-width: 0; }
 .coop-turnline { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .coop-turnline .status { font-size: 1.05rem; }
+/* "Your turn" glows three times. The glow is drawn once behind the words and only its opacity pulses
+   (an animated text-shadow would repaint the page every frame). */
+.coop-turnline .status.myturn { position: relative; z-index: 0; animation: none; }
+.coop-turnline .status.myturn::after { content: attr(data-glow); position: absolute; left: 0; top: 0; z-index: -1; white-space: nowrap; pointer-events: none;
+  color: transparent; text-shadow: 0 0 16px rgba(255, 207, 92, .8); opacity: 0; animation: coop-glowtext 1.6s ease-in-out 3; }
+@keyframes coop-glowtext { 50% { opacity: 1; } }
 .coop-roletag { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; font-size: .68rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
   color: var(--accent); background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12); }
 .coop-roletag .ic { width: 13px; height: 13px; }
@@ -178,10 +204,20 @@ const styles = `
 
 /* the board */
 .coop-board { position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 8px; width: 100%; max-width: 640px; justify-self: center; border-radius: 20px; }
+/* --fx-s: one scene unit (1/100 of the tile's height) as a share of the tile's width. */
 .coop-tile { position: relative; aspect-ratio: 1; min-width: 0; display: flex; flex-direction: column; padding: 5px; border-radius: 14px; background: #0b1420;
-  box-shadow: 0 0 0 1px var(--tile-rim), 0 4px 10px rgba(0,0,0,.45); -webkit-user-select: none; user-select: none; transition: transform .15s var(--ease); }
-@container coopfelt (max-width: 440px) { .coop-tile { aspect-ratio: 4 / 5; padding: 4px; } .coop-board { gap: 6px; padding: 6px; } }
+  box-shadow: 0 0 0 1px var(--tile-rim), 0 4px 10px rgba(0,0,0,.45); -webkit-user-select: none; user-select: none; transition: transform .15s var(--ease); --fx-s: 1%; }
+@container coopfelt (max-width: 440px) { .coop-tile { aspect-ratio: 4 / 5; padding: 4px; --fx-s: 1.25%; } .coop-board { gap: 6px; padding: 6px; } }
 .coop-scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; border-radius: inherit; }
+/* Moving parts of a scene (waves, flames) are drawn in layers of their own with the scene's box and viewBox,
+   so they land exactly where the scene would draw them, and the compositor moves them without repainting. */
+.coop-fx { position: absolute; inset: 0; border-radius: inherit; overflow: hidden; pointer-events: none; }
+.coop-layer { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.coop-wave { overflow: visible; animation: coop-wave 3.2s linear infinite; }
+@keyframes coop-wave { to { transform: translateX(calc(var(--fx-s, 1%) * 50)); } }
+/* A flame flickers from the middle of its base (--ox, --oy in scene units). */
+.coop-flick { transform-origin: calc(50% + (var(--ox, 50) - 50) * var(--fx-s, 1%)) calc(var(--oy, 100) * 1%); animation: coop-flick 1.3s ease-in-out infinite; }
+@keyframes coop-flick { 50% { transform: scale(.92, 1.12); } }
 .coop-tile::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 1;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.2), inset 0 0 0 1px rgba(255,255,255,.05), inset 0 -12px 18px rgba(0,0,0,.3); }
 .coop-chips, .coop-pawns, .coop-name { position: relative; z-index: 2; }
@@ -194,6 +230,7 @@ const styles = `
 .coop-chip.coop-gold { color: #3a2500; background: linear-gradient(135deg, #ffe7a0, #f4b942); }
 .coop-chip.coop-ok .ic { color: var(--good); }
 .coop-chip.coop-gain { animation: coop-num .7s var(--spring) .1s; }
+.coop-chip.coop-gain.coop-alt { animation-name: coop-num-b; }
 .coop-pawns { display: flex; justify-content: center; margin-top: auto; padding-bottom: 3px; }
 .coop-pawn { position: relative; width: 28px; height: 28px; flex: none; border-radius: 50%; background: #0b1420; box-shadow: 0 0 0 2px var(--pc), 0 3px 6px rgba(0,0,0,.6);
   transition: translate .25s var(--ease), scale .25s var(--ease); }
@@ -225,13 +262,15 @@ const styles = `
 .coop-save, .coop-cool { animation: coop-pop .6s var(--spring) .15s; }
 .coop-burst { position: absolute; left: 50%; top: 45%; width: 70%; aspect-ratio: 1; border-radius: 50%; pointer-events: none; z-index: 4; opacity: 0;
   border: 3px solid var(--gain-2); transform: translate(-50%, -50%) scale(.2); animation: coop-burst .9s ease-out .2s; }
+.coop-alt > .coop-flash { animation-name: coop-flash-b; }
+.coop-save.coop-alt, .coop-cool.coop-alt { animation-name: coop-pop-b; }
+.coop-alt > .coop-burst { animation-name: coop-burst-b; }
 @keyframes coop-flash { 15% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes coop-flash-b { 15% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes coop-pop { 40% { transform: scale(1.07); } }
+@keyframes coop-pop-b { 40% { transform: scale(1.07); } }
 @keyframes coop-burst { 10% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.5); } }
-.coop-wave { animation: coop-wave 3.2s linear infinite; }
-@keyframes coop-wave { to { transform: translateX(50px); } }
-.coop-flick { transform-box: fill-box; transform-origin: 50% 100%; animation: coop-flick 1.3s ease-in-out infinite; }
-@keyframes coop-flick { 50% { transform: scale(.92, 1.12); } }
+@keyframes coop-burst-b { 10% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.5); } }
 
 /* what you can do */
 .coop-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
@@ -251,7 +290,7 @@ const styles = `
 .coop-panel h3 .ic { width: 20px; height: 20px; color: var(--brand-2); }
 .coop-team { display: grid; gap: 8px; }
 .coop-person { position: relative; display: flex; gap: 10px; align-items: flex-start; padding: 9px 10px 9px 12px; border-radius: 14px; overflow: hidden;
-  background: rgba(255,255,255,.04); border: 1px solid var(--line); transition: transform .25s var(--ease), box-shadow .3s; }
+  background: rgba(255,255,255,.04); border: 1px solid var(--line); transition: transform .25s var(--ease); }
 .coop-person::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--pc); }
 .coop-person.active { transform: translateY(-2px); background: rgba(255,207,92,.07); box-shadow: 0 0 0 2px var(--gold), 0 0 18px rgba(255,207,92,.3); }
 .coop-person .coop-face { margin-top: 2px; }
@@ -264,6 +303,7 @@ const styles = `
 .coop-stat { display: inline-flex; align-items: center; gap: 4px; }
 .coop-stat .ic { width: 13px; height: 13px; }
 .coop-stat.coop-gain { animation: coop-num .7s var(--spring) .1s; }
+.coop-stat.coop-gain.coop-alt { animation-name: coop-num-b; }
 .coop-goal { font-weight: 700; line-height: 1.5; }
 .coop-roles, .coop-tips { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .coop-roles li { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 12px; background: rgba(255,255,255,.04); border-left: 3px solid var(--pc); }
@@ -293,10 +333,11 @@ const styles = `
     radial-gradient(45% 30% at 82% -4%, rgba(150,255,238,.13), transparent 70%),
     ${stone},
     radial-gradient(120% 100% at 50% 0%, #17525c 0%, #0d3743 42%, #082430 72%, #04151b 100%); }
-/* The flood in the room rises with the flood pressure. */
-.coop-temple .coop-felt::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: calc(7% + var(--flood, 0) * 38%); pointer-events: none; z-index: 0;
-  background: ${surf} 0 0 / 60px 8px repeat-x, linear-gradient(180deg, rgba(43,212,200,0) 2px, rgba(43,212,200,.2) 6px, rgba(16,140,150,.36) 60%, rgba(6,80,96,.55));
-  transition: height .8s var(--ease); }
+/* The flood in the room rises with the flood pressure: its surface sits 7% + 38% × --flood above the floor.
+   The layer reaches 38% below the floor (clipped), so it can glide up or down with a transform (temple.js). */
+.coop-temple .coop-flood { position: absolute; left: 0; right: 0; bottom: -38%; height: calc(45% + var(--flood, 0) * 38%); pointer-events: none; z-index: 0;
+  --surface: calc((7 + 38 * var(--flood, 0)) / (45 + 38 * var(--flood, 0)) * 100%);
+  background: ${surf} 0 0 / 60px 8px repeat-x, linear-gradient(180deg, rgba(43,212,200,0) 2px, rgba(43,212,200,.2) 6px, rgba(16,140,150,.36) calc(var(--surface) * .6), rgba(6,80,96,.55) var(--surface)); }
 .coop-temple .coop-motes i::before { border: 1.5px solid rgba(190,255,245,.6); background: rgba(190,255,245,.1); }
 .coop-temple .coop-board { background: linear-gradient(180deg, #2b4145, #16262a);
   box-shadow: 0 0 0 1px rgba(255,214,130,.38), 0 0 0 5px #172629, 0 0 0 6px rgba(255,214,130,.22), 0 16px 30px rgba(0,0,0,.5), inset 0 2px 0 rgba(255,255,255,.06); }
@@ -342,25 +383,33 @@ const styles = `
 
 /* ---------- rendering ---------- */
 
+// A moving part of a scene (a wave, a flame) for spec.place's fx: a layer with the scene's box and viewBox.
+export const layer = (cls, style, body) => `<svg class="coop-layer ${cls}"${style ? ` style="${style}"` : ''} viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">${body}</svg>`;
+const SCENE = '<svg class="coop-scene" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" aria-hidden="true">';
+
 // spec.place(s, i, ui) describes board space i:
-//   { name, art (SVG for a 100 × 100 scene), level (water / fire), marker (relic or animal still here), chips: [chip()…], label }
+//   { name, art (SVG for a 100 × 100 scene), fx (layer()s that move, drawn over art), top (SVG drawn over both),
+//     level (water / fire), marker (relic or animal still here), chips: [chip()…], label }
 // spec.gauges(s, ui) -> [{ key, label, value, n, dir, art }]: counters drawn as part of the world.
 // ui.look(key, n, dir) returns ' coop-gain' / ' coop-loss' when a number moved since the last render.
 function tileHTML(s, i, d, ui, spec) {
   const move = ui.targets.get(i);
-  const cool = ui.look('level-' + i, d.level || 0, -1), save = ui.look('marker-' + i, d.marker ? 1 : 0, -1);
-  const fx = save === ' coop-gain' ? ' coop-gain coop-save' : cool === ' coop-gain' ? ' coop-gain coop-cool' : cool || save;
+  const cool = ui.look.diff('level-' + i, d.level || 0, -1), save = ui.look.diff('marker-' + i, d.marker ? 1 : 0, -1);
+  const fx = ui.look.mark('tile-' + i, save === ' coop-gain' ? ' coop-gain coop-save' : cool === ' coop-gain' ? ' coop-gain coop-cool' : cool || save);
   const pawns = s.players.map((q, k) => q.pos !== i ? '' :
     `<span class="coop-pawn${k === s.cur && !s.over ? ' coop-now' : ''}" data-k="pawn-${esc(q.id)}" title="${esc(q.name)} · ${esc(q.role)}" style="--pc:${colour(k)}">${portrait({ id: q.id, bot: ui.isBot(q.id) })}${spec.pawnMark?.(s, q) || ''}</span>`).join('');
   const attrs = move != null ? ` data-move="${move}" role="button" tabindex="0" aria-label="${esc(ui.choices[move].label)}"` : ` role="group" aria-label="${esc(d.label || d.name)}"`;
-  return `<div class="coop-tile${move != null ? ' coop-can' : ''}${fx}" data-hazard="${d.level || 0}" data-a="room-${i}"${attrs}>` +
-    `<svg class="coop-scene" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${d.art || ''}</svg>` +
+  const top = d.top || '';
+  const scene = d.fx ? `${SCENE}${d.art || ''}</svg><i class="coop-fx" aria-hidden="true">${d.fx}</i>${SCENE}${top}</svg>` : `${SCENE}${d.art || ''}${top}</svg>`;
+  return `<div class="coop-tile${move != null ? ' coop-can' : ''}${fx}" data-hazard="${d.level || 0}" data-a="room-${i}"${attrs}>${scene}` +
     `<div class="coop-chips">${(d.chips || []).join('')}</div><div class="coop-pawns">${pawns}</div><strong class="coop-name">${esc(d.name)}</strong>` +
     `${fx ? '<i class="coop-flash"></i>' : ''}${save === ' coop-gain' ? '<i class="coop-burst"></i>' : ''}</div>`;
 }
 
 function renderGame(game, spec, el, s, ctx) {
   injectCSS('cooperative-collection', styles);
+  // The drawers stay as the player left them (read back too, in case this redraw comes before their toggle event).
+  for (const k of ['guide', 'journal']) { const d = el.querySelector('.coop-' + k); if (d) drawers[k] = d.open; }
   const p = s.players[s.cur], mine = p.id === ctx.me, live = !s.over && s.phase === 'play';
   const choices = game.moves(s);
   const targets = new Map();
@@ -381,7 +430,7 @@ function renderGame(game, spec, el, s, ctx) {
   else {
     const hint = s.phase === 'briefing' ? (mine ? 'Choose a difficulty to begin.' : `${esc(p.name)} is choosing a difficulty.`)
       : esc(spec.hint(s, p)) + (targets.size ? ` Tap a glowing ${spec.placeWord || 'space'} to move there.` : '');
-    status = `<div class="coop-status">${face(p, s.cur)}<div class="coop-turn"><div class="coop-turnline"><span class="status ${mine ? 'myturn' : ''}">${mine ? 'Your turn' : esc(p.name) + '’s turn'}</span><span class="coop-roletag">${roleGlyph(p.role)}${esc(p.role)}</span></div>` +
+    status = `<div class="coop-status">${face(p, s.cur)}<div class="coop-turn"><div class="coop-turnline"><span class="status ${mine ? 'myturn' : ''}"${mine ? ' data-glow="Your turn"' : ''}>${mine ? 'Your turn' : esc(p.name) + '’s turn'}</span><span class="coop-roletag">${roleGlyph(p.role)}${esc(p.role)}</span></div>` +
       `<div class="coop-hint">${hint}</div>${live ? `<small class="coop-ability">${esc(p.ability)}</small>` : ''}</div></div>`;
   }
 
@@ -399,28 +448,40 @@ function renderGame(game, spec, el, s, ctx) {
   const journal = `<details class="panel drawer coop-journal"${drawers.journal ? ' open' : ''}><summary>${glyph('journal')}<span>Journal</span><span class="note">${esc(s.log[0] || '')}</span>${icon('chevron', 'chev')}</summary>` +
     `<div class="drawer-body"><ol class="coop-log">${s.log.slice(0, 14).map((line) => `<li>${esc(line)}</li>`).join('') || '<li>Your story starts here.</li>'}</ol></div></details>`;
 
-  el.innerHTML = `<section class="coop-shell coop-${spec.theme}" style="${spec.mood?.(s) || ''}"><svg class="coop-defs" width="0" height="0" aria-hidden="true" focusable="false"><defs>${spec.defs || ''}</defs></svg>${result}${brief}` +
-    `<div class="game-layout coop-layout"><div class="felt coop-felt">${motes}<div class="coop-table">${hud}${status}${board}${actions}${event}</div></div>` +
-    `<aside class="side coop-side">${team}${guide}${journal}</aside></div></section>`;
+  // Redraw only what changed: the shared gradients, the motes and every unchanged tile stay as they are.
+  morph(el, `<section class="coop-shell coop-${spec.theme}"><svg class="coop-defs" width="0" height="0" aria-hidden="true" focusable="false"><defs>${spec.defs || ''}</defs></svg>${result}${brief}` +
+    `<div class="game-layout coop-layout"><div class="felt coop-felt"><div class="coop-mood" style="${spec.mood?.(s) || ''}">${motes}${spec.backdrop || ''}</div><div class="coop-table">${hud}${status}${board}${actions}${event}</div></div>` +
+    `<aside class="side coop-side">${team}${guide}${journal}</aside></div></section>`);
 
-  el.querySelectorAll('[data-move]').forEach((b) => {
-    b.onclick = () => ctx.send(choices[Number(b.dataset.move)]);
-    if (b.tagName !== 'BUTTON') b.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); b.click(); } };
-  });
-  // <details> toggle events do not bubble, so listen on each drawer after drawing it.
-  el.querySelector('.coop-guide')?.addEventListener('toggle', (e) => { drawers.guide = e.currentTarget.open; });
-  el.querySelector('.coop-journal')?.addEventListener('toggle', (e) => { drawers.journal = e.currentTarget.open; });
+  // Kept nodes keep their handlers, so they are properties (replaced, never stacked) on the box and the drawers.
+  const choose = (b) => { if (b && !b.disabled && el.contains(b)) ctx.send(choices[Number(b.dataset.move)]); };
+  el.onclick = (e) => choose(e.target.closest?.('[data-move]'));
+  el.onkeydown = (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const b = e.target.closest?.('[data-move]');
+    if (b && b.tagName !== 'BUTTON') { e.preventDefault(); choose(b); }
+  };
+  // <details> toggle events do not bubble.
+  const guideEl = el.querySelector('.coop-guide'), journalEl = el.querySelector('.coop-journal');
+  if (guideEl) guideEl.ontoggle = () => { drawers.guide = guideEl.open; };
+  if (journalEl) journalEl.ontoggle = () => { drawers.journal = journalEl.open; };
+  // Glows on legal spaces breathe together from the top of a breath, kept tiles and new targets alike, as they
+  // did when the whole board was drawn afresh.
+  if (targets.size && el.getAnimations) for (const a of el.getAnimations({ subtree: true })) if (a.animationName === 'coop-breathe' && a.playState !== 'paused') a.currentTime = 0;
+  spec.drawn?.(el, s);
   ui.look.commit();
 }
 
 export function cooperative(spec) {
   const game = {
-    id: spec.id, name: spec.name, description: spec.description, minPlayers: 2, maxPlayers: spec.roles.length,
+    id: spec.id, name: spec.name, description: spec.description, minPlayers: 2, maxPlayers: spec.roles.length, options: [teammateOption()],
     cover: spec.cover || art(spec.theme), howTo: { goal: spec.goal, turn: spec.steps.map((text,i)=>[String(i+1),['Plan together','Take one action','Face the world'][i] || 'Teamwork',text]), tips: spec.tips },
-    setup(players) {
+    setup(players, opts) {
       if(players.length<2 || players.length>spec.roles.length || new Set(players.map(p=>p.id)).size!==players.length) throw Error('Invalid team.');
       const s={players:players.map((p,i)=>({...p,role:spec.roles[i][0],ability:spec.roles[i][1],pos:0})),cur:0,round:1,phase:'briefing',difficulty:1,over:false,won:false,winners:[],log:[],event:'Choose the expedition difficulty together.'};
-      s.theme=spec.theme;spec.setup(s); return s;
+      s.theme=spec.theme;spec.setup(s);
+      s.level=levelOf(opts); // how sharp computer teammates are (public, so it is in every view); separate from s.difficulty
+      return s;
     },
     turnOf(s) {return s.over?[]:[s.players[s.cur].id];},
     moves(s) {return s.phase==='briefing'?[0,1,2].map(level=>action('begin',['Relaxed','Standard','Daring'][level],level===1?100:0,{level})):spec.moves(s,s.players[s.cur]);},
@@ -438,7 +499,16 @@ export function cooperative(spec) {
       if(!s.over && s.round>spec.limit) finish(s,false,spec.timeout);
     },
     view(s) {return JSON.parse(JSON.stringify(s));},
-    bot(s) {return game.moves(s).reduce((best,m)=>m.score>best.score?m:best);},
+    // Steady (normal) takes the highest-scoring action. Learning (easy) does too, but one move in four it slips
+    // and takes any legal action. Expert (hard) follows the theme's plan (spec.expert). Every level picks
+    // Standard at the briefing.
+    bot(v) {
+      const moves=game.moves(v), best=moves.reduce((b,m)=>m.score>b.score?m:b);
+      if(v.phase==='briefing') return best;
+      if(v.level==='easy') return rand(4)===0?moves[rand(moves.length)]:best;
+      if(v.level==='hard') return spec.expert?.(v,v.players[v.cur],moves)||best;
+      return best;
+    },
     render(el,s,ctx) { renderGame(game, spec, el, s, ctx); },
   };
   return game;

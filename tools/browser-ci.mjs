@@ -57,6 +57,9 @@ for (const [label, viewport] of [['phone', { width: 375, height: 812 }], ['deskt
     return audit(ids, { maxSteps: 1500, every: 25 });
   }, CATALOG.map((g) => g.id));
   await fs.writeFile(new URL(`../test-results/render-${label}.json`, import.meta.url), JSON.stringify(results, null, 2));
+  // morph() (redraw only what changed) must match the browser's own parser exactly.
+  const m = await page.evaluate(async () => (await import('/tools/morph-check.js')).checkMorph(2000));
+  if (m.fails.length || !m.typing || !m.svgOk || m.similarKeptShare < 95) fail(`${label}: morph check ${JSON.stringify({ ...m, fails: m.fails.slice(0, 1) })}`);
   for (const r of results) {
     const where = `${label} ${r.game} ${r.players}p`;
     if (r.crashes.length) fail(`${where}: ${r.crashes.join('; ')}`);

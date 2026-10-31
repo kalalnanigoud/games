@@ -193,8 +193,24 @@ export function openHostPeer(isResume, attempts = 8) {
 
 const ownConn = (conn) => conn.pid && conns.get(conn.pid) === conn;
 
+// One device can't flood the host: each connection gets a steady allowance of messages, far above
+// real play (Sketch Party's drawing sends about three a second), and oversized messages are dropped.
+const RATE = { burst: 60, perSecond: 20 }, MAX_MESSAGE = 100000;
+function withinAllowance(conn, msg) {
+  const now = Date.now();
+  const b = conn._allowance || (conn._allowance = { tokens: RATE.burst, at: now });
+  b.tokens = Math.min(RATE.burst, b.tokens + ((now - b.at) / 1000) * RATE.perSecond);
+  b.at = now;
+  let size = 0;
+  try { size = JSON.stringify(msg).length; } catch { return false; }
+  if (b.tokens >= 1 && size <= MAX_MESSAGE) { b.tokens -= 1; return true; }
+  if (!conn._slowWarned && conn.open) { conn._slowWarned = true; conn.send({ t: 'error', msg: 'Too many messages from this device. Slow down a little.' }); }
+  return false;
+}
+
 export function onHostMessage(conn, msg) {
   if (!msg || typeof msg !== 'object') return;
+  if (!withinAllowance(conn, msg)) return;
   if (msg.t === 'hello') {
     if (typeof msg.token !== 'string' || !/^[a-zA-Z0-9]{1,80}$/.test(msg.token) ||
         typeof msg.secret !== 'string' || !/^[a-f0-9]{64}$/.test(msg.secret)) return reject(conn, 'Invalid player credentials.');

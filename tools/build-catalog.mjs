@@ -13,9 +13,23 @@ const OUT = new URL('games/catalog.js', root);
 const list = (dir, ext) => fs.readdirSync(new URL(dir, root)).filter((f) => ext.test(f)).map((f) => dir + f).sort();
 const FILES = ['index.html', 'css/style.css', ...list('js/', /\.js$/), ...list('games/', /\.js$/).filter((f) => f !== 'games/catalog.js')];
 
+// Covers are shown as pre-rendered images (tools/build-covers.mjs) when one matches the current art;
+// otherwise the live illustration is used, and --check fails so the images get rebuilt.
+const coverHash = (svg) => crypto.createHash('sha256').update(String(svg).replace(/\r\n/g, '\n')).digest('hex').slice(0, 10);
+const manifestUrl = new URL('covers/manifest.json', root);
+const covers = fs.existsSync(manifestUrl) ? JSON.parse(fs.readFileSync(manifestUrl, 'utf8')) : {};
+const staleCovers = [];
+const coverOf = (g) => {
+  const c = covers[g.id];
+  if (c && c.hash === coverHash(g.cover) && fs.existsSync(new URL('covers/' + c.file, root))) {
+    return `<img class="cover-img" src="covers/${c.file}" alt="" width="${c.width}" height="${c.height}" decoding="async" loading="lazy">`;
+  }
+  if (g.cover) staleCovers.push(g.id);
+  return g.cover;
+};
 const entries = GAMES.map((g) => ({
   id: g.id, name: g.name, description: g.description, minPlayers: g.minPlayers, maxPlayers: g.maxPlayers,
-  cover: g.cover, howTo: g.howTo, options: g.options,
+  cover: coverOf(g), howTo: g.howTo, options: g.options,
   // Flags the lobby needs before the game's code has loaded.
   bot: !!g.bot, onTimeout: !!g.onTimeout, defaultTimer: g.defaultTimer, simultaneous: !!g.simultaneous, keepDom: !!g.keepDom,
 }));
@@ -38,7 +52,9 @@ ${GAMES.map((g) => `  ${g.id}: () => import('./${g.id}.js'),`).join('\n')}
 };
 `;
 const current = fs.existsSync(OUT) ? fs.readFileSync(OUT, 'utf8').replace(/\r\n/g, '\n') : '';
+if (staleCovers.length) console.warn(`Cover images out of date for: ${staleCovers.join(', ')}. Run node tools/build-covers.mjs (they show as live illustrations until then).`);
 if (process.argv.includes('--check')) {
+  if (staleCovers.length) { console.error('Cover images are out of date: run node tools/build-covers.mjs, then node tools/build-catalog.mjs, and commit both.'); process.exit(1); }
   if (current !== text) { console.error('games/catalog.js is out of date: run node tools/build-catalog.mjs and commit it.'); process.exit(1); }
   console.log(`Catalog is up to date (${VERSION_LINE()}).`);
 } else if (current !== text) {

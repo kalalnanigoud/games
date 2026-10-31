@@ -1,4 +1,4 @@
-import { cooperative, action, distance, finish, glyph, chip } from './coop-kit.js';
+import { cooperative, action, distance, finish, glyph, chip, layer } from './coop-kit.js';
 import { rand, esc } from '../js/util.js';
 const names=['River Camp','Pine Ridge','Fox Hollow','East Grove','Cedar Pass','Watchtower','Fernwood','Deer Meadow','Creek Bend','Oak Stand','Owl Nest','North Trail','Willow Village','Moss Hill','Badger Den','Ash Village'];
 const animalSites=[2,7,10,14];
@@ -75,21 +75,39 @@ const ANIMAL_ART = [
 const PRINTS = `<g fill="#f6e2c0" opacity=".55">${pawPrint(36, 72)}${pawPrint(52, 66)}${pawPrint(68, 72)}</g>`;
 
 const FLAMES = [[], [[76, 80, 12]], [[20, 82, 14], [56, 80, 16], [86, 84, 12]], [[10, 86, 18], [32, 80, 22], [56, 84, 24], [80, 80, 20], [44, 68, 14], [70, 66, 12]]];
-const flame = (x, y, h, fill, delay) => `<path class="coop-flick" style="animation-delay:-${delay}s" d="M${f1(x - h * .42)} ${y}C${f1(x - h * .55)} ${f1(y - h * .5)} ${f1(x - h * .1)} ${f1(y - h * .62)} ${x} ${f1(y - h * 1.25)}C${f1(x + h * .15)} ${f1(y - h * .62)} ${f1(x + h * .55)} ${f1(y - h * .5)} ${f1(x + h * .42)} ${y}z" fill="${fill}"/>`;
+const flameD = (x, y, h) => [[f1(x - h * .42), y], [f1(x - h * .55), f1(y - h * .5)], [f1(x - h * .1), f1(y - h * .62)], [x, f1(y - h * 1.25)], [f1(x + h * .15), f1(y - h * .62)], [f1(x + h * .55), f1(y - h * .5)], [f1(x + h * .42), y]];
+const flame = (x, y, h, fill) => { const [a, b, c, d, e, g, k] = flameD(x, y, h); return `<path d="M${a.join(' ')}C${b.join(' ')} ${c.join(' ')} ${d.join(' ')}C${e.join(' ')} ${g.join(' ')} ${k.join(' ')}z" fill="${fill}"/>`; };
+// The middle of a flame's base, which it flickers from: the centre of its outline's bounding box (curve extremes included).
+function cubicSpan(a, b, c, d) {
+  const p = b - a, q = c - b, r = d - c, A = p - 2 * q + r, B = 2 * (q - p), ts = [0, 1];
+  if (Math.abs(A) < 1e-9) { if (B) ts.push(-p / B); } else { const D = B * B - 4 * A * p; if (D >= 0) ts.push((-B + Math.sqrt(D)) / (2 * A), (-B - Math.sqrt(D)) / (2 * A)); }
+  const at = ts.filter((t) => t >= 0 && t <= 1).map((t) => (1 - t) ** 3 * a + 3 * (1 - t) ** 2 * t * b + 3 * (1 - t) * t * t * c + t ** 3 * d);
+  return [Math.min(...at), Math.max(...at)];
+}
+function flameBase(x, y, h) {
+  const P = flameD(x, y, h).map(([px]) => px), [l1, r1] = cubicSpan(P[0], P[1], P[2], P[3]), [l2, r2] = cubicSpan(P[3], P[4], P[5], P[6]);
+  return +((Math.min(l1, l2) + Math.max(r1, r2)) / 2).toFixed(3);
+}
+// Each flame flickers in a layer of its own (coop-kit layer()), so the compositor runs it without repainting the board.
+const flameLayer = (x, y, h, delay) => layer('coop-flick', `--ox:${flameBase(x, y, h)};--oy:${y};animation-delay:-${delay}s`, flame(x, y, h, 'url(#cem-fire)') + flame(x, y, h * .5, '#fff0b0'));
 function fire(level, i, wind) {
-  if (!level) return '';
+  if (!level) return { art: '', fx: '' };
   const dx = [0, 7, 0, -7][wind], dy = [-4, 0, 3, 0][wind];
   const smoke = level >= 2 ? `<g fill="#4a4055" opacity="${level === 3 ? .7 : .45}">${[0, 1, 2].map((k) => `<circle cx="${40 + k * (8 + dx)}" cy="${(level === 3 ? 30 : 36) - k * (6 - dy)}" r="${9 + k * 2}"/>`).join('')}</g>` : '';
-  return `<rect width="100" height="100" fill="#ff5a1a" opacity="${[0, .1, .18, .28][level]}"/>${level === 3 ? '<rect y="58" width="100" height="42" fill="#120806" opacity=".4"/>' : ''}${smoke}` +
-    `<ellipse cx="50" cy="98" rx="70" ry="${[0, 16, 26, 40][level]}" fill="url(#cem-glow)"/>` +
-    FLAMES[level].map(([x, y, h], k) => flame(x, y, h, 'url(#cem-fire)', ((i + k) * .37 % 1.3).toFixed(2)) + flame(x, y, h * .5, '#fff0b0', ((i + k) * .37 % 1.3).toFixed(2))).join('');
+  return {
+    art: `<rect width="100" height="100" fill="#ff5a1a" opacity="${[0, .1, .18, .28][level]}"/>${level === 3 ? '<rect y="58" width="100" height="42" fill="#120806" opacity=".4"/>' : ''}${smoke}` +
+      `<ellipse cx="50" cy="98" rx="70" ry="${[0, 16, 26, 40][level]}" fill="url(#cem-glow)"/>`,
+    fx: FLAMES[level].map(([x, y, h], k) => flameLayer(x, y, h, ((i + k) * .37 % 1.3).toFixed(2))).join(''),
+  };
 }
 
+// { art, fx, top }: the still scene, its flickering flames, and the vignette over both (coop-kit tileHTML).
 function tileArt(s, i) {
   const t = s.tiles[i], site = animalSites.indexOf(i);
   let out = SCENE[KIND[i]];
   if (site >= 0) out += t.animal ? ANIMAL_ART[site] : PRINTS;
-  return out + fire(t.fire, i, s.wind) + '<rect width="100" height="100" fill="url(#cem-vig)"/>';
+  const f = fire(t.fire, i, s.wind);
+  return { art: out + f.art, fx: f.fx, top: '<rect width="100" height="100" fill="url(#cem-vig)"/>' };
 }
 
 // Counters drawn as things in the forest: paw tokens, village shields, a wind vane, a setting sun.
@@ -108,9 +126,12 @@ const shieldGauge = (n) => `<svg viewBox="0 0 48 44">${Array.from({ length: 8 },
   return `<path d="M${x + 4.5} ${y}l4.5 2v4c0 3.4-2 5.6-4.5 6.8C${x + 2} ${f1(y + 11.6)} ${x} ${f1(y + 9.4)} ${x} ${y + 6}V${y + 2}z" fill="${on ? '#8ce99a' : 'rgba(255,255,255,.05)'}" stroke="${on ? '#d3ffd9' : 'rgba(255,130,120,.5)'}" stroke-width="1"/>` +
     (on ? '' : `<path d="M${x + 3} ${y + 3}l2.5 3-2 2 2.5 3" stroke="rgba(255,130,120,.7)" stroke-width=".9" fill="none"/>`);
 }).join('')}</svg>`;
+// The needle sways in a second drawing over the dial, so the compositor can turn it (about the hub, which
+// turns into itself); the N never meets the needle, so it is drawn with the dial.
 const vane = (w) => '<svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="19" fill="rgba(0,0,0,.25)" stroke="rgba(255,220,180,.35)" stroke-width="1.2"/><path d="M22 3.5v4M22 36.5v4M3.5 22h4M36.5 22h4" stroke="rgba(255,220,180,.5)" stroke-width="1.4"/>' +
-  `<g transform="rotate(${w * 90} 22 22)"><g class="coop-vane"><path d="M22 6.5l6.5 11h-4v12h-5v-12h-4z" fill="#ffb45e" stroke="#fff1d6" stroke-width=".8"/><path d="M19.5 29.5h5l1.6 6.5h-8.2z" fill="#c98a5e"/></g></g>` +
-  '<circle cx="22" cy="22" r="2" fill="#fff1d6"/><text x="22" y="2.6" text-anchor="middle" font-size="6" font-weight="800" fill="#ffd9b0" font-family="Nunito, sans-serif">N</text></svg>';
+  '<text x="22" y="2.6" text-anchor="middle" font-size="6" font-weight="800" fill="#ffd9b0" font-family="Nunito, sans-serif">N</text></svg>' +
+  `<svg class="coop-vane" viewBox="0 0 44 44"><g transform="rotate(${w * 90} 22 22)"><path d="M22 6.5l6.5 11h-4v12h-5v-12h-4z" fill="#ffb45e" stroke="#fff1d6" stroke-width=".8"/><path d="M19.5 29.5h5l1.6 6.5h-8.2z" fill="#c98a5e"/></g>` +
+  '<circle cx="22" cy="22" r="2" fill="#fff1d6"/></svg>';
 const mix = (a, b, t) => '#' + [0, 2, 4].map((k) => Math.round(parseInt(a.slice(1 + k, 3 + k), 16) * (1 - t) + parseInt(b.slice(1 + k, 3 + k), 16) * t).toString(16).padStart(2, '0')).join('');
 function dusk(frac) {
   const p = Math.max(0, Math.min(1, frac)), y = f1(9 + 24 * p);
@@ -174,6 +195,71 @@ function coverSVG() {
     '<g fill="#ece6f4" opacity=".55"><circle cx="288" cy="128" r="8"/><circle cx="298" cy="121" r="6"/><circle cx="279" cy="122" r="5"/></g></svg>';
 }
 
+/* ===================== Expert teammates (computer level 'hard') ===================== */
+
+// Expert teammates plan the rescue: they try every way to split the animals left between them (and every order
+// to collect them, carrying them all home in one trip) and take the plan that gets the last animal to camp
+// soonest. Whoever the rescue does not need fights the fire that most threatens a village or blocks a rescue,
+// and builds firebreaks when nothing is burning near a village.
+const speedOf = (p) => (p.role === 'Ranger' ? 2 : 1);
+const steps = (p, from, to) => Math.ceil(distance(from, to) / speedOf(p));
+const VILLAGES = [12, 15], OFFSETS = [-4, 1, 4, -1];
+// Water p must pour at animal site i before rescuing there (the Medic rescues through heavy fire).
+const fightAt = (s, p, i) => { const f = s.tiles[i].fire; return p.role === 'Medic' || f < 2 ? 0 : p.role === 'Firefighter' ? 1 : f - 1; };
+// Actions p needs to rescue the animals in `list`, in that order, and deliver everything carried at camp.
+function tour(s, p, list) {
+  if (!list.length && !p.carry) return 0;
+  let at = p.pos, t = 0, pour = 0;
+  for (const i of list) { const f = fightAt(s, p, i); t += steps(p, at, i) + f + 1; pour += f; at = i; }
+  return t + Math.max(0, pour - p.water) + steps(p, at, 0) + 1;
+}
+const orders = (list) => (list.length < 2 ? [list] : list.flatMap((x, k) => orders(list.filter((_, j) => j !== k)).map((rest) => [x, ...rest])));
+function plan(s) {
+  const left = animalSites.filter((i) => s.tiles[i].animal), n = s.players.length;
+  let best = null;
+  for (let code = 0; code < n ** left.length; code++) {
+    const lists = s.players.map(() => []);
+    left.forEach((i, k) => lists[Math.floor(code / n ** k) % n].push(i));
+    const routes = s.players.map((p, j) => orders(lists[j]).map((o) => ({ o, t: tour(s, p, o) })).reduce((a, b) => (b.t < a.t ? b : a)));
+    const span = Math.max(...routes.map((r) => r.t)), sum = routes.reduce((a, r) => a + r.t, 0);
+    if (!best || span < best.span || (span === best.span && sum < best.sum)) best = { span, sum, routes };
+  }
+  return best;
+}
+// How much harm the fire at i does: a village about to burn (or burning), a fire the next wind blows into a
+// village, a fire keeping rescuers from an animal, or just fire.
+function danger(s, i) {
+  const f = s.tiles[i].fire;
+  if (!f) return 0;
+  if (VILLAGES.includes(i)) return [0, 20, 60, 100][f];
+  let to = i + OFFSETS[s.wind];
+  if (to <= 0 || to >= 16 || distance(i, to) !== 1) to = i;
+  if (VILLAGES.includes(to)) return 10 + 10 * f;
+  return s.tiles[i].animal && f >= 2 ? 30 : 2 * f;
+}
+function expert(s, p, moves) {
+  const pick = (type) => moves.find((m) => m.type === type);
+  const toward = (goal) => moves.filter((m) => m.type === 'move').reduce((a, b) => (distance(b.to, goal) < distance(a.to, goal) ? b : a));
+  if (pick('deliver')) return pick('deliver');
+  const mine = plan(s).routes[s.cur], goal = mine.o[0];
+  if (goal != null) {
+    if (p.pos !== goal) return toward(goal);
+    return pick('rescue') || pick('water') || pick('refill') || pick('break');
+  }
+  if (p.carry) return toward(0);
+  // Not needed for the rescue: guard the villages.
+  let best = null;
+  for (let i = 1; i < 16; i++) {
+    const v = danger(s, i) - 12 * steps(p, p.pos, i);
+    if (danger(s, i) && (!best || v > best.v)) best = { i, v };
+  }
+  if (p.pos === 0 && p.water < 4) return pick('refill');
+  if (!best || best.v < 15) return 1 + s.difficulty - s.breaks > 0 ? pick('break') : pick('refill') || pick('break');
+  if (!p.water && steps(p, p.pos, 0) <= 2) return p.pos === 0 ? pick('refill') : toward(0);
+  if (p.pos !== best.i) return toward(best.i);
+  return pick('water') || pick('refill') || pick('break');
+}
+
 /* ===================== rules ===================== */
 
 export default cooperative({
@@ -194,6 +280,7 @@ export default cooperative({
   event(s){const burning=s.tiles.map((t,i)=>t.fire?i:-1).filter(i=>i>0);let n=Math.max(0,1+s.difficulty-s.breaks);s.breaks=0;const offsets=[-4,1,4,-1];for(let k=0;k<n;k++){const source=burning.length?burning[rand(burning.length)]:6;let to=source+offsets[s.wind];if(to<=0||to>=16||distance(source,to)!==1)to=source;s.tiles[to].fire=Math.min(3,s.tiles[to].fire+1);}const damage=[12,15].filter(i=>s.tiles[i].fire>=3).length;s.safety-=damage;s.event=`${['North','East','South','West'][s.wind]} wind: ${n} fire spread${n===1?'':'s'}.${damage?' Villages lost '+damage+' protection.':''}`;s.wind=(s.wind+1)%4;},
   check(s){if(s.safety<=0)finish(s,false,'Both villages exhausted their protection. The rescue team withdrew.');else if(s.rescued===4)finish(s,true,'All four animals are safe at River Camp, and the villages still stand.');},
   hint:()=> 'Rescue animals, carry them home, and protect the villages.',
+  expert,
 
   /* ---- presentation ---- */
   cover: coverSVG(), defs, placeWord: 'place', eventGlyph: 'wind',
@@ -211,7 +298,7 @@ export default cooperative({
     const left = t.fire ? chip('flame', `${t.fire}/3`, t.fire >= 2 ? 'coop-warn' : '') : i === 0 ? chip('bucket', 'Camp', 'coop-ok') : '<span></span>';
     const right = site >= 0 ? (t.animal ? chip('paw', ANIMALS[site], 'coop-gold') : chip('check', '', 'coop-ok')) : village ? chip('shield', '', t.fire >= 3 ? 'coop-warn' : 'coop-ok') : '';
     const label = `${t.name}${site >= 0 ? (t.animal ? `, a ${ANIMALS[site].toLowerCase()} waits for rescue` : ', animal rescued') : ''}${village ? ', a village' : ''}${i === 0 ? ', the camp' : ''}, fire ${t.fire} of 3`;
-    return { name: t.name, level: t.fire, marker: site >= 0 && t.animal, chips: [left, right], label, art: tileArt(s, i) };
+    return { name: t.name, level: t.fire, marker: site >= 0 && t.animal, chips: [left, right], label, ...tileArt(s, i) };
   },
   pawnMark: (s, p) => p.carry ? `<b class="coop-carry">${glyph('paw')}${p.carry}</b>` : '',
   personal: (s, p, ui) => `<span class="coop-stat">${glyph('pin')}${esc(names[p.pos])}</span><span class="coop-stat${ui.look('water-' + p.id, p.water)}">${glyph('drop')}Water ${p.water}/4</span>` +

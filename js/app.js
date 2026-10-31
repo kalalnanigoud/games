@@ -4,6 +4,7 @@
 import { S, loadTabSession } from './state.js';
 import { resume } from './net.js';
 import { render } from './ui.js';
+import './report.js'; // anonymous crash reports, when switched on in config.js
 
 {
   // A refresh of this tab drops you straight back into your room.

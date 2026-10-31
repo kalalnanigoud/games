@@ -242,7 +242,8 @@ export default escapeRoom({
     .esc-signal .esc-goal-ic{position:relative;background:radial-gradient(circle at 40% 30%,#e8ffff,#7fe8f0 55%,#2ab8c8)}
     .esc-signal .esc-goal:not(.esc-done) .esc-goal-ic::after{content:'';position:absolute;top:-1px;right:-1px;width:11px;height:11px;border-radius:50%;
       background:#ff5a64;box-shadow:0 0 0 2px #0b2236,0 0 10px #ff5a64;animation:sgBeacon 1.6s ease-in-out infinite}
-    @keyframes sgBeacon{50%{opacity:.25}}`,
+    @keyframes sgBeacon{50%{opacity:.25}}
+    .esc-flyitem.esc-fly-signal{border-color:#9ff6ff;box-shadow:0 0 18px rgba(110,230,240,.55)}`,
   intro: {
     title: 'Signal from Below',
     text: [

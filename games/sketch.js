@@ -4,10 +4,11 @@
 // are triggered by any player's screen sending { type: 'clock' }; the host's own clock decides.
 // The game keeps its DOM between updates (keepDom), so the canvas and the guess box never reset.
 import { esc, log, addFx, rand, shuffle, PLAYER_COLORS } from '../js/util.js';
-import { injectCSS, floatText } from '../js/fx.js';
+import { injectCSS, floatText, morph } from '../js/fx.js';
 import { sound } from '../js/sound.js';
 import { icon } from '../js/icons.js';
 import { portrait } from '../js/avatar.js';
+import { levelOption, levelOf } from '../js/levels.js';
 
 const browser = typeof document !== 'undefined';
 const W = 1000, H = 750;
@@ -123,6 +124,7 @@ function setup(players, opts = {}) {
     rounds: [1, 2, 3].includes(Number(opts.rounds)) ? Number(opts.rounds) : 2,
     drawMs: [60, 80, 100].includes(Number(opts.time)) ? Number(opts.time) * 1000 : 80000,
     players: shuffle(players.map((p) => ({ id: p.id, name: p.name, score: 0 }))),
+    level: levelOf(opts), // how sharp the computer guessers are; public, so it is in every view
   };
   chooseFor(s);
   return s;
@@ -200,8 +202,14 @@ function view(s, pid) {
   return v;
 }
 
+// Computer guessers recognise their own doodles stroke by stroke and otherwise guess from the letter hints.
+// That is the Normal level. Easy guessers (v.level) pause more, need more of the picture and often name the
+// wrong thing; Hard ones guess more often, spot a doodle from its first line and rule out every wrong guess.
+// The drawing is the same at every level.
+const IDLE = { easy: [0.85, 0.6], normal: [0.75, 0.4], hard: [0.6, 0.2] };
 function bot(v, pid) {
-  const think = { type: 'think' }, idle = browser ? 0.75 : 0.4;
+  const level = v.level === 'easy' || v.level === 'hard' ? v.level : 'normal';
+  const think = { type: 'think' }, idle = IDLE[level][browser ? 0 : 1];
   const deadline = v.phase === 'choose' ? v.chooseUntil : v.phase === 'reveal' ? v.revealUntil : v.phase === 'draw' ? Math.min(v.endsAt, v.hintAt[v.hints.length] ?? Infinity) : Infinity;
   const due = Date.now() >= deadline;
   if (v.phase === 'choose') {
@@ -215,12 +223,40 @@ function bot(v, pid) {
     return browser ? (due ? { type: 'clock' } : think) : { type: 'skip' };
   }
   if (v.guessed[pid] || Math.random() < idle) return due ? { type: 'clock' } : think;
+  if (level !== 'normal') return levelGuess(v, pid, level) || (due ? { type: 'clock' } : think);
   for (const [w, D] of Object.entries(DOODLES))
     if (v.strokes.length >= 2 && v.strokes.length <= D.length && v.strokes.every((st, i) => st.p.join() === D[i].p.join())) return { type: 'guess', text: w };
   const tried = new Set(v.feed.filter((f) => f.pid === pid).map((f) => f.text));
   const options = WORDS.filter((w) => fits(w, v.mask) && !tried.has(w));
   if (options.length && options.length <= (browser ? 12 : 1000)) return { type: 'guess', text: options[rand(options.length)] };
   return due ? { type: 'clock' } : think;
+}
+
+// A guess at the Easy or Hard level, or null to wait. Only what every guesser sees: the strokes, the letter
+// hints, the guesses so far this turn, and the near misses shown to this player.
+function levelGuess(v, pid, level) {
+  const n = v.strokes.length;
+  const turn = v.feed.slice(v.feed.map((f) => f.k).lastIndexOf('sys') + 1); // since "… is drawing!"
+  const looks = (D, from) => n >= from && n <= D.length && v.strokes.every((st, i) => st.p.join() === D[i].p.join());
+  const pick = (list) => ({ type: 'guess', text: list[rand(list.length)] });
+  if (level === 'hard') {
+    const near = turn.filter((f) => f.k === 'close' && f.to === pid).map((f) => /“(.+)”/.exec(f.text)?.[1]).filter(Boolean);
+    const wrong = new Set([...turn.filter((f) => f.k === 'guess').map((f) => f.text), ...near]);
+    for (const [w, D] of Object.entries(DOODLES)) if (!wrong.has(w) && looks(D, 1)) return { type: 'guess', text: w };
+    const options = WORDS.filter((w) => fits(w, v.mask) && !wrong.has(w) && near.every((g) => close(g, w)));
+    return options.length && options.length <= (browser ? 20 : 1000) ? pick(options) : null;
+  }
+  const tried = new Set(turn.filter((f) => f.pid === pid && f.k === 'guess').map((f) => f.text));
+  for (const [w, D] of Object.entries(DOODLES)) {
+    if (tried.has(w) || !looks(D, Math.max(2, Math.min(3, D.length)))) continue;
+    const mixUps = Object.keys(DOODLES).filter((d) => d !== w && !tried.has(d));
+    return Math.random() < 0.4 && mixUps.length ? pick(mixUps) : { type: 'guess', text: w };
+  }
+  const options = WORDS.filter((w) => fits(w, v.mask) && !tried.has(w));
+  if (!options.length || options.length > (browser ? 6 : 1000)) return null;
+  // Easy guessers often miss the letters already shown.
+  const careless = WORDS.filter((w) => fits(w, v.mask.replace(/[^ ]/g, '_')) && !tried.has(w));
+  return pick(Math.random() < 0.4 && careless.length ? careless : options);
 }
 
 /* ---------------- interface ---------------- */
@@ -239,7 +275,7 @@ const TICKER = 4; // the latest guesses stay beside the guess box; older ones fo
 let historyOpen = typeof matchMedia === 'function' ? matchMedia('(min-width: 901px)').matches : true;
 
 const UI = { gid: null, v: null, ctx: null, color: 0, size: 1, gesture: 0, drawing: false, pending: null, local: [], sentAt: 0, offset: 0, hostNow: 0, clockSent: 0, root: null,
-  scoreKey: null, scores: {}, until: {}, mask: '', maskKey: null };
+  scoreKey: null, scores: {}, until: {}, rises: {}, mask: '', maskKey: null };
 const amDrawer = () => UI.v && UI.v.phase === 'draw' && UI.v.drawer === UI.ctx.me && !UI.v.over;
 const amPlayer = () => UI.v?.players.some((p) => p.id === UI.ctx.me);
 const deadline = (v) => (v.phase === 'choose' ? v.chooseUntil : v.phase === 'draw' ? v.endsAt : v.phase === 'reveal' ? v.revealUntil : 0);
@@ -383,7 +419,14 @@ function draw() {
   const v = UI.v, ctx = UI.ctx, el = UI.root, me = ctx.me, now = Date.now();
   const drawer = v.players.find((p) => p.id === v.drawer), isDrawer = me === v.drawer, player = amPlayer();
   // A region is rewritten only when its markup changes, so effects already playing aren't restarted.
-  const region = (r, html) => { const n = el.querySelector(`[data-r="${r}"]`); if (!n || n._skHtml === html) return false; n._skHtml = html; n.innerHTML = html; return true; };
+  // `patch` regions are morphed: only the parts that changed are redrawn (the portraits and letter tiles stay).
+  const region = (r, html, patch) => {
+    const n = el.querySelector(`[data-r="${r}"]`);
+    if (!n || n._skHtml === html) return false;
+    n._skHtml = html;
+    if (patch) morph(n, html); else n.innerHTML = html;
+    return true;
+  };
   const col = (id) => PLAYER_COLORS[Math.max(0, v.players.findIndex((p) => p.id === id)) % PLAYER_COLORS.length];
   const face = (id, cls = '') => `<span class="sk-face ${cls}" style="--pc:${col(id)}">${portrait({ id, bot: !!ctx.isBot?.(id) })}</span>`;
   const nameOf = (id) => esc(v.players.find((p) => p.id === id)?.name || '?');
@@ -391,7 +434,7 @@ function draw() {
 
   // A score that rose since the last update flashes for a moment and floats its "+N".
   const scoreKey = v.players.map((p) => p.id).join(), risen = [];
-  if (UI.scoreKey === scoreKey) for (const p of v.players) { const had = UI.scores[p.id]; if (had != null && p.score > had) { UI.until['s' + p.id] = now + 1500; risen.push([p.id, p.score - had]); } }
+  if (UI.scoreKey === scoreKey) for (const p of v.players) { const had = UI.scores[p.id]; if (had != null && p.score > had) { UI.until['s' + p.id] = now + 1500; UI.rises[p.id] = (UI.rises[p.id] || 0) + 1; risen.push([p.id, p.score - had]); } }
   UI.scoreKey = scoreKey; UI.scores = Object.fromEntries(v.players.map((p) => [p.id, p.score]));
   // Letters that just appeared (a hint, or the whole word once you guess it) pop in.
   const maskKey = v.used + ':' + v.phase;
@@ -414,7 +457,7 @@ function draw() {
     : v.phase === 'choose' ? `<span class="sk-say">${isDrawer ? 'Choose a word to draw' : esc(drawer.name) + ' is choosing a word…'}</span>`
     : isDrawer && v.phase === 'draw' ? `<span class="sk-label">Draw</span><span class="sk-letters mine">${tiles}</span>`
     : `<span class="sk-label">${v.phase === 'reveal' ? 'The word was' : v.guessed[me] ? 'You got it!' : 'Guess'}</span><span class="sk-letters">${tiles}</span><small>${v.phase === 'draw' && !v.word ? v.mask.replace(/ /g, '').length + ' letters' : ''}</small>`;
-  if (region('top', `${who}<div class="sk-word">${word}</div>${v.over ? '' : '<div class="sk-clock"><span class="sk-time"></span></div>'}`)) clockFace();
+  if (region('top', `${who}<div class="sk-word">${word}</div>${v.over ? '' : '<div class="sk-clock"><span class="sk-time"></span></div>'}`, true)) clockFace();
 
   // ---- over the canvas: choosing, the reveal, final scores ----
   const ranked = v.players.slice().sort((a, b) => b.score - a.score), got = Object.entries(v.guessed);
@@ -452,10 +495,10 @@ function draw() {
   // ---- scores ----
   region('scores', ranked.map((p) => {
     const drawingNow = p.id === v.drawer && !v.over, gotIt = v.guessed[p.id];
-    const cls = ['sk-player', drawingNow && 'drawing', gotIt && 'got', p.id === me && 'me', hot('s' + p.id) && 'sk-scored'].filter(Boolean).join(' ');
+    const cls = ['sk-player', drawingNow && 'drawing', gotIt && 'got', p.id === me && 'me', hot('s' + p.id) && (UI.rises[p.id] % 2 ? 'sk-scored' : 'sk-scored sk-again')].filter(Boolean).join(' ');
     return `<div class="${cls}" data-k="sk-p-${esc(p.id)}" style="--pc:${col(p.id)}">${face(p.id)}<span class="sk-pname">${esc(p.name)}</span>${p.id === me ? '<span class="tag t-you">You</span>' : ''}`
       + `${drawingNow ? `<span class="sk-badge draw" title="Drawing">${IC.pencil}</span>` : gotIt ? `<span class="sk-badge ok" title="Guessed it">${icon('check')}</span>` : ''}<b class="sk-pts">${p.score}</b></div>`;
-  }).join(''));
+  }).join(''), true);
   for (const [id, d] of risen) {
     const r = [...el.querySelectorAll('.sk-player')].find((n) => n.dataset.k === 'sk-p-' + id)?.querySelector('.sk-pts')?.getBoundingClientRect();
     if (r && r.width) floatText(r, '+' + d, '#3ee0a1');
@@ -608,7 +651,9 @@ const STYLE = `
 .sk-letters i.gap{width:10px}
 .sk-word small{color:#c9c2ff;font-weight:700;font-size:.78rem}
 .sk-word small:empty{display:none}
-.sk-clock{--p:1;--ring:#ffd166;position:relative;width:52px;height:52px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(var(--ring) calc(var(--p) * 360deg),rgba(255,255,255,.15) 0);box-shadow:0 4px 12px rgba(0,0,0,.35)}
+.sk-clock{--p:1;--ring:#ffd166;position:relative;width:52px;height:52px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(var(--ring) calc(var(--p) * 360deg),rgba(255,255,255,.15) 0)}
+/* The ring is redrawn four times a second as it runs down; its soft shadow sits on a pseudo-element that stays put, so it isn't repainted with it. */
+.sk-clock::before{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.35)}
 .sk-clock.low{--ring:#ff6b81}
 .sk-clock .sk-time{display:grid;place-items:center;width:42px;height:42px;border-radius:50%;background:#fff;color:var(--ink);font:700 1.15rem/1 var(--font-display)}
 .sk-clock .sk-time:empty{visibility:hidden}
@@ -719,11 +764,16 @@ const STYLE = `
 .sk-badge.draw{background:var(--gold);color:#3b2a00}
 .sk-badge.ok{background:var(--good);color:#05271a}
 .sk-pts{display:inline-block;min-width:2.4em;text-align:right;font:700 1.15rem/1 var(--font-display);color:var(--gold)}
-/* A correct guess: the row flashes and the score pops. */
+/* A correct guess: the row flashes and the score pops. The rows are kept between updates, so every other
+   rise uses twin keyframes (sk-again): a row that scores again while still flashing flashes again. */
 .sk-player.sk-scored::after{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:linear-gradient(90deg,rgba(62,224,161,.38),rgba(62,224,161,.06));box-shadow:inset 0 0 0 1.5px rgba(62,224,161,.85);opacity:0;animation:sk-flash 1.3s ease-out}
 @keyframes sk-flash{15%{opacity:1}}
 .sk-player.sk-scored .sk-pts{animation:sk-pop .6s var(--spring)}
 @keyframes sk-pop{40%{transform:scale(1.4);color:#9ff3cf}}
+.sk-player.sk-again::after{animation-name:sk-flash2}
+.sk-player.sk-again .sk-pts{animation-name:sk-pop2}
+@keyframes sk-flash2{15%{opacity:1}}
+@keyframes sk-pop2{40%{transform:scale(1.4);color:#9ff3cf}}
 
 @media(max-width:900px){.sk-grid{grid-template-columns:minmax(0,1fr);gap:14px}.sk-felt{padding:24px 8px 10px}.sk-felt::before{left:16px;right:16px}.sk-feed{height:112px}}
 @media(max-width:560px){
@@ -757,6 +807,7 @@ export default {
   options: [
     { id: 'rounds', label: '🔁 Rounds', default: '2', choices: [['1', '1 round'], ['2', '2 rounds'], ['3', '3 rounds']] },
     { id: 'time', label: '⏱ Drawing time', default: '80', choices: [['60', '60 seconds'], ['80', '80 seconds'], ['100', '100 seconds']] },
+    levelOption(),
   ],
   cover: coverSVG(),
   howTo: {

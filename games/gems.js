@@ -2,8 +2,9 @@
 // Collect gem tokens, buy development cards that give permanent gem bonuses,
 // win the favour of patrons, and reach 15 prestige (the round is then finished).
 
-import { injectCSS, snapshot, flip } from '../js/fx.js';
+import { injectCSS, snapshot, flip, morph } from '../js/fx.js';
 import { esc, log, addFx, shuffle, rand, toast, PLAYER_COLORS } from '../js/util.js';
+import { levelOption, levelOf } from '../js/levels.js';
 import { sound } from '../js/sound.js';
 import { icon } from '../js/icons.js';
 import { portrait } from '../js/avatar.js';
@@ -233,7 +234,7 @@ function validate(s, pid, a) {
    State changes
    ===================================================================== */
 
-function setup(players) {
+function setup(players, opts) {
   const n = players.length;
   const per = n <= 2 ? 4 : n === 3 ? 5 : 7;
   const bank = zero(COLORS);
@@ -258,6 +259,7 @@ function setup(players) {
     nobles: shuffle(buildNobles()).slice(0, n + 1),
     nobleChoices: null, finalRound: false,
     over: false, winners: [], log: [], fx: [], fxSeq: 0,
+    level: levelOf(opts),
   };
   log(s, `${players[0].name} goes first. Reaching ${GOAL} prestige ends the game after the round.`);
   return s;
@@ -551,8 +553,11 @@ function bot(v, pid) {
   };
   if (v.phase === 'noble') {
     const opts = (v.nobleChoices || []).map((id) => ({ type: 'noble', id }));
+    if (v.level === 'hard') opts.sort((a, b) => rivalNeed(v, me, a.id) - rivalNeed(v, me, b.id));
     return pick(opts);
   }
+  if (v.level === 'easy') return botEasy(v, me, pick);
+  if (v.level === 'hard') return botHard(v, me, pick);
   const B = brain(v, me);
   if (v.phase === 'discard') {
     const naive = {};
@@ -577,6 +582,177 @@ function bot(v, pid) {
   }
   acts.push({ type: 'pass' });
   return pick(acts) || { type: 'pass' };
+}
+
+/* ---------- computer levels ----------
+   Normal is the planner above. Easy is a beginner: it buys what it can, otherwise gathers gems for a
+   card it fancies, and never courts patrons or blocks anyone. Hard tries every purchase, every way of
+   taking gems and the reserves that matter, plays each a few turns ahead (everyone moving as the Normal
+   planner would), scores where that leaves it (prestige, bonuses, patron progress), and takes away a
+   rival's best purchase when that matters. */
+
+// Bonus cards the closest rival still lacks for this patron: a hard computer takes the patron they want most.
+function rivalNeed(v, me, id) {
+  const nb = v.nobles.find((n) => n.id === id);
+  let best = 99;
+  if (nb) for (const p of v.players) if (p.id !== me.id) best = Math.min(best, COLORS.reduce((a, c) => a + Math.max(0, (nb.req[c] || 0) - p.bonus[c]), 0));
+  return best;
+}
+
+function botEasy(v, me, pick) {
+  if (v.phase === 'discard') {
+    const out = {};
+    let left = tokenCount(me) - LIMIT;
+    for (const c of TOKENS.slice().sort((a, b) => me.gems[b] - me.gems[a])) { const n = Math.min(left, me.gems[c]); if (n) { out[c] = n; left -= n; } }
+    return pick([{ type: 'discard', gems: out }]);
+  }
+  const market = [];
+  for (const t of [1, 2, 3]) v.market[t].forEach((c, i) => c && market.push({ card: c, t, i }));
+  const acts = [];
+  const afford = [...market.map((e) => e.card), ...me.reserved.filter((c) => !c.hidden)].filter((c) => payment(me, c));
+  afford.sort((a, b) => b.p - a.p || COLORS.reduce((s, c) => s + (a.cost[c] || 0) - (b.cost[c] || 0), 0));
+  if (afford.length && Math.random() < 0.7) acts.push({ type: 'buy', id: afford[0].id });
+  const avail = availColors(v);
+  if (avail.length) {
+    // A card it fancies: one of the few closest to affordable, picked at random.
+    const near = market.slice().sort((a, b) => missing(me, a.card) - missing(me, b.card)).slice(0, 4);
+    const fancy = near.length && Math.random() < 0.75 ? near[Math.floor(Math.random() * near.length)].card : null;
+    const mixed = avail.map((c) => ({ c, w: (fancy && (fancy.cost[c] || 0) > me.bonus[c] + me.gems[c] ? 1 : 0) + Math.random() }));
+    acts.push({ type: 'take', gems: mixed.sort((a, b) => b.w - a.w).slice(0, Math.min(3, avail.length)).map((x) => x.c) });
+  }
+  for (const e of market) acts.push({ type: 'reserve', tier: e.t, slot: e.i });
+  for (const t of [1, 2, 3]) acts.push({ type: 'reserve', tier: t, deck: true });
+  acts.push({ type: 'pass' });
+  return pick(acts) || { type: 'pass' };
+}
+
+// What a position is worth to a player, in prestige: points banked, plus bonuses and patron progress
+// while the game still has turns in it, plus the gems in hand.
+function hardWorth(p, nobles, late) {
+  let worth = p.points;
+  const eng = 1 - late;
+  for (const c of COLORS) worth += Math.min(p.bonus[c], 4) * 0.55 * eng + Math.max(0, p.bonus[c] - 4) * 0.2 * eng;
+  for (const nb of nobles) {
+    let have = 0, req = 0;
+    for (const c of COLORS) { req += nb.req[c] || 0; have += Math.min(p.bonus[c], nb.req[c] || 0); }
+    worth += 2.2 * (have / req) ** 2 * eng;
+  }
+  return worth + 0.12 * (tokenCount(p) - p.gems.gold) * eng + 0.3 * p.gems.gold * eng;
+}
+
+// Plays a move for the computer, then a few more rounds in which everyone moves as the Normal planner
+// would, and scores where that leaves it. Moves that can't be played out here score nothing.
+function playout(v, pid, first, turns) {
+  const s = JSON.parse(JSON.stringify(v));
+  s.fx = [];
+  s.log = [];
+  const seat = s.players.findIndex((p) => p.id === pid);
+  const me = s.players[seat];
+  const lead = Math.max(...s.players.map((p) => p.points));
+  const step = (a) => {
+    try { act(s, pid, a); } catch { return false; }
+    while (!s.over && s.players[s.cur].id === pid && s.phase !== 'play') {
+      try { act(s, pid, bot({ ...s, level: 'normal' }, pid)); } catch { return false; }
+    }
+    s.cur = seat;
+    s.phase = 'play';
+    return true;
+  };
+  if (!step(first)) return -Infinity;
+  const late = Math.min(1, lead / GOAL);
+  let prev = hardWorth(me, s.nobles, late), total = prev;
+  // Later turns count for less: plans made now grow less certain, so a gain now beats the same gain later.
+  const others = s.players.map((p, i) => (seat + 1 + i) % s.players.length).slice(0, -1);
+  for (let k = 1; k <= turns && !s.over && me.points < GOAL; k++) {
+    for (const i of others) {
+      const r = s.players[i];
+      s.cur = i;
+      s.phase = 'play';
+      for (let n = 0; n < 4 && !s.over && s.cur === i; n++) { try { act(s, r.id, bot({ ...s, level: 'normal' }, r.id)); } catch { break; } }
+    }
+    s.cur = seat;
+    s.phase = 'play';
+    if (s.over || !step(bot({ ...s, level: 'normal' }, pid))) break;
+    const w = hardWorth(me, s.nobles, late);
+    total += 0.7 ** k * (w - prev);
+    prev = w;
+  }
+  return total;
+}
+
+// The most prestige a rival could gain from one purchase on their next turn (with a patron it brings).
+function rivalGain(v, r, cards) {
+  let best = 0;
+  for (const card of cards) {
+    if (!payment(r, card)) continue;
+    let gain = card.p;
+    const bonus = { ...r.bonus, [card.c]: r.bonus[card.c] + 1 };
+    if (v.nobles.some((nb) => COLORS.every((c) => bonus[c] >= (nb.req[c] || 0)))) gain += 3;
+    best = Math.max(best, gain);
+  }
+  return best;
+}
+
+function botHard(v, me, pick) {
+  const B = brain(v, me);
+  if (v.phase === 'discard') {
+    // Try a few ways of giving gems back, including keeping exactly what pays for each card it can
+    // afford now, and keep the one that plays out best (gains next turn count most).
+    const excess = tokenCount(me) - LIMIT;
+    const naive = {};
+    let left = excess;
+    for (const c of TOKENS) { const n = Math.min(left, me.gems[c]); if (n) { naive[c] = n; left -= n; } }
+    const tries = [botDiscard(v, me, B), naive];
+    for (const c of TOKENS) if (me.gems[c] >= excess) tries.push({ [c]: excess });
+    for (const e of B.afford.slice(0, 3)) {
+      const pay = payment(me, e.card), out = {};
+      let need = excess;
+      for (const c of TOKENS.slice().sort((a, b) => (a === 'gold' ? 99 : B.demand[a]) - (b === 'gold' ? 99 : B.demand[b]))) {
+        const n = Math.min(need, me.gems[c] - (pay[c] || 0));
+        if (n > 0) { out[c] = n; need -= n; }
+      }
+      if (!need) tries.push(out);
+    }
+    let bestA = null, bestW = -Infinity;
+    for (const gems of tries) {
+      const a = { type: 'discard', gems };
+      const w = playout(v, me.id, a, 1) + playout(v, me.id, a, 2);
+      if (w > bestW) { bestW = w; bestA = a; }
+    }
+    return pick([bestA, { type: 'discard', gems: naive }]);
+  }
+  const market = [];
+  for (const t of [1, 2, 3]) v.market[t].forEach((c, i) => c && market.push({ card: c, t, i }));
+  const cards = market.map((e) => e.card);
+  const rivals = v.players.filter((p) => p.id !== me.id);
+  const rivalCards = (r, without) => [...cards.filter((c) => c !== without), ...r.reserved.filter((c) => !c.hidden)];
+  const threat = (without) => Math.max(0, ...rivals.map((r) => {
+    const g = rivalGain(v, r, rivalCards(r, without));
+    return g + (r.points + g >= GOAL && r.points + g >= me.points ? 6 : 0);
+  }));
+  const now = threat(null);
+  const deny = (card) => (now ? (now - threat(card)) * 0.5 : 0);
+
+  // Candidate moves: every purchase, every way of taking gems, and reserving the cards that matter.
+  const cands = [];
+  for (const card of [...cards, ...me.reserved.filter((c) => !c.hidden)]) if (payment(me, card)) cands.push({ a: { type: 'buy', id: card.id }, bonus: deny(card) });
+  const avail = availColors(v);
+  if (avail.length >= 3) {
+    for (let i = 0; i < avail.length; i++) for (let j = i + 1; j < avail.length; j++) for (let k = j + 1; k < avail.length; k++) cands.push({ a: { type: 'take', gems: [avail[i], avail[j], avail[k]] }, bonus: 0 });
+  } else if (avail.length) cands.push({ a: { type: 'take', gems: avail.slice() }, bonus: 0 });
+  for (const c of COLORS) if (v.bank[c] >= 4) cands.push({ a: { type: 'take', gems: [c, c] }, bonus: 0 });
+  if (me.reserved.length < MAX_RES) {
+    const worth = market.slice().sort((a, b) => (deny(b.card) - deny(a.card)) || ((B.list.find((e) => e.card === b.card)?.val || 0) - (B.list.find((e) => e.card === a.card)?.val || 0)));
+    for (const e of worth.slice(0, 4)) cands.push({ a: { type: 'reserve', tier: e.t, slot: e.i }, bonus: deny(e.card) });
+  }
+  // In the final round, prestige now is all that counts.
+  const finalTurn = v.finalRound;
+  let bestA = null, bestW = -Infinity;
+  for (const c of cands) {
+    const w = playout(v, me.id, c.a, finalTurn ? 0 : 3) + c.bonus;
+    if (w > bestW) { bestW = w; bestA = c.a; }
+  }
+  return pick([bestA, ...botTake(v, me, B), { type: 'reserve', tier: 1, deck: true }, { type: 'reserve', tier: 2, deck: true }, { type: 'reserve', tier: 3, deck: true }, { type: 'pass' }]) || { type: 'pass' };
 }
 
 /* =====================================================================
@@ -666,6 +842,33 @@ function gemMarkup(color, pre) {
 const lg = (id, stops, x2 = 0, y2 = 1) => `<linearGradient id="${id}" x1="0" y1="0" x2="${x2}" y2="${y2}">${stops.map(([o, c, a]) => `<stop offset="${o}" stop-color="${c}"${a != null ? ` stop-opacity="${a}"` : ''}/>`).join('')}</linearGradient>`;
 const rg = (id, stops, cx = 0.5, cy = 0.5, r = 0.5) => `<radialGradient id="${id}" cx="${cx}" cy="${cy}" r="${r}">${stops.map(([o, c, a]) => `<stop offset="${o}" stop-color="${c}"${a != null ? ` stop-opacity="${a}"` : ''}/>`).join('')}</radialGradient>`;
 
+// A blurred ellipse drawn without a blur filter: nested ellipses whose opacities add up to the same soft
+// edge (fitted to a Gaussian blur of 2.4), so every chip on screen paints as plain shapes.
+const CHIP_SHADE = '<g fill="#000">' + [[-4.8, 0.0147], [-3.6, 0.0334], [-2.4, 0.0581], [-1.2, 0.0773], [0, 0.0804], [1.2, 0.0664], [2.4, 0.044], [3.6, 0.0233], [4.8, 0.0098], [6, 0.0043]]
+  .map(([o, a]) => `<ellipse cx="50" cy="63" rx="${r3(20 + o)}" ry="${r3(6 + o)}" fill-opacity="${a}"/>`).join('') + '</g>';
+
+// The same idea for any convex outline: copies grown or shrunk in steps of the blur radius (sigma),
+// with opacities that add up to a Gaussian edge of opacity .65, moved down by dy.
+const SOFT = [[-1.5, 0.102], [-1, 0.158], [-0.5, 0.186], [0, 0.174], [0.5, 0.133], [1, 0.084], [1.5, 0.044], [2, 0.018], [2.5, 0.008]];
+function grow(P, o) {
+  const n = P.length;
+  let area = 0;
+  for (let i = 0; i < n; i++) area += P[i][0] * P[(i + 1) % n][1] - P[(i + 1) % n][0] * P[i][1];
+  const s = area > 0 ? 1 : -1;
+  const nrm = (a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1; return [(s * dy) / l, (-s * dx) / l]; };
+  return P.map((p, i) => {
+    const a = nrm(P[(i - 1 + n) % n], p), b = nrm(p, P[(i + 1) % n]);
+    let mx = a[0] + b[0], my = a[1] + b[1];
+    const ml = Math.hypot(mx, my) || 1;
+    mx /= ml; my /= ml;
+    const k = Math.min(1 / Math.max(mx * a[0] + my * a[1], 1e-3), 2);
+    return [p[0] + mx * o * k, p[1] + my * o * k];
+  });
+}
+const softShadow = (P, sigma, dy) => '<g fill="#000">' + SOFT.map(([t, a]) => `<polygon points="${PTS(grow(P, t * sigma).map(([x, y]) => [x, y + dy]))}" fill-opacity="${a}"/>`).join('') + '</g>';
+// The card's bonus gem casts drop-shadow(0 .8cqw .8cqw rgba(0,0,0,.65)): .8cqw of a 24cqw gem, in its units.
+const BONUS_SHADOW = (0.8 / 24) * 2.3;
+
 function chipSymbol(c) {
   const P = PAL[c];
   const ins = Array.from({ length: 8 }, (_, k) => `<rect x="45.5" y="5.5" width="9" height="11" rx="2" fill="${P.ins}" transform="rotate(${k * 45 + 22.5} 50 50)"/>`).join('');
@@ -674,7 +877,7 @@ function chipSymbol(c) {
     `<symbol id="gems-edge-${c}" viewBox="0 0 100 100"><circle cx="50" cy="54" r="45" fill="${P.chip[2]}"/><circle cx="50" cy="50" r="45" fill="${P.chip[1]}"/>${ins}<circle cx="50" cy="50" r="45" fill="none" stroke="rgba(0,0,0,.35)"/></symbol>` +
     `<symbol id="gems-tok-${c}" viewBox="0 0 100 100"><circle cx="50" cy="54.5" r="45" fill="${P.chip[2]}"/><circle cx="50" cy="50" r="45" fill="url(#gems-chg-${c})"/>${ins}` +
     `<circle cx="50" cy="50" r="45" fill="none" stroke="rgba(0,0,0,.35)"/><circle cx="50" cy="50" r="34" fill="none" stroke="${P.ins}" stroke-opacity=".7" stroke-width="1.3" stroke-dasharray="2.6 2.2"/>` +
-    `<circle cx="50" cy="50" r="30.5" fill="url(#gems-inl-${c})" stroke="rgba(0,0,0,.4)"/><ellipse cx="50" cy="63" rx="20" ry="6" fill="#000" opacity=".35" filter="url(#gems-blur)"/>` +
+    `<circle cx="50" cy="50" r="30.5" fill="url(#gems-inl-${c})" stroke="rgba(0,0,0,.4)"/>${CHIP_SHADE}` +
     `<use href="#gems-g-${c}" x="18" y="15" width="64" height="64"/><path d="M13 36 A40 40 0 0 1 70 11" fill="none" stroke="#fff" stroke-opacity=".32" stroke-width="3" stroke-linecap="round"/></symbol>`;
 }
 
@@ -875,8 +1078,8 @@ function ensureDefs() {
   if (document.getElementById('gems-defs')) return;
   if (!defsHTML) {
     defsHTML = `<svg id="gems-defs" xmlns="http://www.w3.org/2000/svg" width="0" height="0" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true"><defs>` +
-      `<filter id="gems-blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.4"/></filter>` +
-      COLORS.map((c) => `<symbol id="gems-g-${c}" viewBox="-1.15 -1.15 2.3 2.3">${gemMarkup(c, 'gems-gm')}</symbol><symbol id="gems-sh-${c}" viewBox="-1.15 -1.15 2.3 2.3"><polygon points="${PTS(outlineOf(CUT[c]))}" fill="currentColor"/></symbol>`).join('') +
+      COLORS.map((c) => `<symbol id="gems-g-${c}" viewBox="-1.15 -1.15 2.3 2.3">${gemMarkup(c, 'gems-gm')}</symbol><symbol id="gems-sh-${c}" viewBox="-1.15 -1.15 2.3 2.3"><polygon points="${PTS(outlineOf(CUT[c]))}" fill="currentColor"/></symbol>` +
+        `<symbol id="gems-gs-${c}" viewBox="-1.15 -1.15 2.3 2.3">${softShadow(outlineOf(CUT[c]), BONUS_SHADOW, BONUS_SHADOW)}</symbol>`).join('') +
       `<symbol id="gems-sh-gold" viewBox="-1.15 -1.15 2.3 2.3"><circle r="1" fill="currentColor"/></symbol>` +
       COLORS.map(chipSymbol).join('') + COIN + SCENES + NOBLE_DEFS_SVG + BACKS +
       `</defs></svg>`;
@@ -969,10 +1172,10 @@ const pipHTML = (c, n, cls = 'gems-pip') => `<span class="${cls} gems-c-${c}"><s
 const backArt = (t) => `<svg class="gems-art" viewBox="0 0 100 140" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><use href="#gems-back-${t}"/></svg>`;
 
 function cardHTML(card, o = {}) {
-  const pts = card.p ? `<span class="gems-pts">${card.p}</span>` : '<span></span>';
+  const pts = card.p ? `<span class="gems-pts" data-t="${card.p}">${card.p}</span>` : '<span></span>';
   const pips = COLORS.filter((c) => card.cost[c]).map((c) => pipHTML(c, card.cost[c])).join('');
   const front = `<div class="gems-face gems-front"><svg class="gems-art" viewBox="0 0 100 140" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><use href="#gems-scene-${card.t}${card.art ? 'b' : 'a'}"/></svg>` +
-    `<div class="gems-tint"></div><div class="gems-band">${pts}<svg class="gems-bonus" viewBox="0 0 100 100" aria-hidden="true"><use href="#gems-g-${card.c}"/></svg></div><div class="gems-cost">${pips}</div></div>`;
+    `<div class="gems-tint"></div><div class="gems-band">${pts}<svg class="gems-bonus" viewBox="0 0 100 100" aria-hidden="true"><use href="#gems-gs-${card.c}"/><use href="#gems-g-${card.c}"/></svg></div><div class="gems-cost">${pips}</div></div>`;
   const back = o.back ? `<div class="gems-face gems-backface">${backArt(card.t)}</div>` : '';
   return `<div class="gems-card gems-t${card.t} gems-b-${card.c} ${o.cls || ''}" ${o.attrs || ''}><div class="gems-flipper">${front}${back}</div></div>`;
 }
@@ -980,7 +1183,7 @@ const hiddenCardHTML = (t, o = {}) => `<div class="gems-card gems-t${t} gems-hid
 
 function nobleHTML(nb, o = {}) {
   const req = COLORS.filter((c) => nb.req[c]).map((c) => pipHTML(c, nb.req[c], 'gems-nb')).join('');
-  return `<div class="gems-noble ${o.cls || ''}" ${o.attrs || ''}>${nobleArt(nb)}<span class="gems-npts">3</span><div class="gems-nreq">${req}</div></div>`;
+  return `<div class="gems-noble ${o.cls || ''}" ${o.attrs || ''}>${nobleArt(nb)}<span class="gems-npts" data-t="3">3</span><div class="gems-nreq">${req}</div></div>`;
 }
 
 function deckStyle(n, t) {
@@ -1045,7 +1248,7 @@ function render(el, v, ctx) {
 
   // ---- nobles ----
   const choices = v.phase === 'noble' && myTurn ? v.nobleChoices || [] : [];
-  const nobles = v.nobles.map((nb) => `<div class="gems-nwrap">${nobleHTML(nb, {
+  const nobles = v.nobles.map((nb) => `<div class="gems-nwrap">${choices.includes(nb.id) ? '<i class="gems-nglow" aria-hidden="true"></i>' : ''}${nobleHTML(nb, {
     cls: choices.includes(nb.id) ? 'gems-choose' : choices.length ? 'gems-dim' : '',
     attrs: `data-k="${nb.id}" data-act="noble" data-id="${nb.id}" role="button" tabindex="0" aria-label="${esc(nb.name)}"`,
   })}<div class="gems-nname">${esc(nb.name)}</div></div>`).join('');
@@ -1061,7 +1264,7 @@ function render(el, v, ctx) {
       else if (fresh.has(c.id)) { cls = 'gems-deal'; dd = '--dd:.42s;'; }
       if (canPlay && payment(meP, c)) cls += ' gems-can';
       if (ui.modal?.id === c.id) cls += ' gems-picked';
-      return cardHTML(c, { back: true, cls, attrs: `data-k="${c.id}" data-noenter data-act="card" data-id="${c.id}" role="button" tabindex="0" aria-label="${NAME[c.c]} card, ${c.p} prestige" style="--slot:${i};${dd}"` });
+      return cardHTML(c, { back: true, cls, attrs: `data-k="${c.id}${dd ? '-deal' : ''}" data-a="${c.id}" data-noenter data-act="card" data-id="${c.id}" role="button" tabindex="0" aria-label="${NAME[c.c]} card, ${c.p} prestige" style="--slot:${i};${dd}"` });
     }).join('');
     return `<div class="gems-tier">${deck}${slots}</div>`;
   }).join('');
@@ -1075,7 +1278,8 @@ function render(el, v, ctx) {
     let h = '';
     for (let i = 0; i < layers; i++) h += `<span class="gems-layer" style="--i:${i}">${i === layers - 1 ? chipSVG(c) : edgeSVG(c)}</span>`;
     const had = prevSel.filter((x) => x === c).length;
-    const lift = Array.from({ length: selN }, (_, j) => `<span class="gems-lift ${j >= had ? 'gems-lnew' : ''}" style="--j:${j}">${chipSVG(c)}</span>`).join('');
+    // Keyed by how many are lifted, so the chips of a pile are re-made together and bob in step.
+    const lift = Array.from({ length: selN }, (_, j) => `<span class="gems-lift ${j >= had ? 'gems-lnew' : ''}" data-k="lift-${c}${selN}-${j}" data-noenter style="--j:${j}">${chipSVG(c)}</span>`).join('');
     const cls = [selN ? 'gems-psel' : '', canPlay && c !== 'gold' && left > 0 ? 'gems-pick' : '', total ? '' : 'gems-pempty'].join(' ');
     return `<div class="gems-pile gems-pile-${c} ${cls}" data-act="bank" data-c="${c}" role="button" tabindex="0" aria-label="${NAME[c]}: ${left} in the bank" style="--top:${Math.max(0, layers - 1)}">` +
       `<div class="gems-stack">${layers ? '' : '<span class="gems-ghostchip"></span>'}${h}<span class="gems-anchor" data-a="gems-bank-${c}"></span>${lift}</div><span class="gems-count">${left}</span></div>`;
@@ -1085,7 +1289,8 @@ function render(el, v, ctx) {
   const order = meP ? [...v.players.slice(meP.seat), ...v.players.slice(0, meP.seat)] : v.players;
   const panels = order.map((p) => panelHTML(v, p, ctx, meP, canPlay, freshRes)).join('');
 
-  el.innerHTML = `<div class="game-layout gems-layout">
+  // Redraw only what changed: kept nodes are left alone, so the browser restyles and repaints less.
+  morph(el, `<div class="game-layout gems-layout">
     <div class="felt gems-felt"><div class="gems-table">
       ${statusHTML(v, ctx, meP, myTurn)}
       <div class="gems-nobles">${nobles}</div>
@@ -1095,11 +1300,13 @@ function render(el, v, ctx) {
     </div></div>
     <div class="side gems-side">${panels}
       <details class="panel drawer gems-ledger" ${ledgerOpen ? 'open' : ''}><summary>${icon('sparkle')}<span>Ledger</span><span class="note">${esc(v.log?.[0] || '')}</span>${icon('chevron', 'chev')}</summary>
-        <div class="drawer-body"><div class="log">${(v.log || []).map((l) => `<div>${esc(l)}</div>`).join('')}</div></div></details>
+        <div class="drawer-body"><div class="log">${(v.log || []).map((l, i, all) => `<div id="gems-log-${all.length - i}">${esc(l)}</div>`).join('')}</div></div></details>
     </div>
-  </div>${modalHTML(v, meP, myTurn)}`;
+  </div>${modalHTML(v, meP, myTurn)}`);
 
-  el.querySelector('.gems-ledger')?.addEventListener('toggle', (e) => { ledgerOpen = e.currentTarget.open; });
+  // A property, not a listener: the drawer is kept between renders. (toggle events don't bubble.)
+  const ledger = el.querySelector('.gems-ledger');
+  if (ledger) ledger.ontoggle = (e) => { ledgerOpen = e.currentTarget.open; };
   prevPoints = new Map(v.players.map((p) => [v.seed + p.id, p.points]));
   prevSel = ui.sel.slice();
   prevSeed = v.seed;
@@ -1163,7 +1370,8 @@ function trayHTML(v, meP, myTurn) {
   if (!ready) label = `Pick ${want - sel.length} more`;
   const over = tokenCount(meP) + sel.length - LIMIT;
   const tip = sel.length === 1 && v.bank[sel[0]] >= 4 ? `<span class="gems-ttip">Tap ${NAME[sel[0]]} again to take 2</span>` : '';
-  return `<div class="gems-tray gems-tray-sel"><span class="gems-tlabel">Taking</span><span class="gems-tchips">${sel.map((c) => chipSVG(c)).join('')}</span>` +
+  // Keyed by the selection: each change slides the tray in again, its chips bobbing in step.
+  return `<div class="gems-tray gems-tray-sel" data-k="tray-${sel.join('-')}" data-noenter><span class="gems-tlabel">Taking</span><span class="gems-tchips">${sel.map((c) => `<span class="gems-tch">${chipSVG(c)}</span>`).join('')}</span>` +
     `<span class="gems-tname">${gemList(sel)}</span>${tip}${over > 0 ? `<span class="gems-warn">You'll return ${over}</span>` : ''}` +
     `<span class="gems-tbtns"><button class="primary" data-act="take" ${ready ? '' : 'disabled'}>${label}</button><button data-act="clear">Clear</button></span></div>`;
 }
@@ -1415,8 +1623,15 @@ ${COLOR_VARS}
 .gems-face-sm { width: 30px; height: 30px; flex: none; border-radius: 50%; box-shadow: 0 0 0 2px var(--pc, #fff), 0 2px 6px rgba(0,0,0,.4); }
 .gems-face-sm .portrait { width: 100%; height: 100%; display: block; border-radius: 50%; }
 .gems-flag { font: 800 .68rem/1 var(--font-display); letter-spacing: .08em; text-transform: uppercase; padding: 5px 9px; border-radius: 20px;
-  background: linear-gradient(135deg, #ffd36b, #ff9f5a); color: #3b1d00; box-shadow: 0 0 14px rgba(255,190,90,.5); animation: gems-flag 2s ease-in-out infinite; }
-@keyframes gems-flag { 50% { box-shadow: 0 0 22px rgba(255,210,90,.95); } }
+  background: linear-gradient(135deg, #ffd36b, #ff9f5a); color: #3b1d00; position: relative; }
+/* Its glow breathes by fading between two still glows (opacity only, no repaint). The text after it
+   is drawn over the glow, as before. */
+.gems-flag::before, .gems-flag::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; }
+.gems-flag::before { box-shadow: 0 0 14px rgba(255,190,90,.5); animation: gems-fade-out 2s ease-in-out infinite; }
+.gems-flag::after { box-shadow: 0 0 22px rgba(255,210,90,.95); opacity: 0; animation: gems-fade-in 2s ease-in-out infinite; }
+.gems-round, .gems-hint { position: relative; }
+@keyframes gems-fade-out { 50% { opacity: 0; } }
+@keyframes gems-fade-in { 50% { opacity: 1; } }
 .gems-over .winner-banner { padding: 4px; }
 .gems-standings { display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: center; font-size: .9rem; }
 .gems-standings span { background: rgba(10,10,40,.45); border: 1px solid rgba(255,255,255,.1); padding: 4px 12px; border-radius: 20px; }
@@ -1432,8 +1647,11 @@ ${COLOR_VARS}
   box-shadow: 0 0 0 1px #2a1a05, 0 0 0 3px #d8a640, 0 0 0 4px #6a4510, 0 7px 14px rgba(0,0,0,.55); }
 .gems-noble::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; box-shadow: inset 0 0 0 1px rgba(255,240,200,.4), inset 0 0 16px rgba(0,0,0,.55); }
 .gems-portrait { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.gems-npts, .gems-pts { font-family: var(--font-display); font-weight: 800; line-height: 1; background: linear-gradient(180deg, #fffbe6 0%, #ffe08a 45%, #d39a2a 100%);
-  -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 1px 0 rgba(0,0,0,.95)) drop-shadow(0 0 2px rgba(0,0,0,.85)); }
+.gems-npts, .gems-pts { font-family: var(--font-display); font-weight: 800; line-height: 1;
+  color: transparent; text-shadow: 0 1px 0 rgba(0,0,0,.95), 0 0 4px rgba(0,0,0,.6), 0 1px 4px rgba(0,0,0,.6); }
+/* The gold number is drawn over its own shadow (text-shadow is far cheaper than a drop-shadow filter). */
+.gems-npts::after, .gems-pts::after { content: attr(data-t); position: absolute; inset: 0; text-shadow: none;
+  background: linear-gradient(180deg, #fffbe6 0%, #ffe08a 45%, #d39a2a 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .gems-npts { position: absolute; top: 4cqw; left: 7cqw; font-size: 26cqw; }
 .gems-nreq { position: absolute; left: 6cqw; bottom: 6cqw; display: flex; flex-direction: column; gap: 2.5cqw; }
 .gems-nb { position: relative; width: 18cqw; height: 21cqw; border-radius: 3cqw; display: grid; place-items: center;
@@ -1442,8 +1660,13 @@ ${COLOR_VARS}
 .gems-nb b { position: relative; font: 800 14cqw/1 var(--font-display); color: var(--pi); text-shadow: 0 0 2px var(--ps), 0 1px 1px var(--ps); }
 .gems-nname { font: 600 .7rem/1.15 var(--font-display); color: #e6e1ff; text-align: center; text-shadow: 0 1px 2px #000; max-width: 100%; }
 .gems-dim { filter: grayscale(.6) brightness(.7); }
-.gems-choose { box-shadow: 0 0 0 2px #fff3b0, 0 0 0 4px #e9b949, 0 0 18px 4px rgba(255,220,120,.6); animation: gems-lure 2.4s ease-in-out infinite; }
-@keyframes gems-lure { 50% { box-shadow: 0 0 0 2px #fff3b0, 0 0 0 4px #e9b949, 0 0 26px 7px rgba(255,220,120,.35); } }
+.gems-choose { box-shadow: 0 0 0 2px #fff3b0, 0 0 0 4px #e9b949; }
+/* The lure glow under a patron you may choose: two still glows that fade into each other. */
+.gems-nwrap { position: relative; }
+.gems-nglow { position: absolute; left: 0; top: 0; width: 100%; aspect-ratio: 1 / 1.06; border-radius: 9px; pointer-events: none; }
+.gems-nglow::before, .gems-nglow::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+.gems-nglow::before { box-shadow: 0 0 18px 4px rgba(255,220,120,.6); animation: gems-fade-out 2.4s ease-in-out infinite; }
+.gems-nglow::after { box-shadow: 0 0 26px 7px rgba(255,220,120,.35); opacity: 0; animation: gems-fade-in 2.4s ease-in-out infinite; }
 
 /* tiers & cards */
 .gems-tiers { display: grid; gap: 10px; align-content: start; }
@@ -1471,8 +1694,8 @@ ${COLOR_VARS}
 .gems-band { position: absolute; left: 0; right: 0; top: 0; height: 30cqw; z-index: 1; display: flex; align-items: center; justify-content: space-between; padding: 2cqw 8cqw 0 10cqw;
   background: linear-gradient(180deg, rgba(255,255,255,.38), rgba(255,255,255,0) 60%), var(--band);
   box-shadow: 0 1px 0 rgba(255,230,170,.55), 0 3px 6px rgba(0,0,0,.35); }
-.gems-pts { font-size: 25cqw; }
-.gems-bonus { width: 24cqw; height: 24cqw; filter: drop-shadow(0 .8cqw .8cqw rgba(0,0,0,.65)); }
+.gems-pts { position: relative; font-size: 25cqw; }
+.gems-bonus { width: 24cqw; height: 24cqw; }
 .gems-cost { position: absolute; left: 7cqw; bottom: 7cqw; z-index: 1; display: flex; flex-direction: column; gap: 2cqw; }
 .gems-pip { position: relative; width: 22cqw; height: 22cqw; border-radius: 50%; display: grid; place-items: center;
   background: radial-gradient(circle at 34% 30%, var(--p1), var(--p2) 58%, var(--p3)); box-shadow: 0 .8cqw 1.6cqw rgba(0,0,0,.7), inset 0 0 0 .8cqw rgba(255,255,255,.3); }
@@ -1510,11 +1733,18 @@ ${COLOR_VARS}
 .gems-pile { position: relative; cursor: pointer; padding: 3px 8px 2px; border-radius: 14px; touch-action: manipulation; -webkit-tap-highlight-color: transparent; transition: background .2s; }
 .gems-stack { position: relative; width: var(--chip); height: calc(var(--chip) + 15px); }
 .gems-layer, .gems-anchor, .gems-lift, .gems-ghostchip { position: absolute; left: 0; width: var(--chip); height: var(--chip); }
-.gems-layer { bottom: calc(var(--i) * 3px); filter: drop-shadow(0 2px 1.5px rgba(0,0,0,.5)); }
+.gems-layer { bottom: calc(var(--i) * 3px); z-index: 0; }
+/* Chip shadows: a box-shadow cast by the chip's outline (inset, then spread back out so the soft edge
+   matches a drop-shadow of the chip), drawn under the chip. */
+.gems-layer::before, .gems-ptok::before, .gems-tok::before, .gems-tch::before { content: ''; position: absolute; z-index: -1; border-radius: 999px; pointer-events: none;
+  left: calc(5% + var(--k)); top: calc(5% + var(--k)); width: calc(90% - 2 * var(--k)); height: calc(94.5% - 2 * var(--k)); }
+.gems-layer::before { --k: 3px; box-shadow: 0 2px 3.25px 3px rgba(0,0,0,.5); }
 .gems-chip { width: 100%; height: 100%; display: block; overflow: visible; }
 .gems-anchor { bottom: calc(var(--top) * 3px); pointer-events: none; }
-.gems-lift { bottom: calc(var(--top) * 3px + 16px + var(--j) * 9px); z-index: 2; animation: gems-bob 1.5s ease-in-out infinite; animation-delay: calc(var(--j) * -.45s);
-  filter: drop-shadow(0 0 3px #fff6c8) drop-shadow(0 0 9px rgba(255,204,70,.95)) drop-shadow(0 12px 7px rgba(0,0,0,.55)); }
+.gems-lift { bottom: calc(var(--top) * 3px + 16px + var(--j) * 9px); z-index: 2; animation: gems-bob 1.5s ease-in-out infinite; animation-delay: calc(var(--j) * -.45s); }
+/* The lifted chip's halo, glow and shadow are drawn once on a disc under it and bob along with it. */
+.gems-lift::after { content: ''; position: absolute; inset: -3px; border-radius: 50%; z-index: -1; background: rgb(220,201,147);
+  box-shadow: 0 0 10px 1px #fff6c8, 0 0 22px 2px rgba(255,204,70,.95), 0 12px 18px 8px rgba(0,0,0,.55); }
 .gems-lift::before { content: ''; position: absolute; inset: -3px; border-radius: 50%; border: 2px solid #ffe7a0; box-shadow: 0 0 10px rgba(255,214,90,.9), inset 0 0 8px rgba(255,214,90,.6); }
 .gems-lift.gems-lnew { animation: gems-pop .38s cubic-bezier(.3,1.4,.5,1), gems-bob 1.5s ease-in-out .38s infinite; }
 @keyframes gems-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
@@ -1540,19 +1770,21 @@ ${COLOR_VARS}
 .gems-trow { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; }
 .gems-tlabel { font: 800 .72rem/1 var(--font-display); letter-spacing: .08em; text-transform: uppercase; color: var(--gold); }
 .gems-tchips { display: flex; gap: 2px; }
-.gems-tchips .gems-chip { width: 34px; height: 34px; filter: drop-shadow(0 0 5px rgba(255,236,150,.8)); animation: gems-bob 1.5s ease-in-out infinite; }
+.gems-tch { position: relative; z-index: 0; width: 34px; height: 34px; animation: gems-bob 1.5s ease-in-out infinite; }
+.gems-tch::before { --k: 10px; box-shadow: 0 0 10px 10px rgba(255,236,150,.8); }
+.gems-tchips .gems-chip { width: 34px; height: 34px; }
 .gems-tname { font-weight: 800; }
 .gems-ttip { font-size: .78rem; color: #b9b3ee; }
 .gems-warn { color: #ffd2a0; font-weight: 800; font-size: .82rem; }
 .gems-tbtns { display: flex; gap: 8px; }
-.gems-tok { position: relative; width: 44px; height: 44px; cursor: pointer; }
-.gems-tok .gems-chip { filter: drop-shadow(0 2px 2px rgba(0,0,0,.5)); }
+.gems-tok { position: relative; z-index: 0; width: 44px; height: 44px; cursor: pointer; }
+.gems-tok::before { --k: 4px; box-shadow: 0 2px 4.34px 3.75px rgba(0,0,0,.5); }
 .gems-tok b { position: absolute; right: -5px; bottom: -3px; min-width: 19px; height: 19px; border-radius: 10px; background: #1a1846; border: 1px solid rgba(255,207,92,.75); font: 700 11px/17px var(--font-display); color: #fff3cf; }
-.gems-tok.gems-back .gems-chip { filter: drop-shadow(0 0 6px rgba(255,140,110,.9)); }
+.gems-tok.gems-back::before { --k: 12px; box-shadow: 0 0 13px 11.75px rgba(255,140,110,.9); }
 .gems-nbtn { font-family: var(--font-display); }
 
 /* players */
-.gems-pp { padding: 14px 13px 11px; transition: box-shadow .3s; overflow: hidden; }
+.gems-pp { padding: 14px 13px 11px; overflow: hidden; }
 .gems-pp::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--pc); opacity: .85; }
 .gems-pp.gems-turn { box-shadow: 0 0 0 2px var(--gold), 0 0 24px rgba(255,207,92,.35), var(--shadow); }
 .gems-pp.gems-scored { animation: gems-scored 1.2s ease-out .8s; }
@@ -1580,8 +1812,8 @@ ${COLOR_VARS}
 .gems-bcount b { font: 700 14px/1 var(--font-display); color: #ffe4a3; }
 .gems-bcount small { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
 .gems-pptoks { margin-top: 5px; }
-.gems-ptok { position: relative; width: 34px; height: 34px; }
-.gems-ptok .gems-chip { filter: drop-shadow(0 2px 2px rgba(0,0,0,.55)); }
+.gems-ptok { position: relative; z-index: 0; width: 34px; height: 34px; }
+.gems-ptok::before { --k: 4px; box-shadow: 0 2px 4.34px 4px rgba(0,0,0,.55); }
 .gems-ptok b { position: absolute; right: -7px; bottom: -3px; min-width: 18px; height: 18px; border-radius: 9px; background: #1a1846; border: 1px solid rgba(255,207,92,.75);
   font: 700 11px/16px var(--font-display); color: #fff3cf; text-align: center; }
 .gems-zero { opacity: .32; filter: grayscale(.7); }
@@ -1651,6 +1883,7 @@ export default {
   description: 'Trade sparkling gems, buy mines, caravans and palaces that pay you forever, and court royal patrons. First to 15 prestige ends the round.',
   minPlayers: 2,
   maxPlayers: 4,
+  options: [levelOption()],
   cover: coverSVG(),
   howTo: {
     goal: 'Earn <b>15 prestige</b> by buying gem cards and winning patrons. When someone reaches 15, the round is finished so everyone has had the same number of turns; most prestige wins.',

@@ -60,7 +60,33 @@ The countdown pill in the header is drawn by the platform.
 ### Performance
 Endless CSS loops (`animation: … infinite`) are paused automatically after 8 seconds without a touch, and
 resumed on the next tap, to keep phones cool. Never rely on an endless animation for something essential.
-Avoid animating `filter`, `box-shadow` or `backdrop-filter` on large areas.
+
+On a mid-range phone, nearly all of a move's time goes to the browser restyling and repainting the board,
+not to your code. So:
+- **Redraw only what changed.** Write the board with `morph(el, html)` from `js/fx.js` instead of
+  `el.innerHTML = html`. It gives the same result but keeps every node that is already right. The platform
+  keeps `#gamebox` while the same game is on screen. Put `data-k` on repeated pieces so they're matched even
+  when they move. Bind handlers as properties (`el.onclick = …`) or on `el` once; `addEventListener` on kept
+  children piles up with every render. Three things change once nodes are kept:
+  - `<details>` toggle events don't bubble: set `details.ontoggle = …` after each render.
+  - A one-shot animation on a kept node doesn't replay when its class is set again. To replay a flash on
+    the next update, alternate between two identical keyframe names (`pop` / `pop2`).
+  - CSS `transition`s on a kept node now run where a rebuilt node used to snap. Keep the ones you want,
+    and remove the rest, especially on `box-shadow` or `filter`, which repaint every frame.
+- **Paint cheaply, look the same.** Live `filter: drop-shadow()`/`blur()`, SVG `<feGaussianBlur>` and
+  animated `box-shadow` are the costliest things to paint, especially on many pieces. Get the same look with
+  shapes and gradients (a soft radial-gradient ellipse instead of a blurred one), `box-shadow` on a still
+  container, or a glow drawn once on a pseudo-element whose `opacity` (or `transform`) is what animates.
+- Check the look didn't change: `node tools/pixel-compare.mjs shoot <committedCopy> before`, the same for
+  your copy, then `diff before after report` (see the file's header).
+
+### Computer levels (required for new games)
+Add `levelOption()` (or `teammateOption()` in co-op games) from `js/levels.js` to `options`. Store
+`s.level = levelOf(opts)` in `setup`, show `level` in every view, and read `v.level` in `bot`:
+`normal` plays exactly as your current bot, `easy` is clearly weaker (more random, shorter-sighted), and
+`hard` is clearly stronger (looks further ahead, plans). `node tools/levels-test.mjs` checks that Hard beats
+Easy head-to-head (or, for games using `teammateOption()`, that Expert teammates do better than Learning
+ones); `node tools/levels-test.mjs 40 <gameId>` checks just your game.
 
 ### Rules for state
 - **Plain JSON only**: no Sets, Maps, class instances, functions or `undefined` holes. It is cloned and sent over the network.

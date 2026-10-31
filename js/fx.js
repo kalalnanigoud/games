@@ -308,3 +308,75 @@ export function injectCSS(id, css) {
   s.textContent = css;
   document.head.appendChild(s);
 }
+
+/* ---------- redraw only what changed ---------- */
+// morph(el, html) leaves el looking exactly as if el.innerHTML = html, but keeps every node that is
+// already right, so the browser restyles, lays out and repaints only the parts that changed.
+// Elements are matched by data-k (or id) first, then in order by tag. A field that has focus keeps
+// what is being typed. Event handlers set as properties (el.onclick = …) survive; listeners added
+// with addEventListener on kept children would pile up, so bind those on el or as properties.
+const keyOf = (n) => (n.nodeType === 1 ? n.getAttribute('data-k') || n.id || null : null);
+const sameKind = (a, b) => a.nodeType === b.nodeType && (a.nodeType !== 1 || (a.localName === b.localName && a.namespaceURI === b.namespaceURI && keyOf(a) === keyOf(b)));
+
+function morphNode(a, b) {
+  if (a.nodeType !== 1) { if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue; return; }
+  if (a.isEqualNode(b)) return;
+  for (const { name } of [...a.attributes]) if (!b.hasAttribute(name)) a.removeAttribute(name);
+  for (const { name, value } of [...b.attributes]) if (a.getAttribute(name) !== value) a.setAttribute(name, value);
+  const tag = a.localName;
+  if (tag === 'input' || tag === 'textarea') {
+    // Attributes describe the starting state; the live value is a property. Leave a field being typed in alone.
+    if (document.activeElement !== a) {
+      if (tag === 'textarea') a.value = b.textContent;
+      else if (a.type === 'checkbox' || a.type === 'radio') a.checked = b.hasAttribute('checked');
+      else a.value = b.getAttribute('value') ?? '';
+    }
+    if (tag === 'textarea') return;
+  }
+  morphChildren(a, b);
+  if (tag === 'select' && document.activeElement !== a) {
+    const chosen = [...a.options].findIndex((o) => o.hasAttribute('selected'));
+    if (chosen >= 0) a.selectedIndex = chosen;
+  }
+}
+
+function morphChildren(parent, next) {
+  const keyed = new Map();
+  for (const n of parent.childNodes) { const k = keyOf(n); if (k && !keyed.has(k)) keyed.set(k, n); }
+  const used = new Set();
+  let cursor = parent.firstChild;
+  for (const nn of [...next.childNodes]) {
+    const k = keyOf(nn);
+    let match = null;
+    if (k) {
+      const c = keyed.get(k);
+      if (c && !used.has(c) && sameKind(c, nn)) match = c;
+    } else {
+      let c = cursor;
+      while (c && (used.has(c) || keyOf(c))) c = c.nextSibling;
+      if (c && sameKind(c, nn)) match = c;
+    }
+    if (match) {
+      used.add(match);
+      morphNode(match, nn);
+      if (match === cursor) cursor = cursor.nextSibling;
+      else parent.insertBefore(match, cursor);
+    } else {
+      parent.insertBefore(nn, cursor);
+      used.add(nn);
+    }
+  }
+  for (const n of [...parent.childNodes]) if (!used.has(n)) n.remove();
+}
+
+export function morph(el, html) {
+  const tpl = document.createElement('template');
+  // Content for an SVG element is parsed as SVG, so drawn shapes keep their namespace.
+  if (el instanceof SVGElement && !(el instanceof SVGForeignObjectElement)) {
+    tpl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg">${html}</svg>`;
+    morphChildren(el, tpl.content.firstChild);
+  } else {
+    tpl.innerHTML = html;
+    morphChildren(el, tpl.content);
+  }
+}

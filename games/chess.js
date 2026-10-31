@@ -5,7 +5,7 @@
 // toggles a Stockfish evaluation bar and best-move arrows on this device only. The engine runs in
 // this browser; nothing about it is stored in the game state or sent to anyone else.
 import { esc, log, addFx, rand } from '../js/util.js';
-import { injectCSS } from '../js/fx.js';
+import { injectCSS, morph } from '../js/fx.js';
 import { sound } from '../js/sound.js';
 import { icon } from '../js/icons.js';
 import { portrait } from '../js/avatar.js';
@@ -575,6 +575,10 @@ function tickClocks() {
   }
 }
 if (browser) setInterval(tickClocks, 200);
+function clockHTML(color) {
+  const ms = remaining(color), run = !CLK.over && !!CLK.c?.since && CLK.turn === color;
+  return `<span class="chess-clock${run ? ' run' : ''}${run && ms < 20000 ? ' low' : ''}" data-c="${color}" data-k="clock-${color}${run ? '-run' : ''}" data-noenter>${clockText(ms)}</span>`;
+}
 
 // The move list folds away on phones so the board gets the screen; it stays as the player left it.
 let movesOpen = typeof matchMedia === 'function' ? matchMedia('(min-width: 901px)').matches : true;
@@ -613,12 +617,15 @@ function render(el, v, ctx) {
   const lift = UI.tap;
   UI.tap = null;
 
+  const pieces = [];
   const squares = order.map((i, k) => {
     const p = v.board[i], dark = ((i >> 3) + (i & 7)) % 2 === 1, t = targets.find((m) => m.to === i);
+    const held = p !== '.' && UI.sel === i;
+    if (p !== '.' && !held) pieces.push(`<div class="chess-pc" data-k="pc-${v.ids[i]}" data-at="${i}" style="grid-area:${(k >> 3) + 1}/${(k & 7) + 1}/${(k >> 3) + 2}/${(k & 7) + 2}">${pieceSVG(p)}</div>`);
     const cls = ['chess-sq', dark ? 'dark' : 'light', v.last && (v.last.from === i || v.last.to === i) ? 'last' : '', UI.sel === i ? 'sel' : '', t ? (p !== '.' || t.flag === 'ep' ? 'cap' : 'dot') : '', i === checkSq ? 'check' : '',
       myTurn && colorOf(p) === v.turn && moves.some((m) => m.from === i) ? 'mine' : ''].filter(Boolean).join(' ');
     const label = `${sqName(i)}${p !== '.' ? ', ' + (colorOf(p) === 'w' ? 'white ' : 'black ') + NAMES[p.toLowerCase()] : ''}`;
-    return `<div class="${cls}" data-sq="${i}" role="button" aria-label="${label}">${k % 8 === 0 ? `<span class="chess-rank">${8 - (i >> 3)}</span>` : ''}${k >= 56 ? `<span class="chess-file">${FILES[i & 7]}</span>` : ''}${i === landed ? '<i class="chess-land" aria-hidden="true"></i>' : ''}${p !== '.' ? `<div class="chess-pc${i === lift ? ' lift' : ''}" data-k="pc-${v.ids[i]}">${pieceSVG(p)}</div>` : ''}</div>`;
+    return `<div class="${cls}" data-sq="${i}" role="button" aria-label="${label}">${k % 8 === 0 ? `<span class="chess-rank">${8 - (i >> 3)}</span>` : ''}${k >= 56 ? `<span class="chess-file">${FILES[i & 7]}</span>` : ''}${i === landed ? `<i class="chess-land" data-k="land-${v.sans.length}" data-noenter aria-hidden="true"></i>` : ''}${held ? `<div class="chess-pc${i === lift ? ' lift' : ''}" data-k="pc-${v.ids[i]}">${pieceSVG(p)}</div>` : ''}</div>`;
   }).join('');
 
   // Player bars: the lobby portrait ringed in the side's colour, with a little king badge.
@@ -627,7 +634,7 @@ function render(el, v, ctx) {
     const active = !v.over && v.turn === p.color;
     return `<div class="pchip chess-chip ${p.color} ${active ? 'turn' : ''}"><span class="chess-face">${portrait({ id: p.id, bot: !!ctx.isBot?.(p.id) })}<span class="chess-dot ${p.color}" title="${p.color === 'w' ? 'White' : 'Black'}">${pieceSVG(p.color === 'w' ? 'K' : 'k')}</span></span>
       <span class="chess-who"><b>${esc(p.name)}</b>${p.id === ctx.me ? '<span class="tag t-you">You</span>' : ''}</span>
-      <span class="chess-taken">${taken.slice().sort((a, b) => VAL[b] - VAL[a]).map((t) => `<i>${pieceSVG(p.color === 'w' ? t : t.toUpperCase())}</i>`).join('')}${diff > 0 ? `<small>+${Math.round(diff / 100)}</small>` : ''}</span>${v.clock ? `<span class="chess-clock" data-c="${p.color}">${clockText(remaining(p.color))}</span>` : ''}</div>`;
+      <span class="chess-taken">${taken.slice().sort((a, b) => VAL[b] - VAL[a]).map((t) => `<i>${pieceSVG(p.color === 'w' ? t : t.toUpperCase())}</i>`).join('')}${diff > 0 ? `<small>+${Math.round(diff / 100)}</small>` : ''}</span>${v.clock ? clockHTML(p.color) : ''}</div>`;
   };
   const status = v.over ? `${esc(v.reason)} (${v.result})`
     : myTurn ? (checkSq >= 0 ? 'Check! Your move' : 'Your move') + ` · ${v.turn === 'w' ? 'White' : 'Black'}`
@@ -640,13 +647,14 @@ function render(el, v, ctx) {
   const offerFromThem = v.drawOffer && v.drawOffer !== ctx.me;
   const banner = v.winners.length ? `${icon('trophy')} ${v.winners.includes(ctx.me) ? 'You win!' : esc(v.players.find((p) => p.id === v.winners[0]).name) + ' wins'}` : `${DRAW_IC} Draw`;
 
-  el.innerHTML = `${DEFS}<div class="chess-root"><div class="game-layout">
+  // Redraw only what changed: kept squares and pieces aren't restyled or repainted.
+  morph(el, `${DEFS}<div class="chess-root"><div class="game-layout">
     <div class="chess-main felt chess-felt">
       ${v.over ? `<div class="winner-banner">${banner}</div>` : ''}
       ${chip(opp)}
       <div class="chess-boardrow">
         ${A.on ? '<div class="chess-eval" aria-hidden="true"><i></i><b>…</b></div>' : ''}
-        <div class="chess-frame"><div class="chess-board">${squares}<svg class="chess-arrows" viewBox="0 0 800 800" aria-hidden="true"></svg></div></div>
+        <div class="chess-frame"><div class="chess-board">${squares}<div class="chess-pcs">${pieces.join('')}</div><svg class="chess-arrows" viewBox="0 0 800 800" aria-hidden="true"></svg></div></div>
       </div>
       ${chip(mine)}
       <div class="status ${myTurn ? 'myturn' : ''} chess-status">${status}</div>
@@ -662,7 +670,7 @@ function render(el, v, ctx) {
           <div class="log chess-log">${v.log.slice(0, 6).map((l) => `<div>${esc(l)}</div>`).join('')}</div></div></details>
     </div>
   </div>
-  ${UI.promo ? `<div class="modal-bg"><div class="modal panel chess-promo"><h3>Promote to</h3><div class="row">${'qrbn'.split('').map((q) => `<button data-promo="${q}" aria-label="${NAMES[q]}">${pieceSVG(myColor === 'w' ? q.toUpperCase() : q)}</button>`).join('')}</div><button class="small ghost" data-promo="">${icon('close')}Cancel</button></div></div>` : ''}</div>`;
+  ${UI.promo ? `<div class="modal-bg"><div class="modal panel chess-promo"><h3>Promote to</h3><div class="row">${'qrbn'.split('').map((q) => `<button data-promo="${q}" aria-label="${NAMES[q]}">${pieceSVG(myColor === 'w' ? q.toUpperCase() : q)}</button>`).join('')}</div><button class="small ghost" data-promo="">${icon('close')}Cancel</button></div></div>` : ''}</div>`);
 
   el.querySelectorAll('[data-sq]').forEach((d) => (d.onclick = () => {
     if (!myTurn) return;
@@ -692,8 +700,9 @@ function render(el, v, ctx) {
     A.taps = A.taps.filter((t) => now - t < 900).concat(now);
     if (A.taps.length >= 3) { A.taps = []; e.preventDefault(); toggleSight(redraw); }
   };
-  // <details> toggle events don't bubble, so listen on the drawer itself after it is drawn.
-  el.querySelector('.chess-movesbox')?.addEventListener('toggle', (e) => { movesOpen = e.currentTarget.open; });
+  // <details> toggle events don't bubble; a property (not a listener) since the drawer is kept between draws.
+  const movesBox = el.querySelector('.chess-movesbox');
+  if (movesBox) movesBox.ontoggle = (e) => { movesOpen = e.currentTarget.open; };
   tickClocks();
   if (A.on) { if (!v.over) analyse(fen(P), P); paint(); }
 }
@@ -710,7 +719,7 @@ const STYLE = `
 .chess-main>.winner-banner{padding:4px}
 .chess-main>.winner-banner .ic{width:1em;height:1em;vertical-align:-.12em}
 /* player bars */
-.chess-chip{min-height:52px;gap:10px;padding:7px 8px;background:rgba(8,14,38,.5);border-color:rgba(160,190,255,.14)}
+.chess-chip{min-height:52px;gap:10px;padding:7px 8px;background:rgba(8,14,38,.5);border-color:rgba(160,190,255,.14);transition:none}
 .chess-chip.turn{border-color:rgba(255,207,92,.6);box-shadow:0 0 0 2px var(--gold),0 0 18px rgba(255,207,92,.28)}
 .chess-face{position:relative;width:34px;height:34px;flex:none;border-radius:50%}
 .chess-face .portrait{width:100%;height:100%;display:block;border-radius:50%}
@@ -746,12 +755,16 @@ const STYLE = `
 @keyframes chess-breathe{50%{opacity:.5}}
 /* pieces: the one you pick up lifts off the board; pressing dips it */
 .chess-pc{position:absolute;inset:5%;z-index:2;pointer-events:none;transition:translate .2s var(--ease),scale .2s var(--ease)}
-.chess-pc svg{width:100%;height:100%;display:block;filter:drop-shadow(0 3px 2px rgba(0,0,0,.45))}
+.chess-pc svg{width:100%;height:100%;display:block}
+/* resting pieces sit in one layer over the board that casts all their shadows in a single pass */
+.chess-pcs{position:absolute;inset:0;z-index:2;display:grid;grid-template-columns:repeat(8,1fr);grid-template-rows:repeat(8,1fr);pointer-events:none;filter:drop-shadow(0 3px 2px rgba(0,0,0,.45))}
+.chess-sq .chess-pc svg{filter:drop-shadow(0 3px 2px rgba(0,0,0,.45))}
 .chess-sq.sel .chess-pc{translate:0 -8%;scale:1.1;z-index:5}
 .chess-sq.sel .chess-pc svg{filter:drop-shadow(0 9px 6px rgba(0,0,0,.4))}
 .chess-pc.lift{animation:chess-lift .26s var(--spring)}
 @keyframes chess-lift{from{translate:0 0;scale:1}}
 .chess-sq.mine:active .chess-pc{scale:.94}
+${Array.from({ length: 64 }, (_, i) => `.chess-sq.mine[data-sq="${i}"]:active~.chess-pcs>[data-at="${i}"]`).join(',')}{scale:.94}
 .chess-sq.sel:active .chess-pc{scale:1.04}
 /* where the latest move landed: one soft pulse */
 .chess-land{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:0;background:radial-gradient(circle,rgba(255,240,180,.95) 0%,rgba(255,214,90,.55) 42%,transparent 70%);animation:chess-land .8s var(--ease) .4s}

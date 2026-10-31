@@ -19,7 +19,12 @@ const loading = new Map();
 export function loadGame(id) {
   if (loaded.has(id)) return Promise.resolve(loaded.get(id));
   if (!loaders[id]) return Promise.reject(Error('Unknown game: ' + id));
-  if (!loading.has(id)) loading.set(id, loaders[id]().then((m) => { loaded.set(id, m.default); loading.delete(id); return m.default; }, (e) => { loading.delete(id); throw e; }));
+  if (!loading.has(id)) loading.set(id, loaders[id]().then((m) => {
+    // Keep showing the catalog's pre-rendered cover image rather than the module's live illustration.
+    const entry = CATALOG.find((g) => g.id === id);
+    if (entry?.cover) m.default.cover = entry.cover;
+    loaded.set(id, m.default); loading.delete(id); return m.default;
+  }, (e) => { loading.delete(id); throw e; }));
   return loading.get(id);
 }
 

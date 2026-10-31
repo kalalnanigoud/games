@@ -1,7 +1,8 @@
 ﻿// Court of Whispers — a hidden-role bluffing game of renaissance palace intrigue.
 // Claim any role, call out liars, and be the last courtier with influence.
 import { esc, rand, shuffle, log, addFx, PLAYER_COLORS } from '../js/util.js';
-import { injectCSS } from '../js/fx.js';
+import { injectCSS, morph } from '../js/fx.js';
+import { levelOption, levelOf } from '../js/levels.js';
 import { sound } from '../js/sound.js';
 import { icon as uiIcon } from '../js/icons.js';
 import { portrait } from '../js/avatar.js';
@@ -372,7 +373,14 @@ function combos(arr, k, start = 0, cur = [], out = []) {
   return out;
 }
 
+// Computer levels: Normal is the courtier below; Easy and Hard follow it.
 function bot(v, pid) {
+  if (v.level === 'easy') return botEasy(v, pid);
+  if (v.level === 'hard') return botHard(v, pid);
+  return botNormal(v, pid);
+}
+
+function botNormal(v, pid) {
   const me = P(v, pid);
   if (!me) return { type: 'allow' };
   const mine = hidden(me).map((c) => c.role);
@@ -529,6 +537,209 @@ function bot(v, pid) {
   return act('income');
 }
 
+// Easy: a careless courtier. Picks actions on a whim (so it bluffs without a thought), challenges and
+// blocks at random, strikes whoever comes to mind, and gives up or keeps cards at random.
+function botEasy(v, pid) {
+  const me = P(v, pid);
+  if (!me) return { type: 'allow' };
+  const rnd = Math.random;
+  const pick = (arr) => arr[Math.floor(rnd() * arr.length)];
+  const mine = hidden(me).map((c) => c.role);
+  const pd = v.pending;
+  const opp = alive(v).filter((p) => p.id !== pid);
+  const pass = { type: 'allow' };
+  if (v.phase === 'lose') return { type: 'lose', card: pick(hidden(me)).k };
+  if (v.phase === 'exchange') {
+    const h = hidden(me);
+    const pool = [...h, ...((v.exchange && v.exchange.drawn) || [])].map((c) => [rnd(), c.k]).sort((a, b) => a[0] - b[0]);
+    return { type: 'exchange', keep: pool.slice(0, h.length).map((x) => x[1]) };
+  }
+  if (v.phase === 'challenge' || v.phase === 'blockChallenge') return rnd() < 0.12 ? { type: 'challenge' } : pass;
+  if (v.phase === 'block') {
+    const def = A[pd.action];
+    if (def.by === 'target' && pd.target !== pid) return pass;
+    const real = def.blockers.find((r) => mine.includes(r));
+    if (real && rnd() < 0.6) return { type: 'block', role: real };
+    return rnd() < 0.12 ? { type: 'block', role: pick(def.blockers) } : pass;
+  }
+  if (v.phase !== 'action') return pass;
+  const act = (action, t) => (t ? { type: 'act', action, target: t.id } : { type: 'act', action });
+  if (me.coins >= 10 || (me.coins >= 7 && rnd() < 0.5)) return act('coup', pick(opp));
+  const rich = opp.filter((p) => p.coins >= 1);
+  const options = ['income', 'aid', 'aid', 'levy', 'exchange'];
+  if (me.coins >= 3) options.push('assassinate');
+  if (rich.length) options.push('plunder');
+  const a = pick(options);
+  if (a === 'assassinate') return act(a, pick(opp));
+  if (a === 'plunder') return act(a, pick(rich));
+  return act(a);
+}
+
+// Hard: a careful schemer. Counts every revealed card and its own hand, reads the public chronicle for
+// who has been caught lying, challenges claims that are unlikely given what it can see (weighing what is
+// at stake), bluffs only roles that could plausibly be in its hand, and aims at whoever leads the court.
+function botHard(v, pid) {
+  const me = P(v, pid);
+  if (!me) return { type: 'allow' };
+  const rnd = Math.random;
+  const mineC = hidden(me);
+  const mine = mineC.map((c) => c.role);
+  const has = (r) => mine.includes(r);
+  const shown = (r) => v.players.reduce((n, p) => n + p.cards.filter((c) => c.up && c.role === r).length, 0);
+  const unacc = (r) => 3 - shown(r) - mine.filter((x) => x === r).length;
+  const pd = v.pending;
+  const al = alive(v);
+  const opp = al.filter((p) => p.id !== pid);
+  const n = al.length;
+  const challenge = { type: 'challenge' }, pass = { type: 'allow' };
+  const unseen = (v.deckCount || 0) + v.players.reduce((a, p) => a + (p.id === pid ? 0 : hidden(p).length), 0);
+  // Chance that p holds at least one of the copies of r we can't account for.
+  const pHolds = (p, r) => {
+    const u = unacc(r);
+    if (u <= 0) return 0;
+    let none = 1;
+    for (let i = 0; i < hidden(p).length; i++) none *= Math.max(0, unseen - u - i) / Math.max(1, unseen - i);
+    return 1 - none;
+  };
+  // How readily p claims a role they don't hold (relative to one they do), from the chronicle:
+  // caught bluffs raise it, proven claims lower it, and more claimed roles than cards betray a liar.
+  const bluffiness = (p, base) => {
+    let caught = 0, proved = 0;
+    for (const line of v.log || []) {
+      if (line.startsWith(p.name + ' was bluffing')) caught++;
+      else if (line.startsWith(p.name + ' reveals the ')) proved++;
+    }
+    const open = new Set(p.claims.filter((r) => !p.cards.some((c) => c.up && c.role === r)));
+    const extra = Math.max(0, open.size - hidden(p).length) * 0.1;
+    return Math.min(1.5, (base * 3 + caught * 1.2) / (3 + caught + proved) + extra);
+  };
+  // Typical bluffing, before the chronicle says more: claims that cost the liar little are bluffed more.
+  const BLUFF_BASE = { levy: 0.22, assassinate: 0.15, plunder: 0.12, exchange: 0.08 };
+  const KEPT = { chancellor: 0.45, shadow: 0.6, duchess: 0.75, corsair: 0.9, envoy: 1 };
+  const keepValue = (roles) => handValue(roles, me.coins, n) + roles.filter((r) => me.claims.includes(r)).length * 0.3;
+
+  if (v.phase === 'lose') {
+    let best = mineC[0], bestV = -Infinity;
+    for (const c of mineC) {
+      const val = keepValue(mineC.filter((x) => x !== c).map((x) => x.role));
+      if (val > bestV) { bestV = val; best = c; }
+    }
+    return { type: 'lose', card: best.k };
+  }
+
+  if (v.phase === 'exchange') {
+    const pool = [...mineC, ...((v.exchange && v.exchange.drawn) || [])];
+    let best = mineC, bestV = -Infinity;
+    for (const c of combos(pool, mineC.length)) {
+      const val = keepValue(c.map((x) => x.role));
+      if (val > bestV) { bestV = val; best = c; }
+    }
+    return { type: 'exchange', keep: best.map((c) => c.k) };
+  }
+
+  if (v.phase === 'challenge' || v.phase === 'blockChallenge') {
+    const isBlock = v.phase === 'blockChallenge';
+    const role = isBlock ? pd.blockRole : pd.claim;
+    const claimant = P(v, isBlock ? pd.blocker : pd.actor);
+    if (unacc(role) <= 0) return challenge; // every copy is accounted for: a sure bluff
+    const pH = pHolds(claimant, role);
+    const base = !isBlock ? BLUFF_BASE[pd.action] ?? 0.15 : pd.action === 'assassinate' ? (hidden(claimant).length === 1 ? 0.7 : 0.25) : pd.action === 'aid' ? 0.2 : 0.3;
+    // A courtier who already gave up a card chose what to keep, and strong roles are kept.
+    const kept = hidden(claimant).length < claimant.cards.length ? KEPT[role] : 1;
+    const b = bluffiness(claimant, base) * kept;
+    const post = ((1 - pH) * b) / ((1 - pH) * b + pH);
+    const mineN = mine.length;
+    let need = 0.5;
+    if (mineN === 1) need += 0.15; // a wrong challenge would banish us
+    if (hidden(claimant).length === 1) need -= 0.1; // a right one banishes them
+    if (!isBlock) {
+      if (pd.action === 'assassinate' && pd.target === pid) {
+        if (has('duchess')) need = mineN === 1 ? 2 : 0.9; // the Duchess blocks it safely
+        else if (mineN === 1) need = 0.62; // otherwise a Duchess bluff is the way out
+      }
+      if (pd.action === 'levy') need -= claimant.coins >= 4 ? 0.08 : 0.03;
+      if (pd.action === 'plunder' && pd.target === pid && !has('corsair') && !has('envoy')) need -= 0.05;
+      if (pd.action === 'exchange') need += 0.15;
+    } else if (pd.actor === pid) {
+      need -= pd.action === 'assassinate' ? 0.1 : 0.03; // our own move is at stake
+    }
+    if (n > 2 && pd.target !== pid && pd.actor !== pid) need += 0.12; // let the others take the risk
+    return post > need ? challenge : pass;
+  }
+
+  if (v.phase === 'block') {
+    const def = A[pd.action];
+    if (def.by === 'target' && pd.target !== pid) return pass;
+    const real = def.blockers.find(has);
+    if (real) return { type: 'block', role: real };
+    const actor = P(v, pd.actor);
+    if (pd.action === 'aid') {
+      if (mine.length === 2 && unacc('chancellor') >= 2 && (n === 2 || actor.coins >= 5) && rnd() < 0.25) return { type: 'block', role: 'chancellor' };
+      return pass;
+    }
+    if (pd.action === 'assassinate') {
+      if (mine.length === 1) return { type: 'block', role: 'duchess' }; // nothing left to lose
+      const u = unacc('duchess');
+      if (rnd() < (u >= 2 ? 0.7 : u === 1 ? 0.35 : 0)) return { type: 'block', role: 'duchess' };
+      return pass;
+    }
+    if (pd.action === 'plunder') {
+      const opts = ['corsair', 'envoy'].filter((r) => unacc(r) >= 2).sort((a, b) => unacc(b) - unacc(a));
+      if (opts.length && mine.length === 2 && rnd() < (me.coins >= 4 ? 0.45 : 0.3)) return { type: 'block', role: opts[0] };
+      return pass;
+    }
+    return pass;
+  }
+
+  if (v.phase !== 'action') return pass;
+
+  // ---- choose an action ----
+  const coins = me.coins;
+  const act = (action, target) => (target ? { type: 'act', action, target: target.id } : { type: 'act', action });
+  const threat = (p) => hidden(p).length * 3 + p.coins * 0.6 + (p.claims.includes('shadow') ? 1 : 0) + (p.claims.includes('chancellor') ? 0.6 : 0) + rnd() * 0.1;
+  const ranked = opp.map((p) => ({ p, t: threat(p) })).sort((a, b) => b.t - a.t).map((x) => x.p);
+  if (coins >= 7) return act('coup', ranked[0]);
+  const strikeTarget = () => ranked
+    .map((p) => ({ p, w: threat(p) - (p.claims.includes('duchess') ? 4 : 0) - pHolds(p, 'duchess') * 3 + (hidden(p).length === 1 ? 2 : 0) }))
+    .sort((a, b) => b.w - a.w)[0].p;
+  // Don't spend a turn on a move a rival has shown they can block (their claim could be true): two
+  // careful courtiers would otherwise plunder each other, and block, for ever.
+  const claimsBlock = (p, roles) => roles.some((r) => p.claims.includes(r) && unacc(r) > 0);
+  const plunderTarget = (min) => opp
+    .filter((p) => p.coins >= min && !claimsBlock(p, ['corsair', 'envoy']))
+    .map((p) => ({ p, w: Math.min(2, p.coins) * 2 + threat(p) * 0.3 }))
+    .sort((a, b) => b.w - a.w)[0]?.p;
+
+  if (has('shadow') && coins >= 3) {
+    const t = strikeTarget();
+    if (!claimsBlock(t, ['duchess'])) return act('assassinate', t); // otherwise save up for a Coup
+  }
+  if (has('chancellor')) return act('levy');
+  if (has('corsair')) {
+    const t = plunderTarget(2);
+    if (t) return act('plunder', t);
+  }
+  // Bluff a role that could well be in hand, more boldly with few rivals to call it.
+  const nerve = ([0, 0, 0.6, 0.45, 0.35, 0.28, 0.22][n] ?? 0.2) * (mine.length === 1 ? 0.5 : 1);
+  const plausible = (r) => unacc(r) >= 2 || (me.claims.includes(r) && unacc(r) >= 1);
+  if (coins >= 3 && plausible('shadow')) {
+    const t = strikeTarget();
+    if (hidden(t).length === 1 && !t.claims.includes('duchess') && rnd() < nerve) return act('assassinate', t);
+  }
+  if (plausible('chancellor') && rnd() < nerve) return act('levy');
+  if (plausible('corsair')) {
+    const t = plunderTarget(2);
+    if (t && rnd() < nerve * 0.6) return act('plunder', t);
+  }
+  if (has('envoy') && handValue(mine, coins, n) < 4.2 * mine.length) return act('exchange');
+  if (has('corsair')) {
+    const t = plunderTarget(1);
+    if (t) return act('plunder', t);
+  }
+  const chClaims = opp.some((p) => p.claims.includes('chancellor'));
+  return act(unacc('chancellor') <= 0 || !chClaims ? 'aid' : 'income');
+}
+
 /* ============================================================
    Art: shared SVG defs, role portraits, card faces and backs
    ============================================================ */
@@ -575,6 +786,7 @@ const ICON = {
   scroll: '<path d="M6 3h11a3 3 0 0 1 3 3v1h-3v12a2 2 0 0 1-2 2H5a3 3 0 0 1-3-3v-1h3V5a2 2 0 0 1 1-2Z"/><path d="M8 7h7M8 10.5h7M8 14h5" stroke="rgba(0,0,0,.45)" stroke-width="1.3" fill="none"/>',
 };
 const icon = (k, cls = '') => `<svg class="bluff-ic ${cls}" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">${ICON[k]}</svg>`;
+const shadedIcon = (k) => icon(k, 'sh') + icon(k); // with its shadow (see .bluff-ic.sh)
 
 const BG = {
   chancellor: ['#a476e0', '#5a2f94', '#1f0c38'], shadow: ['#646a7c', '#262a33', '#060609'], corsair: ['#5aa0e0', '#1f5590', '#081a36'],
@@ -991,6 +1203,7 @@ const COVER = coverSVG();
    ============================================================ */
 const DAMASK = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='72' height='72'%3E%3Cg fill='none' stroke='%23f2c14e' stroke-width='1.1'%3E%3Cpath d='M36 6C44 16 44 24 36 31C28 24 28 16 36 6Z'/%3E%3Cpath d='M36 31C48 31 54 41 50 50C44 46 40 40 36 31ZM36 31C24 31 18 41 22 50C28 46 32 40 36 31Z'/%3E%3Ccircle cx='36' cy='57' r='3'/%3E%3Cpath d='M0 36C6 32 10 32 14 36C10 40 6 40 0 36ZM58 36C62 32 66 32 72 36C66 40 62 40 58 36Z'/%3E%3C/g%3E%3C/svg%3E\")";
 const CROWN_URI = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='%23825010'%3E%3Cpath d='M3 18.5 4.6 7.5l4.6 4.6L12 4l2.8 8.1 4.6-4.6L21 18.5Z'/%3E%3Crect x='3.5' y='19.2' width='17' height='2.6'/%3E%3C/g%3E%3C/svg%3E\")";
+const CROWN_LIT = CROWN_URI.replace("fill='%23825010'", "fill='%23fff0be' fill-opacity='.75'");
 const INK = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='i'%3E%3CfeTurbulence baseFrequency='.8' numOctaves='2' seed='3'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -2.4 2.05'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23i)'/%3E%3C/svg%3E\")";
 
 const STYLE = `
@@ -1026,10 +1239,13 @@ const STYLE = `
 
 /* ---- cards ---- */
 .bluff-card { position: relative; width: var(--cw, 60px); aspect-ratio: 5 / 7; flex: none; perspective: 900px; transition: translate .25s var(--ease), scale .25s var(--ease); }
+/* the tapped card springs with its own animation (a transition would override it); a card that changes
+   state on a redraw snaps (see snapCards) */
+.bluff-card.tapped, .bluff-card.snap { transition: none; }
 .bluff-card-in { position: absolute; inset: 0; transform-style: preserve-3d; }
 .bluff-card.down .bluff-card-in { transform: rotateY(180deg); }
 .bluff-face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 7% / 5%; overflow: hidden;
-  box-shadow: 0 calc(var(--cw, 60px) * .05) calc(var(--cw, 60px) * .12) rgba(0,0,0,.55), 0 1px 2px rgba(0,0,0,.6); transition: box-shadow .25s; }
+  box-shadow: 0 calc(var(--cw, 60px) * .05) calc(var(--cw, 60px) * .12) rgba(0,0,0,.55), 0 1px 2px rgba(0,0,0,.6); }
 .bluff-face.back { transform: rotateY(180deg); }
 .bluff-face > svg { width: 100%; height: 100%; display: block; }
 .bluff-card.flipin .bluff-card-in { animation: bluff-flip .85s var(--fd, 0ms) cubic-bezier(.3,.7,.3,1.1) both; }
@@ -1082,7 +1298,7 @@ const STYLE = `
 .bluff-opps { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 12px; padding: 12px 0 0; --scw: 50px; }
 .bluff-seat { position: relative; width: 156px; padding: 13px 8px 8px; border-radius: 16px; display: flex; flex-direction: column; align-items: center; gap: 7px;
   background: linear-gradient(var(--pc), var(--pc)) top / 100% 3px no-repeat, var(--glass); border: 1px solid rgba(255,255,255,.1);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 8px 18px rgba(0,0,0,.38); transition: box-shadow .3s, opacity .4s, filter .4s, transform .15s var(--ease); }
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 8px 18px rgba(0,0,0,.38); transition: transform .15s var(--ease); }
 .bluff-seat.turn { border-color: rgba(255,207,92,.75); box-shadow: 0 0 0 2px var(--gold), 0 0 24px rgba(255,207,92,.35), 0 8px 18px rgba(0,0,0,.38); }
 .bluff-seat.out { background: rgba(10,8,24,.5); border-color: rgba(255,255,255,.06); box-shadow: none; }
 .bluff-seat.out .bluff-seat-head, .bluff-seat.out .bluff-seat-foot { opacity: .55; }
@@ -1093,9 +1309,13 @@ const STYLE = `
 .bluff-seat.pickable:active { transform: scale(.97); }
 .bluff-seat.pickable::after { content: 'Tap to target'; position: absolute; top: -11px; left: 50%; transform: translateX(-50%); font: 800 10px var(--font-body); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; padding: 2px 9px; border-radius: 999px;
   background: linear-gradient(135deg, #ff9a76, #e8486a); color: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.5); }
-/* coins just landed in this purse: one warm flash */
-.bluff-seat.gain, .bluff-mine.gain { animation: bluff-gain 1.2s ease-out .75s; }
-@keyframes bluff-gain { 20% { box-shadow: 0 0 0 2px #fff3b0, 0 0 30px 6px rgba(255,214,90,.6); } }
+/* coins just landed in this purse: one warm flash, its glow drawn once and faded in (opacity only).
+   On a plain rival plaque it switches on and off, as the plaque's own shadow used to. */
+.bluff-gainfx { position: absolute; inset: -1px; border-radius: inherit; pointer-events: none; opacity: 0;
+  box-shadow: 0 0 0 2px #fff3b0, 0 0 30px 6px rgba(255,214,90,.6); animation: bluff-gain 1.2s ease-out .75s; }
+@keyframes bluff-gain { 20% { opacity: 1; } }
+.bluff-seat:not(.turn):not(.pickable):not(.win) > .bluff-gainfx { animation-name: bluff-gain-snap; animation-timing-function: step-end; }
+@keyframes bluff-gain-snap { 6.85% { opacity: 1; } 47.4% { opacity: 0; } }
 .bluff-seat.gain .bluff-ccount, .bluff-mine.gain .bluff-ccount { display: inline-block; animation: bluff-pop .5s var(--spring) .85s; }
 @keyframes bluff-pop { 40% { transform: scale(1.4); } }
 .bluff-seat-head { display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; }
@@ -1132,7 +1352,10 @@ const STYLE = `
 .bluff-coin { display: block; width: 24px; height: 24px; border-radius: 50%; position: relative;
   background: radial-gradient(circle at 36% 30%, #fff8d2 0 9%, #f8d872 24%, #dca434 58%, #a9731a 82%, #7d5210 100%);
   box-shadow: inset 0 0 0 1.5px #7d5210, inset 0 0 0 3px #f6d374, inset 0 0 0 4px rgba(125,82,16,.55), 0 2px 4px rgba(0,0,0,.55); }
-.bluff-coin::after { content: ''; position: absolute; inset: 27%; background: ${CROWN_URI} center / contain no-repeat; opacity: .85; filter: drop-shadow(0 1px 0 rgba(255,240,190,.75)); }
+/* the stamped crown, with its pale lower edge drawn as a second copy 1px down (no live filter); the box
+   is 1px taller so that copy is never cut off */
+.bluff-coin::after { content: ''; position: absolute; inset: 27% 27% calc(27% - 1px); opacity: .85;
+  background: ${CROWN_URI} 50% 0 / contain no-repeat, ${CROWN_LIT} 50% 1px / contain no-repeat; }
 .bluff-purse { display: flex; align-items: flex-end; gap: 5px; --cs: 18px; --co: 3px; }
 .bluff-stacks { display: flex; gap: 2px; align-items: flex-end; }
 .bluff-stack { position: relative; width: var(--cs); height: calc(var(--cs) * .72 + 4 * var(--co) + 3px); }
@@ -1172,14 +1395,18 @@ const STYLE = `
 .bluff-pl-txt small { display: block; color: var(--muted); font-size: 12px; font-weight: 700; line-height: 1.3; }
 .bluff-pl-ic { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; flex: none; color: #fff;
   background: radial-gradient(circle at 30% 22%, rgba(255,255,255,.42), transparent 55%), var(--rc, #e2a232); box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.28), 0 4px 10px rgba(0,0,0,.45); }
-.bluff-pl-ic .bluff-ic { width: 26px; height: 26px; filter: drop-shadow(0 1px 1px rgba(0,0,0,.45)); }
+.bluff-pl-ic .bluff-ic { width: 26px; height: 26px; }
+/* an icon's soft shadow: a dark copy 1px below it in the same grid cell, instead of a live drop-shadow */
+.bluff-pl-ic > .bluff-ic, .bluff-act-ic > .bluff-ic { grid-area: 1 / 1; position: relative; }
+.bluff-pl-ic > .bluff-ic.sh, .bluff-act-ic > .bluff-ic.sh { color: #000; top: 1px; opacity: .45; }
+.bluff-pl-ic > .bluff-ic.sh { opacity: .4; }
 .bluff-vs { font: 700 12px var(--font-display); letter-spacing: .06em; color: #ffd0d8; padding: 2px 9px; border-radius: 999px; background: rgba(255,107,129,.2); border: 1px solid rgba(255,107,129,.5); }
 .bluff-candle { width: 38px; height: 54px; flex: none; }
 .bluff-candle .fl { transform-origin: 50% 90%; animation: bluff-flicker 1.6s ease-in-out infinite; }
 @keyframes bluff-flicker { 0%,100% { transform: scale(1) rotate(0); } 30% { transform: scale(1.06,.94) rotate(-3deg); } 60% { transform: scale(.95,1.07) rotate(2deg); } }
 .bluff-track { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; align-items: center; }
 .bluff-track-lbl { font: 800 10px var(--font-body); letter-spacing: .12em; text-transform: uppercase; color: rgba(255,236,226,.7); margin-right: 2px; }
-.bluff-tk { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px 2px 3px; border-radius: 20px; font-size: 12px; font-weight: 800; background: rgba(12,9,30,.55); border: 1px solid rgba(255,255,255,.12); color: var(--text); transition: background .3s; }
+.bluff-tk { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px 2px 3px; border-radius: 20px; font-size: 12px; font-weight: 800; background: rgba(12,9,30,.55); border: 1px solid rgba(255,255,255,.12); color: var(--text); }
 .bluff-tk i { width: 17px; height: 17px; border-radius: 50%; display: grid; place-items: center; font-style: normal; box-sizing: border-box; }
 .bluff-tk i .ic { width: 11px; height: 11px; stroke-width: 3; }
 .bluff-tkface { width: 18px; height: 18px; flex: none; border-radius: 50%; box-shadow: 0 0 0 1.5px var(--pc, #fff); }
@@ -1193,7 +1420,7 @@ const STYLE = `
 /* ---- my seat ---- */
 .bluff-mine { display: flex; align-items: center; justify-content: center; gap: 22px; padding: 16px 16px 12px; border-radius: 20px; margin-top: 6px;
   background: linear-gradient(var(--pc, #7c6cff), var(--pc, #7c6cff)) top / 100% 3px no-repeat, linear-gradient(180deg, rgba(26,20,56,.58), rgba(12,9,30,.52));
-  border: 1px solid rgba(255,255,255,.1); transition: box-shadow .3s; }
+  border: 1px solid rgba(255,255,255,.1); }
 .bluff-mine.turn { border-color: rgba(255,207,92,.75); box-shadow: 0 0 0 2px var(--gold), 0 0 26px rgba(255,207,92,.3); }
 .bluff-mine.out .bluff-mine-info { opacity: .6; }
 .bluff-mine-info { display: flex; flex-direction: column; gap: 9px; align-items: flex-start; min-width: 130px; }
@@ -1219,7 +1446,7 @@ button.bluff-act { position: relative; display: flex; align-items: center; gap: 
 .bluff-act-ic { width: 40px; height: 40px; flex: none; border-radius: 12px; display: grid; place-items: center; color: #fff;
   background: radial-gradient(circle at 30% 22%, rgba(255,255,255,.4), transparent 55%), var(--rc);
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.26), inset 0 -6px 10px rgba(0,0,0,.18), 0 3px 8px rgba(0,0,0,.35); }
-.bluff-act-ic .bluff-ic { width: 22px; height: 22px; filter: drop-shadow(0 1px 1px rgba(0,0,0,.5)); }
+.bluff-act-ic .bluff-ic { width: 22px; height: 22px; }
 .bluff-act-l { min-width: 0; }
 .bluff-act-l b { display: block; font: 600 14px/1.15 var(--font-display); }
 .bluff-act-l small { display: block; font-size: 11px; font-weight: 700; color: var(--muted); line-height: 1.2; }
@@ -1417,6 +1644,7 @@ let prevCoins = new Map(); // game id | player id -> coins at the last render, f
 // The ledger and chronicle fold away on phones so the table gets the screen; they stay as the player left them.
 const WIDE = typeof matchMedia === 'function' ? matchMedia('(min-width: 901px)').matches : true;
 let ledgerOpen = WIDE, chronOpen = WIDE;
+let lastBtnSig = null; // the buttons drawn in the controls last time (see render)
 
 function prepEvents(v, now) {
   const list = v.ev || [];
@@ -1473,11 +1701,40 @@ function cardHTML(c, o = {}) {
   }
   if (o.cls) cls.push(o.cls);
   const style = (fd != null ? `--fd:${Math.round(fd)}ms;` : '') + (cd != null ? `--cd:${Math.round(cd)}ms;` : '') + (o.style || '');
+  // data-t names the timed animation a redraw must not restart or shift (see holdTimers).
+  const timed = fd != null || cd != null ? ` data-t="${fd != null ? 'f' + Math.round(now + fd) : ''}${cd != null ? 'c' + Math.round(now + cd) : ''}|${o.style || ''}"` : '';
   const front = showFront ? `<div class="bluff-face front">${faceSVG(c.role, o.mini)}${c.up ? CRACK : ''}</div>` : '';
-  const back = !showFront || fd != null ? `<div class="bluff-face back">${BACK_SVG}</div>` : '';
-  return `<div class="${cls.join(' ')}" data-k="${esc(c.k)}"${o.noenter ? ' data-noenter' : ''}${o.attrs ? ' ' + o.attrs : ''}${style ? ` style="${style}"` : ''}><div class="bluff-card-in">${front}${back}</div>${o.ribbon || ''}${o.tag || ''}</div>`;
+  // The back is a <span> so a redraw that adds the front face never mistakes one face for the other.
+  const back = !showFront || fd != null ? `<span class="bluff-face back">${BACK_SVG}</span>` : '';
+  return `<div class="${cls.join(' ')}" data-k="${esc(c.k)}"${o.noenter ? ' data-noenter' : ''}${o.attrs ? ' ' + o.attrs : ''}${timed}${style ? ` style="${style}"` : ''}><div class="bluff-card-in">${front}${back}</div>${o.ribbon || ''}${o.tag || ''}</div>`;
 }
 const staticCard = (role, cw, mini = false) => `<div class="bluff-card" style="--cw:${cw}"><div class="bluff-card-in"><div class="bluff-face front">${faceSVG(role, mini)}</div></div></div>`;
+// Timed reveals (--fd, --cd, --bd) count from when their element appears. morph keeps elements, so a
+// redraw while one is playing keeps its original delays instead of shifting it.
+function holdTimers(el, draw) {
+  const prev = new Map();
+  for (const n of el.querySelectorAll('[data-t]')) prev.set(n, [n.getAttribute('data-t'), n.getAttribute('style')]);
+  draw();
+  if (!prev.size) return;
+  for (const n of el.querySelectorAll('[data-t]')) {
+    const p = prev.get(n);
+    if (p && p[0] === n.getAttribute('data-t') && p[1] !== n.getAttribute('style')) n.setAttribute('style', p[1]);
+  }
+}
+// A card's translate/scale transition is for pressing it. A kept card that changes state on a redraw
+// (lifted, set down, revealed) snaps into place as a freshly drawn card did; the card just tapped
+// plays its own spring instead.
+function snapCards(el, draw) {
+  const was = new Map();
+  for (const n of el.querySelectorAll('.bluff-card[data-k]')) was.set(n, n.className);
+  draw();
+  const changed = [];
+  for (const n of el.querySelectorAll('.bluff-card[data-k]')) if (was.has(n) && was.get(n) !== n.className && !n.classList.contains('tapped')) changed.push(n);
+  if (!changed.length) return;
+  for (const n of changed) n.classList.add('snap');
+  void getComputedStyle(changed[0]).transitionDuration; // take the new place with transitions off
+  for (const n of changed) n.classList.remove('snap');
+}
 
 function purseHTML(p, big = false) {
   const n = p.coins;
@@ -1525,14 +1782,19 @@ function seatHTML(v, p, st) {
   const ex = v.exchange && v.exchange.pid === p.id ? v.exchange.drawn : [];
   const cards = p.cards.map((c) => cardHTML(c, { now: st.now, mini: true, cls: 'mini', reveal: v.over })).join('') + ex.map((c) => cardHTML(c, { now: st.now, mini: true, cls: 'mini extra' })).join('');
   const ob = outAt.get(p.id);
-  const badge = p.out && !v.over ? `<span class="bluff-banished${ob && ob - st.now > -600 ? ' new' : ''}"${ob ? ` style="--bd:${Math.round(ob - st.now)}ms"` : ''}>Banished</span>` : '';
-  return `<div class="${cls.join(' ')}" data-a="p-${esc(p.id)}-seat" style="--pc:${color}"${pickable ? ` data-do="target" data-pid="${esc(p.id)}" role="button" tabindex="0" aria-label="Target ${esc(p.name)}"` : ''}>
-${flagHTML(v, p.id)}${saysHTML(v, p.id)}
+  const fresh = ob && ob - st.now > -600;
+  const badge = p.out && !v.over ? `<span class="bluff-banished${fresh ? ' new' : ''}"${fresh ? ` data-t="b${Math.round(ob)}" style="--bd:${Math.round(ob - st.now)}ms"` : ''}>Banished</span>` : '';
+  // The speech bubble and response badge come last: they float above the plaque wherever they sit in
+  // the markup, and a redraw that adds or drops one leaves the rest of the seat untouched.
+  // The id keys the seat for the redraw, so when the seats turn (one device, the next player's eyes)
+  // each plaque moves whole. (Not data-k: that would also make the plaques glide and pop in.)
+  return `<div class="${cls.join(' ')}" id="bw-seat-${esc(p.id)}" data-a="p-${esc(p.id)}-seat" style="--pc:${color}"${pickable ? ` data-do="target" data-pid="${esc(p.id)}" role="button" tabindex="0" aria-label="Target ${esc(p.name)}"` : ''}>
 <div class="bluff-seat-head">${avatarHTML(p, color, st.ctx)}<div class="bluff-seat-name">${esc(p.name)}</div></div>
 <div class="bluff-seat-cards" data-a="p-${esc(p.id)}-hand">${cards}${badge}</div>
 <div class="bluff-seat-foot">${purseHTML(p)}${claimsHTML(p)}</div>
-</div>`;
+${saysHTML(v, p.id)}${flagHTML(v, p.id)}${st.gained.has(p.id) ? GAIN_FX : ''}</div>`;
 }
+const GAIN_FX = '<i class="bluff-gainfx" aria-hidden="true"></i>';
 
 const CANDLE = `<svg class="bluff-candle" viewBox="0 0 40 56" aria-hidden="true"><defs><radialGradient id="bw-cfl" cx=".5" cy=".7" r=".7"><stop offset="0" stop-color="#fffbe6"/><stop offset=".4" stop-color="#ffd760"/><stop offset=".8" stop-color="#ff8a20"/><stop offset="1" stop-color="#ff5a10" stop-opacity="0"/></radialGradient></defs>
 <circle cx="20" cy="15" r="14" fill="#ffc860" opacity=".2"/><rect x="15" y="22" width="10" height="26" rx="1.5" fill="#f3e6c8"/><path d="M15 24c-1.5 5 1.5 6 .5 11H18V24Z" fill="#fffaf0"/>
@@ -1544,7 +1806,7 @@ function stageHTML(v, me, ctx) {
   const nm = (id) => (id === me ? 'You' : esc(short(P(v, id)?.name)));
   if (v.over) {
     const w = P(v, v.winners[0]);
-    return `<div class="bluff-plate"><div class="bluff-pl-row"><div class="bluff-pl-ic" style="--rc:${COIN_HUE}">${icon('chancellor')}</div><div class="bluff-pl-txt"><b>${w ? nm(w.id) : 'Nobody'} ${w && w.id === me ? 'rule' : 'rules'} the court</b><small>The whispers fall silent.</small></div></div></div>`;
+    return `<div class="bluff-plate"><div class="bluff-pl-row"><div class="bluff-pl-ic" style="--rc:${COIN_HUE}">${shadedIcon('chancellor')}</div><div class="bluff-pl-txt"><b>${w ? nm(w.id) : 'Nobody'} ${w && w.id === me ? 'rule' : 'rules'} the court</b><small>The whispers fall silent.</small></div></div></div>`;
   }
   if (!pd) {
     const a = v.players[v.turn];
@@ -1553,7 +1815,7 @@ function stageHTML(v, me, ctx) {
   const def = A[pd.action];
   const tgt = pd.target ? ` → ${nm(pd.target)}` : '';
   let h = '<div class="bluff-plate"><div class="bluff-pl-row">';
-  h += pd.claim ? staticCard(pd.claim, 'var(--pcw, 44px)', true) : `<div class="bluff-pl-ic" style="--rc:${pd.action === 'coup' ? '#c8283a' : COIN_HUE}">${icon(pd.action)}</div>`;
+  h += pd.claim ? staticCard(pd.claim, 'var(--pcw, 44px)', true) : `<div class="bluff-pl-ic" style="--rc:${pd.action === 'coup' ? '#c8283a' : COIN_HUE}">${shadedIcon(pd.action)}</div>`;
   h += `<div class="bluff-pl-txt"><b>${nm(pd.actor)}${pd.claim ? ` · <em style="color:${shade(R[pd.claim].color, 0.35)}">${R[pd.claim].name}</em>` : ''}</b><small>${def.name}${tgt} · ${def.sub}</small></div></div>`;
   if (pd.blocker) {
     h += `<span class="bluff-vs">BLOCKED</span><div class="bluff-pl-row">${staticCard(pd.blockRole, 'var(--pcw, 44px)', true)}<div class="bluff-pl-txt"><b>${nm(pd.blocker)} · <em style="color:${shade(R[pd.blockRole].color, 0.35)}">${R[pd.blockRole].name}</em></b><small>claims a block</small></div></div>`;
@@ -1624,7 +1886,7 @@ function mineHTML(v, meP, st) {
     }).join('');
   }
   const turn = !v.over && v.players[v.turn].id === me;
-  return `<div class="bluff-mine${turn ? ' turn' : ''}${meP.out ? ' out' : ''}${v.over && v.winners.includes(me) ? ' win' : ''}${st.gained.has(me) ? ' gain' : ''}" data-a="p-${esc(me)}-seat" style="--pc:${color}">${saysHTML(v, me)}
+  return `<div class="bluff-mine${turn ? ' turn' : ''}${meP.out ? ' out' : ''}${v.over && v.winners.includes(me) ? ' win' : ''}${st.gained.has(me) ? ' gain' : ''}" data-a="p-${esc(me)}-seat" style="--pc:${color}">
 <div class="bluff-mine-info">
 <div class="bluff-mine-name">${avatarHTML(meP, color, st.ctx)}<span>${esc(meP.name)}</span><span class="tag t-you">You</span>${flagHTML(v, me).replace('bluff-flag', 'bluff-flag bluff-flag-inline')}</div>
 ${purseHTML(meP, true)}
@@ -1632,7 +1894,7 @@ ${meP.claims.length ? `<div class="bluff-secret">Claimed: ${claimsHTML(meP)}</di
 <div class="bluff-secret">${uiIcon('eye')}Only you see your hidden cards</div>
 </div>
 <div class="bluff-hand${exch ? ' ex' : ''}" data-a="p-${esc(me)}-hand">${cards}</div>
-</div>`;
+${saysHTML(v, me)}${st.gained.has(me) ? GAIN_FX : ''}</div>`;
 }
 
 const ALLOW_BTN = `<button class="good" data-do="allow">${uiIcon('check')}Allow</button>`;
@@ -1668,7 +1930,7 @@ function controlsHTML(v, meP, ctx) {
       const held = role && mine.includes(role);
       const color = role ? R[role].color : action === 'coup' ? '#c8283a' : COIN_HUE;
       return `<button class="bluff-act" data-do="${def.target ? 'pick' : 'act'}" data-action="${action}"${ok ? '' : ' disabled'} style="--rc:${color}">
-<span class="bluff-act-ic">${icon(role || action)}</span><span class="bluff-act-l"><b>${def.name}</b><small>${role ? R[role].name + ' · ' : ''}${def.sub}</small></span>
+<span class="bluff-act-ic">${shadedIcon(role || action)}</span><span class="bluff-act-l"><b>${def.name}</b><small>${role ? R[role].name + ' · ' : ''}${def.sub}</small></span>
 ${role ? `<span class="bluff-tag ${held ? 'held' : 'bluff'}">${held ? 'Held' : 'Bluff'}</span>` : ''}</button>`;
     };
     const hint = must ? 'You hold 10+ coins — you must stage a Coup!' : 'Your move: choose an action';
@@ -1791,8 +2053,19 @@ function render(el, v, ctx) {
   const st = { now, pickable, ctx, gained, tapped };
   const sMine = myAct;
   const revealed = v.players.reduce((n, p) => n + p.cards.filter((c) => c.up).length, 0);
+  // The drawers are kept between redraws: draw them as the player has them right now.
+  const ledgerEl = el.querySelector('.bluff-ledgerbox'), chronEl = el.querySelector('.bluff-chronicle');
+  if (ledgerEl) ledgerOpen = ledgerEl.open;
+  if (chronEl) chronOpen = chronEl.open;
+  // When the buttons themselves change (Allow and Challenge become Allow and Block), draw them afresh as
+  // before: a kept button turned into another would fade between the two looks.
+  const ctrl = controlsHTML(v, meP, ctx);
+  const btnSig = (ctrl.match(/<button[^>]*>/g) || []).map((b) => b.replace(' disabled', '')).join('');
+  if (btnSig !== lastBtnSig) el.querySelector('.bluff-ctrl')?.replaceChildren();
+  lastBtnSig = btnSig;
 
-  el.innerHTML = `${DEFS}
+  // Redraw only what changed (the board is kept while this game is on screen).
+  snapCards(el, () => holdTimers(el, () => morph(el, `${DEFS}
 <div class="game-layout bluff">
   <div class="bluff-board">
     <div class="felt bluff-table" data-a="table">
@@ -1801,7 +2074,7 @@ function render(el, v, ctx) {
       <div class="bluff-opps n${opps.length}">${opps.map((p) => seatHTML(v, p, st)).join('')}</div>
       <div class="bluff-center">${treasuryHTML()}<div class="bluff-stage">${stageHTML(v, me, ctx)}</div>${deckHTML(v, now)}</div>
       ${meP ? mineHTML(v, meP, st) : ''}
-      <div class="bluff-ctrl">${controlsHTML(v, meP, ctx)}</div>
+      <div class="bluff-ctrl">${ctrl}</div>
     </div>
   </div>
   <div class="side bluff-side">
@@ -1813,10 +2086,12 @@ function render(el, v, ctx) {
     <details class="panel drawer bluff-chronicle" ${chronOpen ? 'open' : ''}><summary>${uiIcon('clock')}<span>Chronicle</span><span class="note">${esc(v.log?.[0] || '')}</span>${uiIcon('chevron', 'chev')}</summary>
       <div class="drawer-body"><div class="log bluff-log">${logHTML(v)}</div></div></details>
   </div>
-</div>`;
-  // <details> toggle events don't bubble, so listen on each drawer after it is drawn.
-  el.querySelector('.bluff-ledgerbox')?.addEventListener('toggle', (e) => { ledgerOpen = e.currentTarget.open; });
-  el.querySelector('.bluff-chronicle')?.addEventListener('toggle', (e) => { chronOpen = e.currentTarget.open; });
+</div>`)));
+  // <details> toggle events don't bubble. The drawers are kept between redraws, so set the handler as
+  // a property (replaced, never stacked).
+  const lb = el.querySelector('.bluff-ledgerbox'), cb = el.querySelector('.bluff-chronicle');
+  if (lb) lb.ontoggle = () => { ledgerOpen = lb.open; };
+  if (cb) cb.ontoggle = () => { chronOpen = cb.open; };
 
   el.onclick = (e) => {
     const t = e.target.closest('[data-do]');
@@ -1837,12 +2112,13 @@ function render(el, v, ctx) {
     if (d === 'allow') { sound('click'); ctx.send({ type: 'allow' }); return; }
     if (d === 'challenge') { ctx.send({ type: 'challenge' }); return; }
     if (d === 'block') { sound('click'); ctx.send({ type: 'block', role: t.dataset.role }); return; }
-    if (d === 'sel') { sound('click'); ui.sel = ui.tapped = t.dataset.k; return rerender(); }
+    if (d === 'sel') { sound('click'); replayTap(t); ui.sel = ui.tapped = t.dataset.k; return rerender(); }
     if (d === 'lose') { if (ui.sel) { sound('click'); ctx.send({ type: 'lose', card: ui.sel }); } return; }
     if (d === 'ex') {
       sound('click');
       const k = t.dataset.k;
       const need = hidden(meP).length;
+      replayTap(t);
       ui.tapped = k;
       if (ui.ex.includes(k)) ui.ex = ui.ex.filter((x) => x !== k);
       else { ui.ex = ui.ex.concat(k); if (ui.ex.length > need) ui.ex = ui.ex.slice(ui.ex.length - need); }
@@ -1853,11 +2129,19 @@ function render(el, v, ctx) {
   el.onkeydown = (e) => {
     if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role="button"][data-do]')) { e.preventDefault(); e.target.click(); }
   };
+  // A purse's flash is gone once it has played, so it leaves no layer behind.
+  el.onanimationend = (e) => { if (e.target.classList?.contains('bluff-gainfx')) e.target.remove(); };
 
   if (fresh.length) playEvents(fresh, v, me);
 }
 function rerender() {
   if (last && last.el.isConnected) render(last.el, last.v, last.ctx);
+}
+// The tapped card is kept by the redraw; let its lift play again when it is tapped twice running.
+function replayTap(t) {
+  if (!t.classList.contains('tapped')) return;
+  t.classList.remove('tapped');
+  void getComputedStyle(t).animationName;
 }
 
 /* ---------- event playback (banners, stamps, slashes) ---------- */
@@ -2050,6 +2334,7 @@ export default {
   minPlayers: 2,
   maxPlayers: 6,
   cover: COVER,
+  options: [levelOption()],
   howTo: {
     goal: 'Be the <b>last courtier standing</b>. Everyone starts with 2 secret role cards (your "influence") and 2 coins. Lose both cards and you are out.',
     turn: [
@@ -2066,7 +2351,7 @@ export default {
     ],
   },
 
-  setup(players) {
+  setup(players, opts) {
     const deck = shuffle(ROLES.flatMap((r) => [r, r, r]));
     const s = {
       gid: Math.random().toString(36).slice(2, 10),
@@ -2090,6 +2375,7 @@ export default {
       evSeq: 0,
       over: false,
       winners: [],
+      level: levelOf(opts), // computer difficulty, public
     };
     s.respond = [s.players[s.turn].id];
     log(s, `The court assembles by candlelight. ${s.players[s.turn].name} speaks first.`);

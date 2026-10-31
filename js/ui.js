@@ -1,11 +1,12 @@
 // Screens: home, lobby, game, how-to-play guides and the top bar.
 
 import { esc, toast, uid } from './util.js';
-import { snapshot, flip, playFx, changed, confetti, wake, settleLoops } from './fx.js';
+import { snapshot, flip, playFx, changed, confetti, wake, settleLoops, morph } from './fx.js';
 import { sound, isMuted, setMuted } from './sound.js';
 import { icon } from './icons.js';
 import { portrait } from './avatar.js';
 import { openModal, closeModal } from './dialog.js';
+import { report } from './report.js';
 import { GAME_INFO, favorites, toggleFavorite, filterGames } from './library.js';
 import { standings, tourLine } from './tour.js';
 import { MAX_ROOM, S, GAMES, FILES, getGame, gameReady, loadGame, defaultTimer, defaultOpts, seated, isWatching, myId, playerName, isBot, saveSession, loadSession, clearSession } from './state.js';
@@ -731,8 +732,7 @@ export function renderGame() {
   const online = S.role === 'host' || S.role === 'client';
   // One bar for the whole game: title and connection, timer, end-of-game actions, voice, rules, menu.
   // The tournament is a chip that opens the menu, where its standings live.
-  const head = `
-    <div class="game-head">
+  const headInner = `
       <div class="gh-title">
         ${online ? `<span class="dot ${S.status === 'online' ? 'on' : 'off'}" id="netDot" title="${esc(S.status)}"></span>` : ''}
         <h2>${esc(g.name)}</h2>
@@ -746,12 +746,12 @@ export function renderGame() {
       <span class="gh-voice" id="ghVoice">${voiceHTML()}</span>
       ${helpBtn(g.id)}
       <button class="icon-btn" id="ghMenuBtn" aria-label="Game menu" title="Game menu" aria-haspopup="menu" aria-expanded="${menuOpen}">${icon('more')}</button>
-      ${menuOpen ? menuMarkup(false) : ''}
-    </div>`;
-  // Games that manage their own DOM (keepDom) keep #gamebox between updates, so inputs keep focus.
-  const keep = g.keepDom && app.querySelector('#gamebox')?.dataset.game === g.id && app.querySelector('.game-head');
-  if (keep) app.querySelector('.game-head').outerHTML = head;
-  else app.innerHTML = head + `<div id="gamebox" data-game="${g.id}"></div>`;
+      ${menuOpen ? menuMarkup(false) : ''}`;
+  // While the same game is on screen, its area (#gamebox) stays put and the bar is updated in place,
+  // so a game that redraws only what changed (morph) isn't rebuilt from scratch by the platform.
+  const keep = app.querySelector('#gamebox')?.dataset.game === g.id && app.querySelector('.game-head');
+  if (keep) morph(app.querySelector('.game-head'), headInner);
+  else app.innerHTML = `<div class="game-head">${headInner}</div><div id="gamebox" data-game="${g.id}"></div>`;
 
   const ctx = {
     me: myId(),
@@ -767,6 +767,7 @@ export function renderGame() {
     g.render(box, S.view, ctx);
   } catch (e) {
     console.error(e);
+    report(e, 'render');
     box.innerHTML = `<div class="panel">Display error: ${esc(e.message)}</div>`;
   }
   // A dialog that was already open shouldn't pop in again on every update.
@@ -793,10 +794,11 @@ export function renderGame() {
   requestAnimationFrame(settleLoops);
   const headEl = app.querySelector('.game-head');
   if (menuFocus) headEl.querySelector(`.gh-menu #${CSS.escape(menuFocus)}`)?.focus({ preventScroll: true });
-  headEl.addEventListener('change', (e) => {
+  // The bar is kept between updates, so its handlers are properties (set, not stacked, each render).
+  headEl.onchange = (e) => {
     if (e.target.id === 'viewAs') { S.viewAs = e.target.value; closeMenu(); saveSession(); refreshLocalView(); render(); }
-  });
-  headEl.addEventListener('click', (e) => {
+  };
+  headEl.onclick = (e) => {
     if (e.target.closest('.gh-scrim')) return closeMenu();
     const b = e.target.closest('button');
     if (!b) return;
@@ -815,13 +817,13 @@ export function renderGame() {
       if (!S.view.over && !confirm('Restart the game from the beginning?')) return;
       startGame();
     } else if (b.id === 'lobbyBtn') { closeMenu(); endGame(); }
-  });
+  };
 }
 
 /* ---------------- turn timer display ---------------- */
 
-// Updates once a second; the bar slides smoothly with a CSS transition, so the
-// phone only repaints this small pill.
+// Updates once a second; the bar slides smoothly with a transform transition, which the
+// compositor runs without repainting the pill.
 export function tickTimer() {
   const el = document.getElementById('turnTimer');
   if (!el) return;
@@ -838,7 +840,7 @@ export function tickTimer() {
   if (!el.firstChild) el.innerHTML = `<i class="tt-bar"></i><span>${icon('timer')}<span class="tt-who"></span></span><b class="tt-secs"></b>`;
   el.querySelector('.tt-who').textContent = who;
   el.querySelector('.tt-secs').textContent = secs + 's';
-  el.querySelector('.tt-bar').style.width = Math.max(0, (ms - 1000) / t.total) * 100 + '%';
+  el.querySelector('.tt-bar').style.transform = `scaleX(${Math.max(0, (ms - 1000) / t.total)})`;
   if (mine && secs <= 5 && secs > 0 && secs !== lastTickSec) sound('click');
   lastTickSec = secs;
 }

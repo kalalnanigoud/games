@@ -10,10 +10,11 @@
 // queued and shown in order, so sounds and floats always match the board.
 
 import { esc, rand, shuffle, log, uid, PLAYER_COLORS } from '../js/util.js';
-import { injectCSS, snapshot, flip, fly, floatText, pulse, shake } from '../js/fx.js';
+import { injectCSS, snapshot, flip, fly, floatText, pulse, shake, morph } from '../js/fx.js';
 import { sound } from '../js/sound.js';
 import { icon } from '../js/icons.js';
 import { portrait } from '../js/avatar.js';
+import { levelOption, levelOf } from '../js/levels.js';
 
 /* =====================================================================
    Rules
@@ -274,6 +275,132 @@ function botMove(v, pid) {
   return best;
 }
 
+// Every legal take for a seat: { src, k, line, cnt, marker }.
+function legalTakes(v, seat) {
+  const b = v.boards[seat], out = [];
+  const srcs = [];
+  v.factories.forEach((f, i) => { if (f.length) srcs.push([i, f]); });
+  if (tilesOf(v.centre).length) srcs.push(['c', v.centre]);
+  for (const [src, ts] of srcs) {
+    const marker = src === 'c' && ts.includes(MARKER);
+    for (let k = 0; k < 5; k++) {
+      const cnt = ts.filter((t) => t !== MARKER && colorOf(t) === k).length;
+      if (!cnt) continue;
+      for (let line = -1; line < 5; line++) if (line < 0 || !canPlace(b, line, k)) out.push({ src, k, line, cnt, marker });
+    }
+  }
+  return out;
+}
+const pick = (a) => a[rand(a.length)];
+
+/* ---- Easy: no plan. Half the time it puts a colour on any line it may go on, at random; otherwise it
+   just fits as many tiles as it can, never looking at where they will land on the wall. ---- */
+function botEasy(v, pid) {
+  const seat = seatOf(v, pid), b = v.boards[seat];
+  const all = legalTakes(v, seat);
+  const onLines = all.filter((m) => m.line >= 0);
+  let m = null;
+  if (Math.random() < 0.5) m = pick(onLines.length ? onLines : all);
+  else {
+    let bs = -Infinity;
+    for (const x of all) {
+      const put = x.line < 0 ? 0 : Math.min(x.cnt, x.line + 1 - b.lines[x.line].length);
+      const sc = put - (x.cnt - put) - (x.marker ? 1 : 0) + Math.random() * 0.5;
+      if (sc > bs) { bs = sc; m = x; }
+    }
+  }
+  return { type: 'take', src: m.src, color: m.k, line: m.line };
+}
+
+/* ---- Hard: judges a take the way Normal does (wall neighbours, bonuses in reach, exact floor cost,
+   whether the line can still be finished from what is left), without Normal's dithering, and looks one
+   move ahead: of its best takes it prefers the one that leaves the next player the least, which also
+   means grabbing what they need. ---- */
+function hardSeat(v, seat, endSoon) {
+  const b = v.boards[seat];
+  // Wall as it will look once the already-full lines are tiled.
+  const pend = b.wall.map((row) => row.slice());
+  b.lines.forEach((ln, r) => { if (ln.length === r + 1) pend[r][wallCol(r, colorOf(ln[0]))] = ln[0]; });
+  return { b, pend, fl: b.floor.length, endSoon };
+}
+// What one take is worth to a seat. avail: tiles of each colour still on the table after the take.
+function hardValue(C, k, cnt, line, marker, avail) {
+  const { b, pend, fl, endSoon } = C;
+  const floorCost = (q) => { let c = 0; for (let i = 0; i < q; i++) c += fl + i < 7 ? PEN[fl + i] : 0; return c; };
+  const mk = marker ? 1 : 0;
+  const markerVal = marker && !endSoon ? 0.7 : 0;
+  if (line < 0) return -floorCost(cnt + mk) - 1.5 + markerVal;
+  const cap = line + 1, have = b.lines[line].length, free = cap - have;
+  const put = Math.min(cnt, free), over = cnt - put, done = have + put === cap;
+  const c = wallCol(line, k);
+  pend[line][c] = 1;
+  const adj = tileScore(pend, line, c);
+  let rowN = 0, colN = 0, kN = 0;
+  for (let x = 0; x < 5; x++) {
+    if (pend[line][x] !== null) rowN++;
+    if (pend[x][c] !== null) colN++;
+    if (pend[x][wallCol(x, k)] !== null) kN++;
+  }
+  pend[line][c] = null;
+  const sets = (rowN === 5 ? 2 : rowN * 0.15) + (colN === 5 ? 7 : colN * 0.5) + (kN === 5 ? 10 : kN * 0.55);
+  let val = 0;
+  if (done) val += adj + sets + 1.4 + (over === 0 ? 0.7 : 0);
+  else {
+    const need = free - put;
+    let f = (adj + sets * 0.8 + 1) * (put / cap) * 0.8;
+    if (endSoon) f *= 0.12;
+    val += f;
+    if (avail[k] < need) val -= 0.3 + 0.15 * need; // can't finish it this round
+    if (have === 0) val -= 0.12 * line * (endSoon ? 3 : 1); // opening a long line ties it up
+  }
+  return val - floorCost(over + mk) + markerVal;
+}
+function botHard(v, pid) {
+  const seat = seatOf(v, pid), n = v.players.length;
+  const endSoon = v.round >= 7 || v.boards.some((bd) => bd.wall.some((row, r) => {
+    const cnt = row.filter((x) => x !== null).length;
+    return cnt === 5 || (cnt === 4 && bd.lines[r].length > 0);
+  }));
+  const me = hardSeat(v, seat, endSoon), opp = hardSeat(v, (seat + 1) % n, endSoon);
+  // The table as colour counts per source.
+  const counts = (ts) => { const a = [0, 0, 0, 0, 0]; for (const t of ts) if (t !== MARKER) a[colorOf(t)]++; return a; };
+  const facs = v.factories.map(counts), centre = counts(v.centre), hasMarker = v.centre.includes(MARKER);
+  const total = [0, 1, 2, 3, 4].map((k) => facs.reduce((a, f) => a + f[k], 0) + centre[k]);
+  // The best a seat can do from the given sources ([colour counts, holds the marker]).
+  const best = (C, srcs, tot) => {
+    let bv = -Infinity;
+    for (const [cs, marker] of srcs) for (let k = 0; k < 5; k++) {
+      if (!cs[k]) continue;
+      const avail = tot.slice(); avail[k] -= cs[k];
+      for (let line = -1; line < 5; line++) {
+        if (line >= 0 && canPlace(C.b, line, k)) continue;
+        bv = Math.max(bv, hardValue(C, k, cs[k], line, marker, avail));
+      }
+    }
+    return bv === -Infinity ? 0 : bv;
+  };
+  const moves = legalTakes(v, seat).map((m) => {
+    const avail = total.slice(); avail[m.k] -= m.cnt;
+    return { ...m, own: hardValue(me, m.k, m.cnt, m.line, m.marker, avail) };
+  }).sort((a, b) => b.own - a.own);
+  // One move ahead for the most promising takes: what is the next player's best reply then?
+  let choice = moves[0], bs = -Infinity;
+  for (const m of moves.slice(0, 14)) {
+    const srcs = [], c2 = centre.slice();
+    let mk2 = hasMarker;
+    if (m.src === 'c') { c2[m.k] = 0; mk2 = false; }
+    facs.forEach((f, i) => {
+      if (i === m.src) { for (let k = 0; k < 5; k++) if (k !== m.k) c2[k] += f[k]; } // the rest slides to the centre
+      else if (f.some((x) => x)) srcs.push([f, false]);
+    });
+    if (c2.some((x) => x)) srcs.push([c2, mk2]);
+    const tot = total.slice(); tot[m.k] -= m.cnt;
+    const sc = m.own - 0.7 * (srcs.length ? best(opp, srcs, tot) : 0) + Math.random() * 0.05;
+    if (sc > bs) { bs = sc; choice = m; }
+  }
+  return { type: 'take', src: choice.src, color: choice.k, line: choice.line };
+}
+
 /* =====================================================================
    Art: tile motifs, icons, cover
    ===================================================================== */
@@ -530,16 +657,26 @@ const STYLE = `
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 6px 18px rgba(0, 0, 0, .2); }
 .mosaic-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .mosaic-chip { position: relative; display: inline-flex; align-items: center; gap: 7px; padding: 3px 12px 3px 3px; border-radius: 999px; max-width: 100%;
-  background: rgba(255, 255, 255, .06); border: 1px solid var(--line); font-size: .84rem; font-weight: 700; transition: box-shadow .3s; }
+  background: rgba(255, 255, 255, .06); border: 1px solid var(--line); font-size: .84rem; font-weight: 700; }
 .mosaic-ava { width: 28px; height: 28px; border-radius: 50%; flex: none; box-shadow: 0 0 0 2px var(--pc, #fff), 0 1px 4px rgba(0, 0, 0, .45); }
 .mosaic-ava .portrait { width: 100%; height: 100%; display: block; border-radius: 50%; }
 .mosaic-cn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 8.5em; }
 .mosaic-chip b { font-family: var(--font-display); font-weight: 700; color: var(--gold); font-size: 1rem; }
 .mosaic-chip.mosaic-me { background: rgba(76, 184, 255, .1); border-color: rgba(76, 184, 255, .32); }
-.mosaic-chip.mosaic-on { box-shadow: 0 0 0 2px var(--gold), 0 0 14px rgba(255, 207, 92, .45); }
-/* A short flash when this player's score goes up. */
-.mosaic-chip.mosaic-scored { animation: mosaicScored 1.2s ease-out .45s; }
-@keyframes mosaicScored { 20% { box-shadow: 0 0 0 2px #fff3b0, 0 0 24px 5px rgba(255, 214, 90, .55); } }
+/* The turn ring and the score flash are glows drawn once on pseudo-elements; only their opacity changes. */
+.mosaic-chip::before, .mosaic-chip::after { content: ''; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none; opacity: 0; }
+.mosaic-chip::before { box-shadow: 0 0 0 2px var(--gold), 0 0 14px rgba(255, 207, 92, .45); transition: opacity .3s; }
+.mosaic-chip.mosaic-on::before { opacity: 1; }
+/* A short flash when this player's score goes up (it takes the turn ring's place while it shows). */
+.mosaic-chip::after { box-shadow: 0 0 0 2px #fff3b0, 0 0 24px 5px rgba(255, 214, 90, .55); }
+.mosaic-chip.mosaic-scored::after { animation: mosaicScored 1.2s ease-out .45s; }
+.mosaic-chip.mosaic-scored::before { animation: mosaicRingOff 1.2s ease-out .45s; }
+.mosaic-chip.mosaic-scored.mosaic-alt::after { animation-name: mosaicScored2; } /* the next flash restarts on a kept chip */
+.mosaic-chip.mosaic-scored.mosaic-alt::before { animation-name: mosaicRingOff2; }
+@keyframes mosaicScored { 20% { opacity: 1; } }
+@keyframes mosaicScored2 { 20% { opacity: 1; } }
+@keyframes mosaicRingOff { 20% { opacity: 0; } }
+@keyframes mosaicRingOff2 { 20% { opacity: 0; } }
 .mosaic-chip .mosaic-fp { width: 16px; height: 16px; border-radius: 4px; display: grid; place-items: center; font-family: var(--font-display); font-size: .62rem; font-weight: 700;
   color: #7a5410; background: linear-gradient(145deg, #fffdf2, #e9dcb4); box-shadow: 0 1px 2px rgba(0, 0, 0, .5); }
 .mosaic-line2 { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; min-height: 36px; }
@@ -604,10 +741,17 @@ button.mosaic-hit:focus-visible { outline: 2px solid var(--gold); outline-offset
 ${GLAZES.map((gz, k) => `.mosaic-c${k} { --glaze: ${gz}; --motif: ${svgURL(MOTIFS[k])}; }`).join('\n')}
 .mosaic-c3.mosaic-tile::after { opacity: .5; }
 .mosaic-lift { animation: mosaicLift .32s cubic-bezier(.3,1.5,.5,1) forwards; z-index: 4; }
-@keyframes mosaicLift { to { transform: translateY(-15%) scale(1.12) rotate(var(--rot, 0deg)); filter: drop-shadow(0 0 calc(var(--u) * .9) rgba(255,220,110,.95)) brightness(1.08); } }
+@keyframes mosaicLift { to { transform: translateY(-15%) scale(1.12) rotate(var(--rot, 0deg)); filter: brightness(1.08); } }
+/* The lifted and the glinting tiles' glows are drawn once just under the tile, on its holder, and only
+   their opacity and transform animate (a live drop-shadow would be re-blurred on every frame). */
+.mosaic-tk.mosaic-up::before, .mosaic-tk.mosaic-shine::before { content: ''; position: absolute; inset: 0; border-radius: 17%; pointer-events: none; opacity: 0; --u: 1cqw; }
+.mosaic-tk.mosaic-up::before { z-index: 4; box-shadow: 0 0 calc(var(--u) * 1.8) rgb(255, 238, 119), 0 calc(var(--u) * .55) calc(var(--u) * 2) rgba(255, 238, 119, .48), 0 calc(var(--u) * .22) calc(var(--u) * 1.8) rgba(255, 238, 119, .32); animation: mosaicLiftGlow .32s cubic-bezier(.3,1.5,.5,1) forwards; }
+@keyframes mosaicLiftGlow { to { transform: translateY(-15%) scale(1.12) rotate(var(--rot, 0deg)); opacity: .95; } }
 .mosaic-dim { opacity: .6; filter: saturate(.7) brightness(.9); }
 .mosaic-glint { animation: mosaicGlint 1.1s .44s ease-out both; }
-@keyframes mosaicGlint { 0% { filter: brightness(1); } 22% { filter: brightness(1.85) drop-shadow(0 0 calc(var(--u) * 1.3) rgba(255,230,140,.95)); transform: scale(1.16); } 100% { filter: brightness(1); transform: scale(1); } }
+@keyframes mosaicGlint { 0% { filter: brightness(1); } 22% { filter: brightness(1.85); transform: scale(1.16); } 100% { filter: brightness(1); transform: scale(1); } }
+.mosaic-tk.mosaic-shine::before { box-shadow: 0 0 calc(var(--u) * 2.6) rgb(255, 230, 140); animation: mosaicGlintGlow 1.1s .44s ease-out both; }
+@keyframes mosaicGlintGlow { 0% { opacity: 0; } 22% { opacity: .95; transform: scale(1.16); } 100% { opacity: 0; transform: scale(1); } }
 .mosaic-marker { display: grid; place-items: center; background: radial-gradient(circle at 32% 26%, #fffef6, #f3e7c8 48%, #cdb47c 100%);
   box-shadow: inset calc(var(--u) * .22) calc(var(--u) * .3) calc(var(--u) * .16) rgba(255,255,255,.8), inset calc(var(--u) * -.28) calc(var(--u) * -.42) calc(var(--u) * .5) rgba(110,80,30,.45),
     0 calc(var(--u) * .22) 0 rgba(0,0,0,.3), 0 calc(var(--u) * .55) calc(var(--u) * .9) rgba(0,0,0,.45); }
@@ -656,9 +800,13 @@ ${GLAZES.map((gz, k) => `.mosaic-c${k} { --glaze: ${gz}; --motif: ${svgURL(MOTIF
     inset 0 0 0 1.05cqw rgba(60,80,150,.35), 0 1.4cqw 2.4cqw rgba(0,4,24,.5), 0 .45cqw 0 #56638f;
   position: relative; padding: 2.4cqw 2.9cqw 3cqw; border-radius: 3.4cqw; color: #26346a; background-color: #e6eaf4;
   background-image: var(--grain), radial-gradient(ellipse at 28% 0%, #ffffff 0%, #eef1f9 40%, #dbe1ef 80%, #c8d0e4 100%);
-  background-blend-mode: multiply, normal; box-shadow: var(--sh); transition: box-shadow .4s; }
+  background-blend-mode: multiply, normal; box-shadow: var(--sh); }
 .mosaic-board::before { content: ''; position: absolute; inset: 1.7cqw; border-radius: 2.3cqw; border: .22cqw solid rgba(60, 85, 160, .22); pointer-events: none; }
-.mosaic-board.mosaic-turn { box-shadow: var(--sh), 0 0 0 .55cqw rgba(255, 207, 92, .95), 0 0 3.6cqw rgba(255, 207, 92, .55); }
+/* The turn glow is drawn once on a pseudo-element of the board's holder, just under the board (and its own
+   shadows, as when it was the last of the board's shadows); only its opacity changes. */
+.mosaic-bwrap::before { content: ''; position: absolute; inset: 0; border-radius: 3.4cqw; pointer-events: none; opacity: 0; transition: opacity .4s;
+  box-shadow: 0 0 0 .55cqw rgba(255, 207, 92, .95), 0 0 3.6cqw rgba(255, 207, 92, .55); }
+.mosaic-bwrap.mosaic-turnw::before { opacity: 1; }
 .mosaic-bhead { display: flex; align-items: center; gap: 2.2cqw; min-height: 9cqw; margin: 0 .3cqw 1.8cqw; position: relative; padding-bottom: 1.4cqw;
   background: ${FRIEZE} left bottom / 4.8cqw 2.4cqw repeat-x; }
 .mosaic-face { width: 8.6cqw; height: 8.6cqw; flex: none; border-radius: 50%; box-shadow: 0 0 0 .5cqw var(--pc, #fff), 0 .4cqw 1cqw rgba(20, 30, 70, .35); }
@@ -669,8 +817,11 @@ ${GLAZES.map((gz, k) => `.mosaic-c${k} { --glaze: ${gz}; --motif: ${svgURL(MOTIF
 .mosaic-bname small { display: block; font-family: var(--font-body); font-size: 2.5cqw; font-weight: 800; color: #6774a3; letter-spacing: .12em; text-transform: uppercase; line-height: 1.2; }
 .mosaic-score { display: inline-flex; align-items: center; gap: .8cqw; padding: .9cqw 2.6cqw .9cqw 1.5cqw; border-radius: 99px; flex: none;
   background: linear-gradient(180deg, #2f4082, #19234f); box-shadow: inset 0 .3cqw 0 rgba(200, 215, 255, .28), inset 0 -.3cqw .5cqw rgba(0, 0, 0, .4), 0 .4cqw .8cqw rgba(20, 30, 70, .35), 0 0 0 .3cqw #c9a24a; }
+/* (This flash swaps the shadows in one step, so it costs two repaints of the pill, not one per frame.) */
 .mosaic-score.mosaic-scored { animation: mosaicScoredPill 1.2s ease-out .45s; }
+.mosaic-score.mosaic-scored.mosaic-alt { animation-name: mosaicScoredPill2; }
 @keyframes mosaicScoredPill { 20% { box-shadow: inset 0 .3cqw 0 rgba(200, 215, 255, .28), 0 0 0 .3cqw #ffe9a0, 0 0 4cqw 1.2cqw rgba(255, 214, 90, .7); } }
+@keyframes mosaicScoredPill2 { 20% { box-shadow: inset 0 .3cqw 0 rgba(200, 215, 255, .28), 0 0 0 .3cqw #ffe9a0, 0 0 4cqw 1.2cqw rgba(255, 214, 90, .7); } }
 .mosaic-score svg { width: 5.6cqw; height: 5.6cqw; display: block; }
 .mosaic-score b { display: inline-block; font-family: var(--font-display); font-weight: 700; font-size: 5.4cqw; line-height: 1; color: #ffd76a; text-shadow: 0 .25cqw 0 rgba(0, 0, 0, .6); min-width: 2ch; text-align: center; }
 .mosaic-bbody { display: grid; grid-template-columns: repeat(5, var(--mz-cell)) 5.2cqw repeat(5, var(--mz-cell)); grid-template-rows: repeat(5, var(--mz-cell)); gap: var(--mz-gap); position: relative; }
@@ -774,6 +925,8 @@ const UI = {
   frame: null, // what is on screen: { v, fx, raise, fresh }
   queue: [], busy: false, timers: [],
   tseq: 0, eseq: 0, keys: new Set(), sel: null, collapsed: {}, draws: 0,
+  scored: [], // per seat: the "scored" flash classes for this draw
+  alt: {}, // game id + player id -> which of the two flash animations plays next
 };
 // Side drawers: the chronicle folds away on phones so the table gets the screen; both stay as the player left them.
 let chronOpen = typeof matchMedia === 'function' ? matchMedia('(min-width: 901px)').matches : true;
@@ -801,7 +954,10 @@ function tileDiv(t, cls = '', tilted = false) {
 }
 function tk(t, { style = '', inner = '', noenter = false, tilted = false } = {}) {
   const key = t === MARKER ? 'marker' : 't' + t;
-  return `<div class="mosaic-tk" data-k="${key}"${noenter ? ' data-noenter' : ''}${style ? ` style="${style}"` : ''}>${tileDiv(t, inner, tilted)}</div>`;
+  // A lifted or glinting tile's glow is drawn on its holder, which then also needs the tile's tilt.
+  const glow = inner === 'mosaic-lift' ? ' mosaic-up' : inner === 'mosaic-glint' ? ' mosaic-shine' : '';
+  if (glow === ' mosaic-up' && tilted && t !== MARKER) style += `;--rot:${rot(t)}deg`;
+  return `<div class="mosaic-tk${glow}" data-k="${key}"${noenter ? ' data-noenter' : ''}${style ? ` style="${style}"` : ''}>${tileDiv(t, inner, tilted)}</div>`;
 }
 
 /* ---------- table: coasters, centre pool, bag, lid ---------- */
@@ -864,10 +1020,10 @@ function tableHTML(v, o) {
 function boardHTML(v, seat, o) {
   const b = v.boards[seat], p = v.players[seat], P = esc(p.id);
   const sel = o.sel;
-  let h = `<div class="mosaic-bwrap${o.raise ? ' mosaic-raise' : ''}"><section class="mosaic-board${o.big ? '' : ' mosaic-mini'}${o.turn ? ' mosaic-turn' : ''}${o.collapsed ? ' mosaic-collapsed' : ''}">`;
+  let h = `<div class="mosaic-bwrap${o.raise ? ' mosaic-raise' : ''}${o.turn ? ' mosaic-turnw' : ''}"><section class="mosaic-board${o.big ? '' : ' mosaic-mini'}${o.turn ? ' mosaic-turn' : ''}${o.collapsed ? ' mosaic-collapsed' : ''}">`;
   h += `<header class="mosaic-bhead"${o.big ? '' : ` data-toggle="${P}" role="button" aria-label="Show or hide this board"`}>${faceHTML(v, seat)}
     <div class="mosaic-bname"><small>${o.self ? 'Your palace' : 'Palace of'}${o.big ? '' : `<span class="mosaic-chev">${icon('chevron')}</span>`}</small>${esc(p.name)}</div>
-    <div class="mosaic-score${scoredNow(v, seat) ? ' mosaic-scored' : ''}" title="Score">${LAUREL}<b data-a="p-${P}-score">${b.score}</b></div></header>`;
+    <div class="mosaic-score${UI.scored[seat] || ''}" title="Score">${LAUREL}<b data-a="p-${P}-score">${b.score}</b></div></header>`;
   if (o.collapsed) return h + '</section></div>';
   h += '<div class="mosaic-bbody">';
   for (let r = 0; r < 5; r++) {
@@ -913,7 +1069,7 @@ function barHTML(v, me, o) {
   const chips = v.players.map((p, i) => {
     const on = !v.over && v.phase === 'draft' && v.cur === i;
     const holds = v.boards[i].floor.includes(MARKER);
-    return `<div class="mosaic-chip${on ? ' mosaic-on' : ''}${i === me ? ' mosaic-me' : ''}${scoredNow(v, i) ? ' mosaic-scored' : ''}">${faceHTML(v, i, 'mosaic-ava')}<span class="mosaic-cn">${esc(p.name)}${i === me ? ' (you)' : ''}</span>${holds ? '<span class="mosaic-fp" title="Has the first-player tile">1</span>' : ''}<b>${v.boards[i].score}</b></div>`;
+    return `<div class="mosaic-chip${on ? ' mosaic-on' : ''}${i === me ? ' mosaic-me' : ''}${UI.scored[i] || ''}">${faceHTML(v, i, 'mosaic-ava')}<span class="mosaic-cn">${esc(p.name)}${i === me ? ' (you)' : ''}</span>${holds ? '<span class="mosaic-fp" title="Has the first-player tile">1</span>' : ''}<b>${v.boards[i].score}</b></div>`;
   }).join('');
   let line;
   if (v.over) {
@@ -980,6 +1136,14 @@ function draw(before) {
   const raise = fr.raise || {};
   const raised = (s) => (raise.seats || []).includes(s);
   const turnSeat = !v.over && v.phase === 'draft' ? v.cur : -1;
+  // A score that went up flashes once. Redraws keep the chip and the pill, so a flash right after
+  // another one switches to the twin animation, which starts over.
+  UI.scored = v.players.map((p, i) => {
+    if (!scoredNow(v, i)) return '';
+    const k = v.gid + '|' + p.id;
+    UI.alt[k] = !UI.alt[k];
+    return UI.alt[k] ? ' mosaic-scored mosaic-alt' : ' mosaic-scored';
+  });
 
   const others = [];
   for (let i = 1; i < n; i++) others.push((mine + i) % n);
@@ -987,7 +1151,10 @@ function draw(before) {
     big: false, self: false, turn: s === turnSeat, raise: raised(s), fresh: fr.fresh, collapsed: !!UI.collapsed[v.players[s].id],
   })).join('');
 
-  el.innerHTML = `<div class="mosaic-root"><div class="game-layout">
+  // Tiles in the lid before this redraw (a tile still in the lid but under the pile doesn't fly).
+  const wasLid = before ? new Set([...el.querySelectorAll('.mosaic-lid [data-k]')].map((e) => e.dataset.k)) : null;
+  // Redraw only what changed: morph keeps every node that is already right.
+  morph(el, `<div class="mosaic-root"><div class="game-layout">
     <div class="mosaic-main"><div class="felt mosaic-felt">
       ${barHTML(v, me, { myTurn, mineTurn, sel })}
       <div class="mosaic-stage${raise.table || raised(mine) ? ' mosaic-raise' : ''}"><div class="mosaic-stage-in">
@@ -1003,25 +1170,27 @@ function draw(before) {
       <details class="panel drawer mosaic-rules" ${rulesOpen ? 'open' : ''}><summary>${icon('help')}<span>How to play</span>${icon('chevron', 'chev')}</summary>
         <div class="drawer-body">${RULES_LIST}</div></details>
     </div>
-  </div></div>`;
+  </div></div>`);
   el.onclick = onClick;
-  // <details> toggle events don't bubble, so listen on each drawer after it is drawn.
-  el.querySelector('.mosaic-chron')?.addEventListener('toggle', (e) => { chronOpen = e.currentTarget.open; });
-  el.querySelector('.mosaic-rules')?.addEventListener('toggle', (e) => { rulesOpen = e.currentTarget.open; });
+  // <details> toggle events don't bubble, so each drawer gets a handler. Properties, not listeners:
+  // the drawers are kept between redraws, so listeners would pile up.
+  const chron = el.querySelector('.mosaic-chron'), rules = el.querySelector('.mosaic-rules');
+  if (chron) chron.ontoggle = (e) => { chronOpen = e.currentTarget.open; };
+  if (rules) rules.ontoggle = (e) => { rulesOpen = e.currentTarget.open; };
   prevScores = new Map(v.players.map((p, i) => [v.gid + '|' + p.id, v.boards[i].score]));
 
   const now = new Set();
   el.querySelectorAll('[data-k]').forEach((e) => now.add(e.dataset.k));
   if (before) {
     flip(el, before);
-    vanish(before, v, now);
+    vanish(before, v, now, wasLid);
   }
   entrance(UI.keys, now);
   UI.keys = now;
 }
 
 // Tiles that left the screen: back into the lid, or (when the lid was poured out) into the bag.
-function vanish(before, v, now) {
+function vanish(before, v, now, wasLid) {
   if (reduced) return;
   const lidSet = new Set(v.lid);
   const lid = rectQ('mosaic-lid'), bag = rectQ('mosaic-bag');
@@ -1032,7 +1201,7 @@ function vanish(before, v, now) {
     const id = +k.slice(1);
     let to;
     if (lidSet.has(id)) {
-      if (b.el.closest && b.el.closest('.mosaic-lid')) continue; // still in the lid, just under the pile
+      if (wasLid.has(k)) continue; // still in the lid, just under the pile
       to = lid;
     } else to = bag;
     if (!to || !b.rect.width) continue;
@@ -1279,7 +1448,9 @@ export default {
   // The platform waits for this before the game-over confetti.
   isAnimating: () => !!UI.busy,
 
-  setup(players) {
+  options: [levelOption()],
+
+  setup(players, opts) {
     const n = players.length;
     const nf = n <= 2 ? 5 : n === 3 ? 7 : 9;
     const start = rand(n);
@@ -1293,6 +1464,7 @@ export default {
       boards: players.map(() => newBoard()),
       seq: 0, ev: null, tiling: null, tilingSeq: 0,
       log: [], over: false, winners: [], final: null,
+      level: levelOf(opts), // computer difficulty, public: every view carries it to the bots
     };
     fillFactories(s);
     log(s, `— Round 1 — ${s.players[start].name} starts. Coasters are set with ${nf * 4} tiles.`);
@@ -1337,7 +1509,9 @@ export default {
   },
 
   bot(v, pid) {
-    return botMove(v, pid);
+    if (v.level === 'easy') return botEasy(v, pid);
+    if (v.level === 'hard') return botHard(v, pid);
+    return botMove(v, pid); // Normal: the original computer player
   },
 
   render,

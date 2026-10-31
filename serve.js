@@ -2,7 +2,7 @@
 const http = require('node:http');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const types = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
+const types = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp', '.json': 'application/json', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
 const inside = (root, file) => {
   const rel = path.relative(root, file);
   return rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel);

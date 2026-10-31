@@ -81,6 +81,15 @@ game, and renders every game for every seat. Results appear under the repository
 It lists every game's name, cover, rules and options so the home page loads without the games' code,
 and it holds the site's version. Commit it with your changes; the GitHub check fails if it is stale.
 
+Covers are shown as pre-rendered images (`covers/`), so phones don't redraw complex illustrations.
+After changing a game's `cover` art, run `node tools/build-covers.mjs` (it needs a browser: Playwright's
+Chromium, or set `CHROME_PATH` to an installed Chrome), then `node tools/build-catalog.mjs`, and commit
+both. Until then that cover shows as the live illustration, and the GitHub check reports it as stale.
+`node tools/build-art.mjs` redraws the app icons and the link-preview image (`icons/og-image.jpg`).
+
+`node tools/pixel-compare.mjs` proves a change didn't alter how the games look: it plays each game to fixed
+positions in two copies of the site and compares the boards pixel by pixel (see the file's header).
+
 ## Reliability
 
 - **Version check.** Players' copies of the site compare versions when they connect. If someone has a
@@ -101,6 +110,25 @@ and it holds the site's version. Commit it with your changes; the GitHub check f
   each player's delay to the host (hover for the milliseconds, and whether the connection goes through a relay).
 - **Rematch.** When a game ends, the host's **Rematch** button keeps everyone in their seats (chess swaps
   colours); other players can tap **Ask for a rematch**.
+- **Flood protection.** Each guest's device may send a burst of 60 messages, then 20 a second, far above
+  real play (drawing sends about three a second). A device that goes over gets one "slow down" message,
+  and anything larger than 100 KB is ignored, so one misbehaving phone can't swamp the host.
+- **Fast redraws.** Games update only the parts of the board that changed (`morph` in `js/fx.js`), and
+  effects are drawn in ways that are cheap to repaint, so moves stay smooth on mid-range phones.
+
+## Crash reports (optional)
+
+When switched on, the site sends an anonymous report if something breaks on a player's device: the error,
+the screen and game, the site version and the browser. It never sends names, room codes, chat or game
+contents, sends each problem once per visit (at most five per visit), and stores nothing about IP addresses.
+It is off until you set it up (free, about five minutes):
+1. In a free Cloudflare account, create a KV namespace (Storage & Databases → KV), e.g. `gn-error-reports`.
+2. Create a Worker (Workers & Pages → Create → Worker), open **Edit code**, paste `server/error-reports.js`, deploy.
+3. In the Worker's Settings, bind the KV namespace with the variable name `REPORTS`, and add a secret
+   `VIEW_KEY` (a long random password).
+4. Put `https://<your-worker>.workers.dev/report` into `errorReports` in `js/config.js` and push.
+Read the latest reports at `https://<your-worker>.workers.dev/recent?key=<VIEW_KEY>`. Reports expire after
+30 days. `node tools/report-test.mjs` checks the Worker.
 
 ## Playing a game
 
@@ -153,10 +181,14 @@ screen), then chooses:
 During a game, a trophy chip in the game bar opens the standings. After each game the host presses
 **Next game ▸**; the last game crowns the champion.
 
-## Chess computer levels
+## Computer levels
 
-The host picks the computer's strength in the lobby: Easy (the built-in player) or Club, Strong and
-Master, which use Stockfish at limited strength on the host's device.
+The host picks how strong the computer players are in the lobby's Game settings. Competitive games offer
+**Easy**, **Normal** and **Hard**; in co-op games and escape rooms, where computers are teammates, the
+choice is **Computer teammates: Learning, Steady or Expert**. Normal and Steady play exactly as the
+computer players always have. Chess keeps its own levels: Easy (the built-in player) or Club, Strong and
+Master, which use Stockfish at limited strength on the host's device. `node tools/levels-test.mjs` checks
+that Hard beats Easy head-to-head, and that Expert teammates do better than Learning ones.
 
 ## Spectators
 
