@@ -145,17 +145,31 @@ the setup.
 
 Creature Island players can keep their explorer (their character, creatures, items and story progress) in a
 free Cloudflare Worker with a D1 database. Nothing is saved until a player chooses **Save adventure**; live
-play never touches the service. Each device keeps a private key in the browser, and the service stores only
-its SHA-256 and the save itself, never IP addresses. Without the service, players can still save to a file.
+play never touches the service. Without the service, players can still save to a file.
+
+Saves belong to an **explorer account**, a name and a 4-digit PIN, so a player can continue on any device.
+Players sign in on the island's start screen, or later from the bag's Save tab.
+- **What's stored:** no PINs. A PIN is kept only as a keyed fingerprint, made with a secret held by the
+  Worker (`PIN_PEPPER`), so a copy of the database alone can't reveal it. Session tokens are stored only as
+  their SHA-256, and IP addresses never.
+- **Guessing:** 4 digits are only 10,000 possibilities, so each name pauses after wrong PINs: 15 minutes
+  after 5, an hour after 10, a day after 15 or more. Each try is counted before its PIN is checked, so
+  guesses sent all at once can't get around it.
+- **Forgotten PINs:** a PIN can't be reset, so players should remember it.
+- **Saves from before accounts:** a save made before accounts (under a private browser key) moves into the
+  account the first time its owner signs in on that browser.
 
 One command sets it up. It needs a Cloudflare API token with Account · Workers Scripts · Edit,
 Account · D1 · Edit and Account · Account Settings · Read:
 
     node tools/deploy-island-saves.mjs
 
-It asks for the token (typing stays hidden) and never stores it. Then it:
+It asks for the token (typing stays hidden). After the first time, it offers to remember it on this computer,
+outside the project and encrypted for your Windows user, so later runs of either setup command don't ask
+again. `--forget-token` clears it. Then it:
 1. creates the `island-saves` D1 database;
-2. uploads `server/island-saves.js` as a Worker, with the database bound as `DB`;
+2. uploads `server/island-saves.js` as a Worker, with the database bound as `DB`, and gives it a random `PIN_PEPPER`
+   secret the first time (later runs keep it, so PINs keep working);
 3. switches on its workers.dev address and checks that it answers;
 4. writes the address into `islandSaves` in `js/config.js`.
 

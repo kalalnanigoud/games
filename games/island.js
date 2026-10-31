@@ -273,6 +273,18 @@ const ISLAND_CSS = `
 .isl-swatches { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .isl-sw, .isl-hair { width: 40px; height: 40px; min-width: 40px; padding: 0; border-radius: 12px; border: 2px solid rgba(255,255,255,.2); font-weight: 800; }
 .isl-sw.on, .isl-hair.on { border-color: #ffd43b; box-shadow: 0 0 0 2px rgba(255,212,59,.35); }
+.isl-root input { user-select: text; -webkit-user-select: text; touch-action: manipulation; }
+.isl-acct { margin: 12px 0 4px; padding: 12px; border-radius: 16px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); }
+.isl-acct h4 { margin: 0 0 4px; }
+.isl-acct.signed { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: 8px 10px 8px 12px; margin: 0 0 10px; font-size: .88rem; }
+.isl-acct.signed span { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.isl-acct.signed button { min-height: 40px; flex: none; }
+.isl-acct-fields { display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 8px; margin: 8px 0; }
+.isl-acct-fields.three { grid-template-columns: minmax(0, 1fr) 84px 84px; }
+.isl-acct-fields input { min-height: 44px; font-size: 16px; padding: 0 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,.18); background: rgba(5,10,30,.55); color: #fff; min-width: 0; }
+.isl-acct-fields input[type="password"] { letter-spacing: .3em; text-align: center; }
+.isl-acct-fields input:focus { outline: 2px solid #7c6cff; outline-offset: 1px; }
+@media (max-width: 420px) { .isl-acct-fields.three { grid-template-columns: 1fr 1fr; } .isl-acct-fields.three input[name="acctName"] { grid-column: 1 / -1; } }
 .isl-file { display: inline-flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--line-2, rgba(255,255,255,.2)); cursor: pointer; font-weight: 700; }
 .isl-down { margin-bottom: 120px; display: grid; gap: 6px; justify-items: center; padding: 14px 18px; border-radius: 18px; background: rgba(120,20,30,.88); text-align: center; max-width: 340px; }
 .isl-down b { font-family: var(--font-display); font-size: 1.3rem; }

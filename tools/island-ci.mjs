@@ -49,7 +49,7 @@ async function open(opts = {}) {
   await context.route(/https:\/\/fonts\./, (r) => r.abort());
   await context.route(saveUrl.replace(/\/+$/, '') + '/**', async (route) => {
     const req = route.request();
-    const res = await worker.fetch(new Request(req.url(), { method: req.method(), headers: req.headers(), body: ['GET', 'HEAD', 'OPTIONS'].includes(req.method()) ? undefined : req.postData() }), { DB: D1 });
+    const res = await worker.fetch(new Request(req.url(), { method: req.method(), headers: req.headers(), body: ['GET', 'HEAD', 'OPTIONS'].includes(req.method()) ? undefined : req.postData() }), { DB: D1, PIN_PEPPER: 'ci-pepper' });
     route.fulfill({ status: res.status, headers: Object.fromEntries(res.headers), body: Buffer.from(await res.arrayBuffer()) });
   });
   await context.addInitScript(() => localStorage.setItem('gn-help-island', '1'));
@@ -62,6 +62,16 @@ async function open(opts = {}) {
 }
 const S = (page) => page.evaluate(async () => { const { S } = await import('/js/state.js'); return { token: S.token, code: S.code, players: S.players, started: S.started, status: S.status }; });
 const islandReady = (page) => waitFor(page, async () => { const m = await import('/games/island.js'); return !!m.debug.client?.state.ready; });
+// The start screen's explorer account: create one with a name and a 4-digit PIN.
+const signUpOn = async (page, name, pin) => {
+  await page.waitForSelector('[data-acct-form]');
+  await page.click('[data-acct="mode-create"]');
+  await page.fill('[name="acctName"]', name);
+  await page.fill('[name="acctPin"]', pin);
+  await page.fill('[name="acctPin2"]', pin);
+  await page.click('[data-acct-form] button[type="submit"]');
+  await page.waitForSelector('.isl-pick .isl-acct.signed');
+};
 const pick = async (page) => {
   await page.waitForSelector('.isl-pick [data-pick="new"]');
   await page.click('.isl-pick [data-pick="new"]');
@@ -81,6 +91,7 @@ try {
   for (const [p, name] of [[phone, 'Phone'], [g2, 'Bea'], [g3, 'Cy']]) { await p.fill('#nameIn', name); await p.fill('#codeIn', code); await p.click('#joinBtn'); }
   await waitFor(host, async () => (await import('/js/state.js')).S.players.length === 4);
   await host.click('#startBtn');
+  await signUpOn(phone, 'Phone Explorer', '4826');
   await Promise.all([host, phone, g2, g3].map(pick));
   const hw = () => host.evaluate(async () => { const { debug } = await import('/games/island.js'); return [...debug.world.players.values()].map((p) => ({ id: p.id, ready: p.ready, x: p.body.x, y: p.body.y, seat: p.seat })); });
   let players = await hw();
@@ -170,10 +181,17 @@ try {
 
   // Another tab saves a newer copy of this explorer. Saving here conflicts; Cancel then Save must conflict
   // again rather than quietly overwrite it, and only "Replace it" does.
-  const phoneKey = await phone.evaluate(() => localStorage.getItem('island-explorer-key'));
+  const phoneKey = await phone.evaluate(() => JSON.parse(localStorage.getItem('island-session')).token);
+  assert.ok(!(await phone.evaluate(() => JSON.stringify(localStorage))).includes('4826'), 'the PIN is never kept in the browser');
+  // Any other device: the same name and PIN bring back the same explorer.
+  const login = await worker.fetch(new Request(saveUrl.replace(/\/+$/, '') + '/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'phone explorer', pin: '4826' }) }), { DB: D1, PIN_PEPPER: 'ci-pepper' });
+  const other = await login.json();
+  const fromElsewhere = await worker.fetch(new Request(saveUrl.replace(/\/+$/, '') + '/explorer', { headers: { authorization: 'Bearer ' + other.token } }), { DB: D1, PIN_PEPPER: 'ci-pepper' });
+  assert.equal((await fromElsewhere.json()).data.name, 'Phone', 'signing in elsewhere loads the same explorer');
+  console.log('PASS an explorer account (name + PIN) works from any device, and the PIN is never stored');
   const rowNow = () => { const r = db.prepare('SELECT rev, data FROM explorers').get(); return { rev: r.rev, name: JSON.parse(r.data).name }; };
   await wait(2100);
-  const elsewhere = await worker.fetch(new Request(saveUrl.replace(/\/+$/, '') + '/explorer', { method: 'PUT', headers: { authorization: 'Bearer ' + phoneKey, 'content-type': 'application/json' }, body: JSON.stringify({ rev: 1, data: { kind: 'island-explorer', v: 1, name: 'Other tab', lv: 9 } }) }), { DB: D1 });
+  const elsewhere = await worker.fetch(new Request(saveUrl.replace(/\/+$/, '') + '/explorer', { method: 'PUT', headers: { authorization: 'Bearer ' + phoneKey, 'content-type': 'application/json' }, body: JSON.stringify({ rev: 1, data: { kind: 'island-explorer', v: 1, name: 'Other tab', lv: 9 } }) }), { DB: D1, PIN_PEPPER: 'ci-pepper' });
   assert.equal((await elsewhere.json()).rev, 2);
   await wait(2100);
   await phone.click('[data-save="cloud"]');

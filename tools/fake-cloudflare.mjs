@@ -50,7 +50,10 @@ export async function fakeCloudflare(token, { subdomain = null } = {}) {
 // Where a deployed Worker would answer: runs `worker` locally, with env() for its bindings.
 export async function fakeWorkerHost(worker, env) {
   const server = http.createServer(async (req, res) => {
-    const out = await worker.fetch(new Request('http://live.test' + req.url, { method: req.method, headers: req.headers }), env());
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const body = ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks);
+    const out = await worker.fetch(new Request('http://live.test' + req.url, { method: req.method, headers: req.headers, body }), env());
     res.writeHead(out.status, Object.fromEntries(out.headers));
     res.end(Buffer.from(await out.arrayBuffer()));
   });

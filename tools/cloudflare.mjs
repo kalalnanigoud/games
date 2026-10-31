@@ -1,10 +1,13 @@
 // What the one-command Cloudflare setups share (tools/deploy-island-saves.mjs, tools/deploy-error-reports.mjs):
 // the hidden token prompt, Cloudflare API calls with plain-language errors, choosing the account, a D1
 // database, uploading a Worker, its workers.dev address, and writing an address into js/config.js.
-// The token is only ever sent to api.cloudflare.com and never written anywhere.
+// The token is only ever sent to api.cloudflare.com. If you choose to, it is remembered on this computer
+// (outside the project, encrypted for your Windows user), so later runs don't ask for it again.
 import fs from 'node:fs';
+import os from 'node:os';
 import readline from 'node:readline';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 const args = process.argv.slice(2);
@@ -14,6 +17,33 @@ export const root = new URL('../', import.meta.url);
 const API = (flag('api') || 'https://api.cloudflare.com/client/v4').replace(/\/+$/, ''); // --api: tests only
 export const CONFIG_FILE = flag('config') ? pathToFileURL(path.resolve(flag('config'))) : new URL('js/config.js', root); // --config: tests only
 export const PERMISSIONS = 'Account · Workers Scripts · Edit, Account · D1 · Edit, Account · Account Settings · Read';
+
+// ---- the remembered token ----
+// Windows: encrypted with DPAPI for the signed-in Windows user (PowerShell's SecureString), so the file is
+// useless to anyone else or on another computer. Elsewhere: a file only your user can read.
+// The token goes to PowerShell on standard input, never on a command line.
+const TOKEN_FILE = path.join(process.env.GAMENIGHT_TOKEN_DIR || path.join(process.env.APPDATA || path.join(os.homedir(), '.config'), 'gamenight'), 'cloudflare-token');
+const WINDOWS = process.platform === 'win32';
+function powershell(script, input) {
+  const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { input, encoding: 'utf8' });
+  if (r.status !== 0) throw new Error((r.stderr || '').trim().split('\n')[0] || 'PowerShell failed');
+  return r.stdout.trim();
+}
+export function rememberToken(value) {
+  fs.mkdirSync(path.dirname(TOKEN_FILE), { recursive: true });
+  const data = WINDOWS ? powershell('$t = [Console]::In.ReadToEnd().Trim(); ConvertTo-SecureString $t -AsPlainText -Force | ConvertFrom-SecureString', value) : value;
+  fs.writeFileSync(TOKEN_FILE, data, { mode: 0o600 });
+  return TOKEN_FILE;
+}
+export function rememberedToken() {
+  try {
+    const data = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
+    if (!data) return '';
+    return WINDOWS ? powershell('$s = [Console]::In.ReadToEnd().Trim() | ConvertTo-SecureString; [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))', data) : data;
+  } catch { return ''; }
+}
+// Forgetting empties the file (it holds nothing afterwards).
+export function forgetToken() { try { if (fs.existsSync(TOKEN_FILE)) fs.writeFileSync(TOKEN_FILE, ''); } catch {} }
 
 export const say = (msg) => console.log(msg);
 export function stop(msg) { console.error('\n✖ ' + msg); process.exit(1); }
@@ -60,9 +90,36 @@ export async function step(label, what, run) {
 // The token, then the account to deploy to. Returns the account's API path, e.g. /accounts/abc123.
 export async function login(title) {
   say(title + '\n');
-  token = (process.env.CLOUDFLARE_API_TOKEN || '').trim() || await ask('Paste your Cloudflare API token (hidden): ', true);
+  if (has('forget-token')) { forgetToken(); say('  Forgot the token saved on this computer.'); }
+  const fromEnv = (process.env.CLOUDFLARE_API_TOKEN || '').trim();
+  const saved = fromEnv || has('forget-token') ? '' : rememberedToken();
+  const typeIt = () => ask('Paste your Cloudflare API token (hidden): ', true);
+  token = fromEnv || saved || await typeIt();
   if (!token) stop('No token given.');
-  const accounts = await step('Finding your account', 'list your Cloudflare accounts', () => cf('GET', '/accounts?per_page=50'));
+  let typed = !fromEnv && !saved;
+  if (saved) say('  Using the token saved on this computer (run with --forget-token to remove it).');
+  let accounts = null;
+  if (saved) {
+    // A remembered token that was rolled or deleted: ask for the new one instead of failing.
+    try { accounts = await cf('GET', '/accounts?per_page=50'); }
+    catch (e) {
+      if (!(e.status === 401 || e.status === 403 || e.codes?.some((c) => c === 10000 || c === 9109))) stop(`Could not list your Cloudflare accounts: ${e.message}`);
+      say('  The saved token no longer works (it may have been rolled). Paste the new one.');
+      forgetToken();
+      token = await typeIt();
+      if (!token) stop('No token given.');
+      typed = true;
+    }
+  }
+  if (!accounts) accounts = await step('Finding your account', 'list your Cloudflare accounts', () => cf('GET', '/accounts?per_page=50'));
+  else say('• Finding your account… done');
+  if (typed && process.stdin.isTTY) {
+    const yes = /^y(es)?$/i.test(await ask(`  Remember this token on this computer, so you don't paste it again? It is kept encrypted for your ${WINDOWS ? 'Windows' : ''} user only. (y/N): `));
+    if (yes) {
+      try { say(`  Saved (encrypted) in ${rememberToken(token)}. Run with --forget-token to remove it.`); }
+      catch (e) { say(`  Couldn't save it (${e.message}); you'll be asked again next time.`); }
+    }
+  }
   let account = flag('account') ? accounts.find((a) => a.id === flag('account')) || { id: flag('account'), name: flag('account') } : accounts[0];
   if (!flag('account') && accounts.length > 1) {
     accounts.forEach((a, i) => say(`  ${i + 1}. ${a.name} (${a.id})`));
