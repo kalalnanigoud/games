@@ -68,9 +68,11 @@ export function defaultOpts(g) {
 export function validOpts(g, opts) {
   return Object.fromEntries((g?.options || []).map((o) => [o.id, o.choices.some(([v]) => v === opts?.[o.id]) ? opts[o.id] : o.default]));
 }
+// A tournament scores each game's winners. Games played live (an open-ended shared adventure) have none.
+export const tourGame = (g) => !!g && !g.live;
 export function validTourDraft(draft) {
-  const known = (id) => GAMES.some((g) => g.id === id);
-  const duel = GAMES.find((g) => g.id === draft?.ko);
+  const known = (id) => GAMES.some((g) => g.id === id && tourGame(g));
+  const duel = GAMES.find((g) => g.id === draft?.ko && tourGame(g));
   return {
     format: draft?.format === 'knockout' ? 'knockout' : 'series',
     picks: Array.isArray(draft?.picks) ? [...new Set(draft.picks.filter(known))] : [],

@@ -119,6 +119,24 @@ try {
   assert.ok(seen && Math.hypot(seen[0] - hostNow.x, seen[1] - hostNow.y) < 40, 'others see the host where the host is');
   console.log('PASS four players move at once (keyboard and touch stick) and every screen agrees');
 
+  // How to play opened while walking: the explorer stops, and letting go of the key inside it counts.
+  const hostX = () => host.evaluate(async () => (await import('/games/island.js')).debug.client.state.body.x);
+  await host.keyboard.down('KeyD');
+  await wait(300);
+  await host.click('.game-head [data-help="island"]');
+  await host.waitForSelector('.modal-bg');
+  await host.keyboard.up('KeyD');
+  const x1 = await hostX();
+  await wait(500);
+  const x2 = await hostX();
+  assert.ok(Math.abs(x2 - x1) < 4, `the explorer stays put behind the rules (${Math.round(x2 - x1)} px)`);
+  assert.deepEqual(await host.evaluate(async () => [...(await import('/games/island.js')).debug.client.state.keys]), [], 'no key is left held');
+  await host.keyboard.press('Escape');
+  await host.waitForSelector('.modal-bg', { state: 'detached' });
+  await wait(300);
+  assert.ok(Math.abs((await hostX()) - x2) < 4, 'and doesn’t walk off once the rules close');
+  console.log('PASS How to play stops the explorer and never leaves a key held');
+
   // A fifth person watches; there's no fifth explorer.
   const fifth = await open({ viewport: { width: 800, height: 600 } });
   await fifth.fill('#nameIn', 'Dee'); await fifth.fill('#codeIn', code); await fifth.click('#joinBtn');
@@ -149,6 +167,27 @@ try {
   assert.equal(row.rev, 1);
   assert.equal(JSON.parse(row.data).name, 'Phone');
   console.log('PASS Save adventure stores the explorer in the save service');
+
+  // Another tab saves a newer copy of this explorer. Saving here conflicts; Cancel then Save must conflict
+  // again rather than quietly overwrite it, and only "Replace it" does.
+  const phoneKey = await phone.evaluate(() => localStorage.getItem('island-explorer-key'));
+  const rowNow = () => { const r = db.prepare('SELECT rev, data FROM explorers').get(); return { rev: r.rev, name: JSON.parse(r.data).name }; };
+  await wait(2100);
+  const elsewhere = await worker.fetch(new Request(saveUrl.replace(/\/+$/, '') + '/explorer', { method: 'PUT', headers: { authorization: 'Bearer ' + phoneKey, 'content-type': 'application/json' }, body: JSON.stringify({ rev: 1, data: { kind: 'island-explorer', v: 1, name: 'Other tab', lv: 9 } }) }), { DB: D1 });
+  assert.equal((await elsewhere.json()).rev, 2);
+  await wait(2100);
+  await phone.click('[data-save="cloud"]');
+  await phone.waitForSelector('[data-save="force"]');
+  await phone.click('[data-save="cancel"]');
+  await wait(2100);
+  await phone.click('[data-save="cloud"]');
+  await phone.waitForSelector('[data-save="force"]');
+  assert.deepEqual(rowNow(), { rev: 2, name: 'Other tab' }, 'Cancel, then Save again, conflicts again instead of overwriting the newer save');
+  await wait(2100);
+  await phone.click('[data-save="force"]');
+  await waitFor(phone, () => !document.querySelector('[data-save="force"]') && !!document.querySelector('[data-save="cloud"]'));
+  assert.deepEqual(rowNow(), { rev: 3, name: 'Phone' }, 'only Replace overwrites it');
+  console.log('PASS a save conflict is only overwritten by an explicit Replace');
 
   // Leaving with unsaved progress asks first; Cancel keeps you on the island.
   await g3.evaluate(async () => { (await import('/js/net.js')).leave(); });

@@ -9,7 +9,7 @@ import { createVoice } from './voice.js';
 import { createTour, currentMatch, recordResult } from './tour.js';
 import { diff, apply } from './patch.js';
 import { rememberPlayed } from './library.js';
-import { MAX_ROOM, MAX_WATCHERS, BOT_NAMES, S, VERSION, getGame, gameReady, loadGame, defaultTimer, defaultOpts, validOpts, validTourDraft, seated, tableLimit, isWatching, adoptToken, myId, playerName, isBot, newerVersion, saveSession, queueSessionSave, flushSessionSave, clearSession } from './state.js';
+import { MAX_ROOM, MAX_WATCHERS, BOT_NAMES, S, VERSION, getGame, gameReady, loadGame, defaultTimer, defaultOpts, validOpts, validTourDraft, seated, tableLimit, tourGame, isWatching, adoptToken, myId, playerName, isBot, newerVersion, saveSession, queueSessionSave, flushSessionSave, clearSession } from './state.js';
 import { render, renderTopbar, paintNet } from './ui.js';
 
 const TAKEOVER_MS = 15000; // how long the backup host waits for the host to come back before taking over
@@ -586,6 +586,8 @@ export function requestRematch() {
 /* ---------------- tournaments (host) ---------------- */
 
 export function startTour(mode, games) {
+  const open = games.find((id) => !tourGame(getGame(id)));
+  if (open) return toast(`${getGame(open).name} can't be part of a tournament: it has no winner to score.`);
   try { S.tour = createTour(mode, games, seated()); } catch (e) { return toast(e.message); }
   return playTour();
 }
@@ -595,6 +597,7 @@ export function playTour() {
   if (!m) return;
   if (S.started && S.game && !S.game.over) return;
   if (!m.seats.every((id) => S.players.some((p) => p.id === id))) return toast('A tournament player is missing. Restore their seat or close the tournament.');
+  if (!tourGame(getGame(m.gameId))) return toast(`${getGame(m.gameId).name} can't be part of a tournament. Close this tournament to play it on its own.`);
   if (S.gameId !== m.gameId) { S.gameId = m.gameId; S.opts = defaultOpts(getGame(m.gameId)); S.timerSec = defaultTimer(getGame(m.gameId)); }
   for (const p of S.players) {
     if (m.seats.includes(p.id)) delete p.watch; else p.watch = true;

@@ -50,6 +50,14 @@ export function createClient(opts) {
   const nowSec = () => performance.now() / 1000;
   const serverNow = () => nowSec() + (st.offset ?? 0);
   const open = () => st.w.open || {};
+  // Unsaved: what the host last said, or, exactly right now, standing away from where the save was made.
+  const movedSinceSave = () => {
+    if (st.downT > 0) return false; // knocked out: a reload puts you in the village, which the host already counts
+    const s = st.me?.savedLoc, b = st.body;
+    return !!s && !!b && ((b.x >= 128 * T) !== (s.x >= 128 * T) || Math.hypot(b.x - s.x, b.y - s.y) > 64);
+  };
+  const isUnsaved = () => !!st.me && (st.me.unsaved || movedSinceSave());
+  const unsavedText = () => (st.me?.unsaved && st.me.unsavedWhy === 'progress' ? 'You have progress that isn’t saved yet.' : 'You’ve moved since your last save; saving keeps where you are now.');
 
   /* ---------------- messages from the host ---------------- */
   function receive(msg) {
@@ -101,7 +109,8 @@ export function createClient(opts) {
       case 'toast': toast(e[1], 'info'); break;
       case 'banner': banner(e[1], e[2]); sound('chime'); break;
       case 'dlg': openDialog(e[1]); break;
-      case 'snap': if (st.snapWait) { const w = st.snapWait; st.snapWait = null; w(e[1], e[2]); } break;
+      case 'snap': if (st.snapWait) { const w = st.snapWait; st.snapWait = null; w(e[1], e[2], e[3]); } break;
+      case 'saved': if (st.ackWait?.snap === e[1]) { const w = st.ackWait; st.ackWait = null; w.resolve(!!e[2]); } break;
       case 'ready': st.ready = true; st.joining = false; paintOverlay(); paintHud(); break;
       case 'warp': if (st.body) { st.body.x = e[1]; st.body.y = e[2]; } else st.body = newBody(e[1], e[2]); st.prev = { x: e[1], y: e[2] }; st.vis = { x: 0, y: 0 }; st.history = []; st.cam = { x: e[1], y: e[2] - 20 }; break;
       case 'down': st.downAt = now; paintOverlay(); sound('bad'); break;
@@ -130,10 +139,14 @@ export function createClient(opts) {
   const KEYMAP = { KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right' };
   const ACTKEYS = { KeyJ: BITS.attack, Space: BITS.attack, KeyK: BITS.dodge, ShiftLeft: BITS.dodge, ShiftRight: BITS.dodge, KeyL: BITS.ability, KeyQ: BITS.ability, KeyE: BITS.interact, Enter: BITS.interact, KeyC: BITS.catch };
   function typing(e) { const t = e.target; return t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable); }
+  const modalOpen = () => !!document.querySelector('.modal-bg');
   function onKey(e) {
-    if (!root?.isConnected || typing(e) || document.querySelector('.modal-bg')) return;
+    if (!root?.isConnected) return;
     const down = e.type === 'keydown';
-    if (KEYMAP[e.code]) { if (down) st.keys.add(KEYMAP[e.code]); else st.keys.delete(KEYMAP[e.code]); e.preventDefault(); return; }
+    // Letting go of a key always counts, even inside a dialog, so nothing stays held behind it.
+    if (!down && KEYMAP[e.code]) { st.keys.delete(KEYMAP[e.code]); return; }
+    if (typing(e) || modalOpen()) return;
+    if (KEYMAP[e.code]) { st.keys.add(KEYMAP[e.code]); e.preventDefault(); return; }
     if (!down) return;
     if (e.code === 'Escape') { if (st.leave) return closeLeave(); if (st.dlg) return closeDialog(); if (st.ui) return closeUi(); if (st.panel) return togglePanel(null); return; }
     // Enter and Space on a focused button press that button, not the game.
@@ -145,6 +158,8 @@ export function createClient(opts) {
     if (ACTKEYS[e.code]) { st.bits |= ACTKEYS[e.code]; e.preventDefault(); }
   }
   function sampleInput() {
+    // A window over the game (How to play, the site's dialogs) stops your explorer and lets go of keys.
+    if (modalOpen()) { st.keys.clear(); st.bits = 0; if (st.joy) st.joy.dx = st.joy.dy = 0; return [0, 0, 0]; }
     let dx = 0, dy = 0;
     if (st.joy?.on) { dx = st.joy.dx; dy = st.joy.dy; }
     else {
@@ -154,7 +169,7 @@ export function createClient(opts) {
       if (st.keys.has('down')) dy += 100;
       if (dx && dy) { dx *= 0.7071; dy *= 0.7071; }
     }
-    if (st.dlg || st.leave || st.ui) { dx = 0; dy = 0; }
+    if (st.dlg || st.leave || st.ui) { dx = 0; dy = 0; st.bits = 0; }
     const bits = st.bits;
     st.bits = 0;
     return [Math.round(dx), Math.round(dy), bits];
@@ -333,7 +348,7 @@ export function createClient(opts) {
     const re = el('.isl-raid');
     re.hidden = !raid;
     if (raid) setText('.isl-raid', raid.wave ? `Murkling raid · wave ${raid.wave} of 3 · ${raid.left} left` : 'Murklings are coming!');
-    el('.isl-bagbtn').classList.toggle('unsaved', !!me.unsaved);
+    el('.isl-bagbtn').classList.toggle('unsaved', isUnsaved());
     paintOverlay();
   }
   function paintBoss() {
@@ -517,7 +532,7 @@ export function createClient(opts) {
     } else if (tab === 'save') body = saveHTML();
     // Kept nodes (morph): the panel refreshes as health and items change without losing your place.
     if (soft && tab === 'map') return drawMap(box.querySelector('canvas'));
-    morph(box, `<div class="isl-tabs" role="tablist">${tabs.map(([id, ic, label]) => `<button role="tab" aria-selected="${id === tab}" data-tab="${id}" title="${label}">${ic}<span>${label}</span>${id === 'save' && me.unsaved ? '<i class="isl-dot"></i>' : ''}</button>`).join('')}<button class="icon-btn isl-x" data-panel="close" aria-label="Close">${IC.close}</button></div><div class="isl-panel-body" data-tab="${tab}">${body}</div>`);
+    morph(box, `<div class="isl-tabs" role="tablist">${tabs.map(([id, ic, label]) => `<button role="tab" aria-selected="${id === tab}" data-tab="${id}" title="${label}">${ic}<span>${label}</span>${id === 'save' && isUnsaved() ? '<i class="isl-dot"></i>' : ''}</button>`).join('')}<button class="icon-btn isl-x" data-panel="close" aria-label="Close">${IC.close}</button></div><div class="isl-panel-body" data-tab="${tab}">${body}</div>`);
     if (tab === 'map') drawMap(box.querySelector('canvas'));
   }
   let mapBase = null;
@@ -543,7 +558,7 @@ export function createClient(opts) {
       : s?.state === 'error' ? `<p class="isl-save-state bad">${esc(s.msg)}</p><div class="isl-row"><button class="primary" data-save="retry">Try again</button><button data-save="file">Save to a file instead</button></div>`
       : s?.state === 'conflict' ? `<p class="isl-save-state bad">${esc(s.msg)}</p><div class="isl-row"><button class="primary" data-save="force">Replace it with this explorer</button><button data-save="cancel">Cancel</button></div>`
       : s?.state === 'replace' ? `<p class="isl-save-state">Saving will replace <b>${esc(st.cloudName || 'your saved explorer')}</b> in the cloud with ${esc(me.name)}.</p><div class="isl-row"><button class="primary" data-save="replace">Replace and save</button><button data-save="cancel">Cancel</button></div>`
-      : me.unsaved ? `<p class="isl-save-state warn">You have progress that isn’t saved yet.</p>`
+      : isUnsaved() ? `<p class="isl-save-state warn">${unsavedText()}</p>`
       : `<p class="isl-save-state good">${IC.check}<span>Everything is saved${me.lastSave ? ` (${fmtTime(me.lastSave)})` : ''}.</span></p>`;
     return `${status}
       ${!s || s.state === 'done' ? `<div class="isl-row">${cloud ? `<button class="primary" data-save="cloud">${IC.cloud}Save adventure</button>` : ''}<button class="${cloud ? '' : 'primary'}" data-save="file">${IC.file}Save to a file</button></div>` : ''}
@@ -555,47 +570,63 @@ export function createClient(opts) {
   function snapshot() {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { st.snapWait = null; reject(new Error('The host didn’t answer. Check your connection and try again.')); }, 6000);
-      st.snapWait = (prog, rec) => { clearTimeout(timer); resolve({ prog, rec }); };
+      st.snapWait = (prog, rec, snap) => { clearTimeout(timer); resolve({ prog, rec, snap }); };
       if (!send({ k: 'cmd', c: 'save' })) { clearTimeout(timer); st.snapWait = null; reject(new Error('Not connected to the host right now. Try again in a moment.')); }
     });
   }
-  async function saveCloud(force = false) {
-    if (st.save?.state === 'saving') return false;
+  // Tells the host the save is stored; resolves to whether that save covers everything (false if the
+  // world moved on during the upload, or the host didn't answer).
+  function confirmSaved(snap, leaving = false) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => { if (st.ackWait?.snap === snap) st.ackWait = null; resolve(false); }, 6000);
+      st.ackWait = { snap, resolve: (v) => { clearTimeout(timer); resolve(v); } };
+      if (!send({ k: 'cmd', c: 'saved', snap, leaving })) { clearTimeout(timer); st.ackWait = null; resolve(false); }
+    });
+  }
+  // Resolves to { ok, upToDate }.
+  async function saveCloud(force = false, { leaving = false } = {}) {
+    if (st.save?.state === 'saving') return { ok: false };
     // A new explorer, or one loaded from a file, replaces the cloud save only when the player says so.
-    if (!force && st.cloudRev && !st.fromCloud && !st.replaceOk) { st.save = { state: 'replace' }; paintPanel(); return false; }
+    if (!force && st.cloudRev && !st.fromCloud && !st.replaceOk) { st.save = { state: 'replace' }; paintPanel(); return { ok: false }; }
     st.save = { state: 'saving' }; paintPanel(); paintOverlay();
     try {
-      const { prog, rec } = await snapshot();
+      const { rec, snap } = await snapshot();
+      // cloudRev is the revision this explorer came from or last saved; a newer one stored from elsewhere
+      // is a conflict, which only an explicit Replace (force) overwrites.
       const out = await saveExplorer(rec, st.cloudRev, force);
-      st.cloudRev = out.rev; st.fromCloud = true; st.cloudName = rec.name;
-      cmd('saved', { prog });
+      st.cloudRev = out.rev; st.fromCloud = true; st.cloudName = rec.name; st.conflict = null;
+      const upToDate = await confirmSaved(snap, leaving);
       st.save = null;
       toast('Adventure saved.', 'info');
       sound('chime');
       paintPanel(); paintOverlay();
-      return true;
+      return { ok: true, upToDate };
     } catch (e) {
-      st.save = e.code === 'conflict' ? { state: 'conflict', msg: `${e.message}${e.savedAt ? ` (last saved ${ago(e.savedAt)})` : ''}` } : { state: 'error', msg: e.message || 'Saving failed.' };
-      if (e.code === 'conflict') st.cloudRev = e.rev ?? st.cloudRev;
+      if (e.code === 'conflict') {
+        // Keep the newer save's details apart: this explorer's own revision doesn't change, so saving again
+        // without choosing Replace conflicts again rather than quietly overwriting.
+        st.conflict = { rev: e.rev, savedAt: e.savedAt };
+        st.save = { state: 'conflict', msg: `${e.message}${e.savedAt ? ` (saved ${ago(e.savedAt)})` : ''} To keep that save instead, leave without saving and continue it next time.` };
+      } else st.save = { state: 'error', msg: e.message || 'Saving failed.' };
       paintPanel(); paintOverlay();
-      return false;
+      return { ok: false };
     }
   }
-  async function saveFile() {
+  async function saveFile({ leaving = false } = {}) {
     try {
-      const { prog, rec } = await snapshot();
+      const { rec, snap } = await snapshot();
       const blob = new Blob([JSON.stringify({ kind: 'island-explorer-file', v: 1, savedAt: Date.now(), data: rec }, null, 1)], { type: 'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = `creature-island-${(rec.name || 'explorer').replace(/[^\w-]+/g, '-').toLowerCase()}-${new Date().toISOString().slice(0, 10)}.json`;
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-      cmd('saved', { prog });
+      const upToDate = await confirmSaved(snap, leaving);
       st.save = null;
       toast('Saved to a file. Keep it somewhere safe.', 'info');
       paintPanel();
-      return true;
-    } catch (e) { st.save = { state: 'error', msg: e.message || 'Saving failed.' }; paintPanel(); return false; }
+      return { ok: true, upToDate };
+    } catch (e) { st.save = { state: 'error', msg: e.message || 'Saving failed.' }; paintPanel(); return { ok: false }; }
   }
 
   /* ---------------- start: continue, new or from a file ---------------- */
@@ -688,16 +719,17 @@ export function createClient(opts) {
     const others = opts.isHost ? (st.w.roster || []).filter((r) => r.id !== st.pid && r.unsaved).map((r) => r.name) : [];
     const what = L.kind === 'leave' ? (opts.isHost ? 'Leaving closes the island for everyone.' : 'You can come back any time with your saved explorer.') : 'This ends the adventure for everyone.';
     if (L.state === 'saving') return `<div class="isl-card"><h2>Saving…</h2><p class="muted">One moment.</p></div>`;
-    return `<div class="isl-card"><h2>${st.me?.unsaved ? 'Save before you go?' : 'Close the island?'}</h2>
-      <p>${st.me?.unsaved ? 'You have progress that isn’t saved. ' : ''}${esc(what)}</p>
+    const mine = st.ready && isUnsaved();
+    return `<div class="isl-card"><h2>${mine ? 'Save before you go?' : 'Close the island?'}</h2>
+      <p>${mine ? unsavedText() + ' ' : ''}${esc(what)}</p>
       ${others.length ? `<p class="isl-save-state warn">${esc(others.join(', '))} ${others.length > 1 ? 'have' : 'has'} unsaved progress too. Give them a moment to save from their menus.</p>` : ''}
       ${L.error ? `<p class="isl-save-state bad">${esc(L.error)}</p>` : ''}
-      ${st.me?.unsaved && cloudAvailable() && st.cloudRev && !st.fromCloud ? `<p class="small muted">Saving replaces ${esc(st.cloudName || 'the explorer saved')} in the cloud.</p>` : ''}
-      <div class="isl-col">${st.me?.unsaved && st.ready ? `<button class="primary" data-leave="save">${L.error ? 'Try saving again' : st.cloudRev && !st.fromCloud && cloudAvailable() ? 'Replace and leave' : 'Save and leave'}</button><button class="bad" data-leave="go">Leave without saving</button>` : `<button class="primary" data-leave="go">${L.kind === 'leave' ? 'Leave' : 'Continue'}</button>`}<button data-leave="cancel">Cancel</button></div></div>`;
+      ${mine && cloudAvailable() && st.cloudRev && !st.fromCloud ? `<p class="small muted">Saving replaces ${esc(st.cloudName || 'the explorer saved')} in the cloud.</p>` : ''}
+      <div class="isl-col">${mine && L.conflict ? `<button class="primary" data-leave="force">Replace the newer save and leave</button>` : ''}${mine ? `<button class="${L.conflict ? '' : 'primary'}" data-leave="save">${L.error ? 'Try saving again' : st.cloudRev && !st.fromCloud && cloudAvailable() ? 'Replace and leave' : 'Save and leave'}</button><button class="bad" data-leave="go">Leave without saving</button>` : `<button class="primary" data-leave="go">${L.kind === 'leave' ? 'Leave' : 'Continue'}</button>`}<button data-leave="cancel">Cancel</button></div></div>`;
   }
   function beforeExit(kind, proceed) {
     if (!root?.isConnected) return false;
-    const mine = st.ready && st.me?.unsaved;
+    const mine = st.ready && isUnsaved();
     const friends = opts.isHost && (st.w.roster || []).some((r) => r.id !== st.pid && r.unsaved);
     if (!mine && !friends) return false;
     st.leave = { kind, proceed, state: 'ask', error: '' };
@@ -706,15 +738,20 @@ export function createClient(opts) {
     return true;
   }
   function closeLeave() { st.leave = null; paintOverlay(); }
-  async function leaveSave() {
+  async function leaveSave(force = false) {
     const L = st.leave;
-    L.state = 'saving'; L.error = ''; paintOverlay();
+    L.state = 'saving'; L.error = ''; L.conflict = false; paintOverlay();
     // "Replace and leave" was the button the player pressed when a different explorer is in the cloud.
     if (st.cloudRev && !st.fromCloud) st.replaceOk = true;
-    const ok = cloudAvailable() ? await saveCloud() : await saveFile();
+    const r = cloudAvailable() ? await saveCloud(force, { leaving: true }) : await saveFile({ leaving: true });
     if (st.leave !== L) return;
-    if (ok) { st.leave = null; paintOverlay(); L.proceed(); return; }
-    L.state = 'ask'; L.error = st.save?.msg || 'Saving failed.'; st.save = null;
+    // The world keeps running while a save uploads. Leave only once the host confirms the save has
+    // everything (it then takes the explorer off the island, so nothing more can be earned or lost).
+    if (r.ok && r.upToDate) { st.leave = null; paintOverlay(); L.proceed(); return; }
+    L.state = 'ask';
+    L.conflict = st.save?.state === 'conflict';
+    L.error = r.ok ? 'Something changed while that was saving, so the save doesn’t have everything yet. Save again, or leave without saving.' : st.save?.msg || 'Saving failed.';
+    st.save = null;
     paintOverlay();
   }
 
@@ -786,7 +823,7 @@ export function createClient(opts) {
     root.classList.toggle('touch', !!touch);
   }
   function clearKeys() { st.keys.clear(); if (st.joy) st.joy.on = false; }
-  function onUnload(e) { if (st.ready && st.me?.unsaved) { e.preventDefault(); e.returnValue = ''; } }
+  function onUnload(e) { if (st.ready && isUnsaved()) { e.preventDefault(); e.returnValue = ''; } }
   function bindUi() {
     root.addEventListener('contextmenu', (e) => e.preventDefault());
     // Joystick: put a thumb anywhere on the left side of the screen.
@@ -868,6 +905,7 @@ export function createClient(opts) {
     if (d.leave === 'cancel') return closeLeave();
     if (d.leave === 'go') { const L = st.leave; st.leave = null; paintOverlay(); return L?.proceed(); }
     if (d.leave === 'save') return leaveSave();
+    if (d.leave === 'force') return leaveSave(true);
   }
   function destroy() {
     disposed = true;

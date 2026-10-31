@@ -235,6 +235,7 @@ const draftSaved=JSON.parse(context.sessionStorage.getItem('gn-session'));
 t.localRoom('gems',draftSaved);
 assert.equal(t.S.lobbyMode,'tour'); assert.deepEqual(json(t.S.tourDraft),draftSaved.tourDraft);
 assert.deepEqual(json(t.validTourDraft({format:'wrong',picks:['gems','no-game','gems',null],ko:'spies'})),{format:'series',picks:['gems'],ko:null});
+assert.deepEqual(json(t.validTourDraft({format:'series',picks:['island','gems'],ko:'island'})),{format:'series',picks:['gems'],ko:null},'an open-ended live adventure is never a tournament game, even in a restored draft');
 t.localRoom('gems',{...draftSaved,lobbyMode:undefined,tourDraft:undefined});
 assert.equal(t.S.lobbyMode,'game'); assert.deepEqual(json(t.S.tourDraft),{format:'series',picks:[],ko:null});
 t.cleanup(); tasks.clear();

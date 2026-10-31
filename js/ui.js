@@ -9,7 +9,7 @@ import { openModal, closeModal } from './dialog.js';
 import { report } from './report.js';
 import { GAME_INFO, favorites, toggleFavorite, filterGames } from './library.js';
 import { standings, tourLine } from './tour.js';
-import { MAX_ROOM, S, GAMES, FILES, getGame, gameReady, loadGame, defaultTimer, defaultOpts, seated, tableLimit, isWatching, myId, playerName, isBot, saveSession, loadSession, clearSession } from './state.js';
+import { MAX_ROOM, S, GAMES, FILES, getGame, gameReady, loadGame, defaultTimer, defaultOpts, seated, tableLimit, tourGame, isWatching, myId, playerName, isBot, saveSession, loadSession, clearSession } from './state.js';
 import { clockSkew, voice, resume, leave, hostRoom, refreshLocalView, broadcast, addBot, fitTable, startGame, requestRematch, standingIn, startTour, playTour, closeTour, endGame, localRoom, joinRoom, send, joinVoice, leaveVoice, toggleWatch, liveSend, askExit } from './net.js';
 
 export const app = document.getElementById('app');
@@ -444,9 +444,9 @@ function showPicker(event) {
 }
 
 function tourSetupHTML(n) {
-  const fits = GAMES.filter((x) => n >= x.minPlayers && n <= x.maxPlayers);
+  const fits = GAMES.filter((x) => n >= x.minPlayers && n <= x.maxPlayers && tourGame(x));
   const unavailable = S.tourDraft.picks.filter((id) => !fits.some((g) => g.id === id));
-  const duels = GAMES.filter((x) => x.minPlayers <= 2 && x.maxPlayers >= 2);
+  const duels = GAMES.filter((x) => x.minPlayers <= 2 && x.maxPlayers >= 2 && tourGame(x));
   const series = S.tourDraft.format === 'series';
   const chip = (x, input) => `<label class="tour-pick">${input}<span>${esc(x.name)}</span></label>`;
   return `
@@ -465,7 +465,7 @@ function tourSetupHTML(n) {
 // What the tournament Start button would do, or why it can't yet.
 function tourPlan(n) {
   if (S.tourDraft.format === 'series') {
-    const games = S.tourDraft.picks.filter((id) => { const x = getGame(id); return n >= x.minPlayers && n <= x.maxPlayers; });
+    const games = S.tourDraft.picks.filter((id) => { const x = getGame(id); return n >= x.minPlayers && n <= x.maxPlayers && tourGame(x); });
     if (n < 2) return { label: 'Waiting for more players…' };
     if (!games.length) return { label: 'Pick the games to play' };
     return { label: `Start series · ${plural(games.length, 'game')}`, go: () => startTour('series', games) };

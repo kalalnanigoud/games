@@ -19,6 +19,7 @@ const angDiff = (a, b) => { let d = a - b; while (d > Math.PI) d -= 2 * Math.PI;
 const inVillage = (x, y) => inRect(x, y, VILLAGE);
 const areaOf = (x) => (x >= 128 * T ? 'cave' : 'overworld');
 const NEAR = 1050; // how far around each player the world is sent to them
+const MOVED = 64; // further than this from where you saved counts as unsaved
 const INTERACT = 58;
 
 // One explorer's body: what both the host and the player's own screen (to move without waiting) step the
@@ -264,6 +265,27 @@ export class World {
   }
   maxHp(p) { return playerMax(p.ex.lv, p.ex.equip.charm); }
   bump(p, progress = false) { p.meVer++; if (progress) p.prog++; }
+  // Unsaved: progress since the last confirmed save, or standing somewhere else than where it was saved
+  // (a reload would put the explorer back there). Walking a couple of steps doesn't count.
+  unsaved(p) {
+    if (p.prog > p.savedProg || !p.savedLoc) return true;
+    const b = this.placeOf(p);
+    return areaOf(b.x) !== areaOf(p.savedLoc.x) || Math.hypot(b.x - p.savedLoc.x, b.y - p.savedLoc.y) > MOVED;
+  }
+  // Where a reload would put the explorer: where they stand, or the village square if they are knocked out
+  // (or somewhere they can't stand). Saves record this, and "unsaved" compares against it.
+  placeOf(p) {
+    const b = p.body;
+    return p.downT > 0 || !fits(b.x, b.y, PLAYER.r, { bridge: 1, cave: 1, storm: 1 }) ? { x: SPAWN[0] * T, y: SPAWN[1] * T } : { x: Math.round(b.x), y: Math.round(b.y) };
+  }
+  // A player saved and is leaving: their explorer leaves the island now, before anything else changes.
+  park(p) {
+    p.ready = false; p.input.length = 0; this.chan(p, null);
+    if (p.comp) this.ents.delete(p.comp);
+    p.comp = null;
+    for (const e of this.ents.values()) if (e.only === p.id) this.ents.delete(e.id);
+    this.worldVer++;
+  }
 
   // ---- fighting ----
   enemiesNear(x, y, r, area) {
@@ -558,9 +580,19 @@ export class World {
     if (!p.ready || !ex) throw new Error('Choose your explorer first.');
     if (c === 'save') {
       // One consistent capture, taken now. Anything that happens while it uploads stays "unsaved".
-      return this.personal(p, ['snap', p.prog, this.snapshot(p)]);
+      const rec = this.snapshot(p), id = (p.snapN = (p.snapN || 0) + 1);
+      (p.snaps ||= new Map()).set(id, { prog: p.prog, loc: rec.loc });
+      if (p.snaps.size > 8) p.snaps.delete(p.snaps.keys().next().value);
+      return this.personal(p, ['snap', p.prog, rec, id]);
     }
-    if (c === 'saved') { if (Number.isSafeInteger(d.prog) && d.prog <= p.prog) { p.savedProg = Math.max(p.savedProg, d.prog); p.lastSave = this.now(); this.bump(p); } return; }
+    if (c === 'saved') {
+      const s = p.snaps?.get(d.snap);
+      if (s) { p.savedProg = Math.max(p.savedProg, s.prog); p.savedLoc = s.loc; p.lastSave = this.now(); p.snaps.delete(d.snap); this.bump(p); this.worldVer++; }
+      const upToDate = !!s && !this.unsaved(p);
+      this.personal(p, ['saved', d.snap, upToDate]);
+      if (d.leaving && upToDate) this.park(p);
+      return;
+    }
     if (c === 'respawn') { if (p.downT > 0) this.respawn(p); return; }
     if (p.downT > 0) throw new Error('You’re knocked out.');
     if (c === 'choose') return this.choose(p, d);
@@ -674,6 +706,7 @@ export class World {
     const ex = p.ex;
     p.ready = true;
     const at2 = ex.loc || villageSpot(p.seat);
+    p.savedLoc = p.prog === 0 ? { x: at2.x, y: at2.y } : null;
     p.body = newBody(at2.x, at2.y);
     p.hp = ex.hp; p.downT = 0; p.iT = 2; p.input.length = 0; p.nodes = {};
     this.summon(p);
@@ -713,13 +746,13 @@ export class World {
     const c = this.ents.get(p.comp);
     const team = ex.team.map((m) => ({ ...m, hp: c && c.uid === m.uid ? Math.round(c.hp) : m.hp }));
     const b = p.body;
-    const safe = p.downT > 0 || !fits(b.x, b.y, PLAYER.r, { bridge: 1, cave: 1, storm: 1 });
+
     return {
       kind: 'island-explorer', v: 1, content: CONTENT_VERSION, name: ex.name, look: ex.look, lv: ex.lv, xp: ex.xp,
       hp: p.downT > 0 ? this.maxHp(p) : Math.round(p.hp), shells: ex.shells, inv: { ...ex.inv }, gear: [...ex.gear], equip: { ...ex.equip },
       team, ranch: ex.ranch.map((m) => ({ ...m })), active: ex.active, dex: { seen: [...ex.dex.seen], caught: [...ex.dex.caught] },
       quests: { ...ex.quests }, flags: [...ex.flags], chests: [...ex.chests], time: Math.round(ex.time),
-      loc: safe ? { x: SPAWN[0] * T, y: SPAWN[1] * T } : { x: Math.round(b.x), y: Math.round(b.y) }, savedAt: this.now(),
+      loc: this.placeOf(p), savedAt: this.now(),
     };
   }
 
@@ -758,6 +791,7 @@ export class World {
   }
   everySecond() {
     const ready = this.readyPlayers();
+    for (const p of ready) { const u = this.unsaved(p); if (u !== p.wasUnsaved) { p.wasUnsaved = u; this.bump(p); this.worldVer++; } }
     this.refreshGates();
     // Notice creatures, for the field guide.
     for (const p of ready) for (const e of this.ents.values()) {
@@ -1242,7 +1276,7 @@ export class World {
   // Most events ride along with the next frame; replies to a request (a save, a conversation) go at once.
   personal(p, ev) {
     p.events.push(ev);
-    if (!p.ready || ['dlg', 'snap', 'ready', 'ui', 'warp', 'toast', 'boss', 'ending'].includes(ev[0])) this.send(p.id, { k: 'ev', ev: p.events.splice(0) });
+    if (!p.ready || ['dlg', 'snap', 'saved', 'ready', 'ui', 'warp', 'toast', 'boss', 'ending'].includes(ev[0])) this.send(p.id, { k: 'ev', ev: p.events.splice(0) });
   }
   sendFrame(p) {
     const b = p.body, area = areaOf(b.x);
@@ -1294,14 +1328,14 @@ export class World {
       inv: ex.inv, gear: ex.gear, equip: ex.equip,
       team: ex.team.map((m) => ({ uid: m.uid, sp: m.sp, lv: m.lv, xp: m.xp, next: xpToNext(m.lv), hp: c && c.uid === m.uid ? Math.round(c.hp) : m.hp, max: creatureMax(m.sp, m.lv), cd: Math.max(0, +((p.cds[m.uid] || 0) - this.t).toFixed(1)), out: !!c && c.uid === m.uid })),
       ranch: ex.ranch.map((m) => ({ uid: m.uid, sp: m.sp, lv: m.lv })), active: ex.active,
-      dex: ex.dex, quests: ex.quests, flags: ex.flags, chests: ex.chests, nodes, unsaved: p.prog > p.savedProg, lastSave: p.lastSave, time: Math.round(ex.time),
+      dex: ex.dex, quests: ex.quests, flags: ex.flags, chests: ex.chests, nodes, unsaved: this.unsaved(p), unsavedWhy: p.prog > p.savedProg ? 'progress' : 'place', savedLoc: p.savedLoc, lastSave: p.lastSave, time: Math.round(ex.time),
     };
   }
   worldView(p) {
     const boss = [...this.ents.values()].find((e) => e.type === 'b' && areaOf(e.x) === areaOf(p.body.x) && dist(e, p.body) < 1400);
     return {
       open: { ...this.open },
-      roster: [...this.players.values()].map((o) => ({ id: o.id, name: o.name, seat: o.seat, ready: o.ready, connected: o.connected, lv: o.ex?.lv || 0, look: o.ex?.look || null, zone: o.zone, down: o.downT > 0, unsaved: o.ready && o.prog > o.savedProg })),
+      roster: [...this.players.values()].map((o) => ({ id: o.id, name: o.name, seat: o.seat, ready: o.ready, connected: o.connected, lv: o.ex?.lv || 0, look: o.ex?.look || null, zone: o.zone, down: o.downT > 0, unsaved: o.ready && this.unsaved(o) })),
       boss: boss ? { kind: boss.kind } : null,
       raid: this.raid ? { wave: this.raid.wave, left: this.raid.left.length } : null,
     };

@@ -99,18 +99,33 @@ assert.ok(w.ents.size < 200, 'the world stays tidy');
   const a = P('A');
   a.ex.inv.sunberry = 7;
   w.message('A', { k: 'cmd', c: 'save' });
-  w.step();
   const snap = events('A').filter((e) => e[0] === 'snap').pop();
   assert.ok(snap, 'a save request returns a snapshot');
-  const [, prog, rec] = snap;
+  const [, prog, rec, snapId] = snap;
+  void prog;
   assert.equal(rec.kind, 'island-explorer');
   assert.equal(rec.inv.sunberry, 7);
   assert.ok(JSON.stringify(rec).length < 20000, 'a save is small');
   assert.equal(lastOf('A', 'me')?.unsaved ?? true, true);
-  w.message('A', { k: 'cmd', c: 'saved', prog });
+  w.message('A', { k: 'cmd', c: 'saved', snap: snapId });
+  assert.deepEqual(events('A').filter((e) => e[0] === 'saved').pop(), ['saved', snapId, true], 'the host confirms the save covers everything');
   assert.equal(a.prog, a.savedProg, 'confirmed saves clear the unsaved marker');
   a.ex.shells += 5; w.bump(a, true);
   assert.ok(a.prog > a.savedProg, 'progress after the snapshot stays unsaved');
+  // Standing somewhere else than the save counts as unsaved too (a reload would put you back there).
+  w.message('A', { k: 'cmd', c: 'save' });
+  const again = events('A').filter((e) => e[0] === 'snap').pop();
+  w.message('A', { k: 'cmd', c: 'saved', snap: again[3] });
+  assert.equal(w.unsaved(a), false);
+  a.body.x += 30;
+  assert.equal(w.unsaved(a), false, 'a step or two away is still where you saved');
+  a.body.x += 70;
+  assert.equal(w.unsaved(a), true, 'walking off is unsaved');
+  for (let i = 0; i < 25; i++) w.step();
+  assert.equal(lastOf('A', 'me').unsaved, true, 'and the bag shows it');
+  a.body.x -= 100;
+  w.message('A', { k: 'cmd', c: 'saved', snap: 999 });
+  assert.deepEqual(events('A').filter((e) => e[0] === 'saved').pop(), ['saved', 999, false], 'an unknown snapshot confirms nothing');
   const back = validateExplorer(JSON.parse(JSON.stringify(rec)), 'Explorer A');
   assert.equal(back.team.length, rec.team.length);
   assert.equal(back.inv.sunberry, 7);
@@ -188,4 +203,24 @@ w.room(ids.map((id) => ({ id, name: 'Explorer ' + id, connected: true })));
 assert.equal(P('B').ex, bEx, 'reconnecting gets the same explorer back');
 assert.ok(island().nodes.length >= 30 && TRACKS.length === 16);
 assert.ok(VILLAGE[2] > 0 && npcPos('elder').x > 0);
-console.log('Creature Island checks passed: four explorers at once, first companion, befriending, exact movement prediction, saves (one consistent capture, unsaved tracking, forged saves cleaned), gates in story order, all three bosses, the village raid, reconnecting.');
+// Save and leave: the world keeps running during the upload, so the host only lets a player go when the
+// confirmed save has everything; then their explorer leaves the island at once.
+{
+  const d = P('D');
+  w.message('D', { k: 'cmd', c: 'save' });
+  const s1 = events('D').filter((e) => e[0] === 'snap').pop();
+  d.ex.shells += 51; w.bump(d, true); // shared rewards keep arriving during the upload
+  w.message('D', { k: 'cmd', c: 'saved', snap: s1[3], leaving: true });
+  assert.deepEqual(events('D').filter((e) => e[0] === 'saved').pop(), ['saved', s1[3], false], 'newer progress: not up to date');
+  assert.ok(d.ready, 'so the explorer stays on the island');
+  w.message('D', { k: 'cmd', c: 'save' });
+  const s2 = events('D').filter((e) => e[0] === 'snap').pop();
+  assert.equal(s2[2].shells, d.ex.shells, 'a fresh save has the new shells');
+  w.message('D', { k: 'cmd', c: 'saved', snap: s2[3], leaving: true });
+  assert.deepEqual(events('D').filter((e) => e[0] === 'saved').pop(), ['saved', s2[3], true]);
+  assert.ok(!d.ready && !d.comp, 'up to date: the explorer leaves the island before anything else changes');
+  const shells = d.ex.shells;
+  steps(40);
+  assert.equal(d.ex.shells, shells, 'and earns nothing more');
+}
+console.log('Creature Island checks passed: four explorers at once, first companion, befriending, exact movement prediction, saves (one consistent capture, unsaved tracking including moving away, save-and-leave only when the save has everything, forged saves cleaned), gates in story order, all three bosses, the village raid, reconnecting.');
