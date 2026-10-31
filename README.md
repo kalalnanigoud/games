@@ -95,10 +95,19 @@ and it holds the site's version. Commit it with your changes; the GitHub check f
   and page exits flush immediately. An abrupt browser/process crash may lose up to that interval of moves.
   Storage quota failures do not stop online play. `node tools/reliability-test.mjs` includes a synthetic
   serialization benchmark; its mocked storage timings are not real device disk measurements.
-- **Connection dots.** The dots in the top bar and lobby turn green, yellow or red with each player's
-  delay to the host (hover for the milliseconds, and whether the connection goes through a relay).
-- **Rematch.** When a game ends, the host's **🔁 Rematch** keeps everyone in their seats (chess swaps
+- **Connection dots.** The dots in the top bar, the game bar and the lobby turn green, yellow or red with
+  each player's delay to the host (hover for the milliseconds, and whether the connection goes through a relay).
+- **Rematch.** When a game ends, the host's **Rematch** button keeps everyone in their seats (chess swaps
   colours); other players can tap **Ask for a rematch**.
+
+## Playing a game
+
+During a game the site's top bar gives way to a single game bar: the game's name and connection, the turn
+timer, voice, **?** for the rules and **⋯** for everything else. The ⋯ menu (a sheet from the bottom on
+phones) holds the room code and invite link, tournament standings, sound, how to play, New game and Back to
+the lobby for the host, and Leave. Rules only open when someone taps **?**; until a game's rules have been
+read once, its **?** button carries a gentle highlight. Dialogs fit the visible screen, and on phones they
+rise from the bottom edge.
 
 ## Party games
 
@@ -112,26 +121,31 @@ and the tournament brackets.
 
 ## Voice chat
 
-In an online room, tap 🎙 in the top bar to talk to everyone else who joined voice (tap again to mute,
-📵 to leave). Audio goes directly between players' browsers, like the games. The browser asks for
+In an online room, tap the headset button (in the top bar, or the game bar during a game) to talk to
+everyone else who joined voice. Tap the microphone to mute, and the hang-up button to leave. Audio goes directly between players' browsers, like the games. The browser asks for
 microphone access the first time, and it needs the site on https (GitHub Pages is) or localhost.
 Incoming callers must be on the host-authorized voice roster; the host binds their voice ID to their
 authenticated data connection. Leaving voice stops audio tracks and closes calls.
 
 ## Finding a game
 
-The library filters by type, supported group size, estimated duration, and difficulty. Cooperative
+The library filters by type, supported group size, estimated duration, and difficulty (one row you can
+swipe sideways on phones). In the lobby, the host's **Change game** opens every game as a cover, with games
+that don't fit the current table marked. Cooperative
 is a cross-category filter. Stars save favorites; recently played records games when they start.
 Preferences stay in this browser without an account. Durations are editorial estimates, especially
 for games with configurable rounds or clocks.
 
 ## Tournaments
 
-In the lobby, the host can open **🏆 Tournament**:
-- **Series**: tick several games; everyone plays each one and every win scores a point.
-- **Knockout**: one-on-one matches of the selected game in a bracket (byes for odd numbers, rematches
-  after draws). Players not in the current match watch.
-After each game the host presses **Next game ▸**; the last game crowns the champion.
+A tournament spans several games, so it is a mode of the room rather than a setting of one game. In the
+lobby the host switches from **One game** to **Tournament** (or taps **Host a tournament night** on the home
+screen), then chooses:
+- **Series**: pick several games; everyone plays each one, in the order picked, and every win scores a point.
+- **Knockout**: one-on-one matches of one game in a bracket (byes for odd numbers, rematches after draws).
+  Players not in the current match watch.
+During a game, a trophy chip in the game bar opens the standings. After each game the host presses
+**Next game ▸**; the last game crowns the champion.
 
 ## Chess computer levels
 

@@ -29,6 +29,7 @@ function renderTopbar() {}
 function paintNet() {}
 globalThis.test = { S, conns, onHostMessage, onConnClosed, saveSession, resume, parse, cleanup, localRoom, hostRoom, joinRoom, broadcast, requireMultiplayer,
   startGame, armTimer, scheduleBots, onClientMessage, setWatch, applyAction, startTour, playTour, closeTour, loadGame, viewFor, standingIn, scheduleClientRetry,
+  addBot, fitTable, seatLimit,
   get timer() { return turnTimer; } };
 `, context);
 const t = context.test;
@@ -153,7 +154,27 @@ t.S.opts={clock:'3+2'}; t.startGame(); assert.deepEqual(t.S.game.players.map(p=>
 const whiteBefore = t.S.game.players.find((p) => p.color === 'w').id;
 t.applyAction(whiteBefore, { type: 'resign' }); t.startGame(true);
 assert.notEqual(t.S.game.players.find((p) => p.color === 'w').id, whiteBefore, 'colours swap in a rematch');
-t.S.started=false; assert.equal(t.setWatch('late',false),null); assert.equal(t.S.players.find(p=>p.id==='late').watch,undefined);
+// Seats follow the chosen game: chess seats two, so a third person watches until a seat frees up.
+t.S.started=false; assert.match(t.setWatch('late',false),/table is full/,'a full chess table keeps a third person watching');
+assert.equal(t.S.players.find(p=>p.id==='late').watch,true);
+assert.equal(t.setWatch('other',true),null); assert.equal(t.setWatch('late',false),null,'a freed seat can be taken');
+assert.equal(t.S.players.find(p=>p.id==='late').watch,undefined);
+assert.equal(t.setWatch('late',true),null); assert.equal(t.setWatch('other',false),null);
+// Joining a full table in the lobby: the newcomer watches, and is told why.
+const third=conn(); t.onHostMessage(third,{t:'hello',token:'third',secret:reconnectSecret(),name:'Third'});
+assert.equal(t.S.players.find(p=>p.id==='third').watch,true,'a full table seats newcomers as spectators');
+assert.match(third.sent.find(m=>m.t==='notice')?.msg||'',/Chess seats 2/);
+// Computer players stop at the limit; picking a game with fewer seats trims the table.
+t.addBot(); assert.equal(t.S.players.filter(p=>p.bot).length,0,'no computer player past the limit');
+t.S.gameId='gems'; assert.equal(t.seatLimit(),4); t.addBot(); assert.equal(t.S.players.filter(p=>p.bot).length,1);
+assert.equal(t.setWatch('third',false),null);
+t.S.gameId='chess'; t.fitTable();
+assert.equal(t.S.players.filter(p=>p.bot).length,0,'computer players leave first');
+assert.equal(t.S.players.find(p=>p.id==='third').watch,true,'then the newest arrival watches');
+assert.deepEqual(t.S.players.filter(p=>!p.watch).map(p=>p.id).sort(),[t.S.token,'other'].sort(),'the host keeps their seat');
+// A tournament may use the whole room; each of its games seats its own players.
+t.S.lobbyMode='tour'; assert.equal(t.seatLimit(),8); t.S.lobbyMode='game';
+t.S.players=t.S.players.filter(p=>p.id!=='third'); t.S.credentials=t.S.credentials.filter(([id])=>id!=='third'); third.close();
 t.S.opts={clock:'bogus'}; t.S.players.pop(); t.startGame(); assert.equal(t.S.opts.clock,'10+5','unknown options fall back to the default');
 // Voice chat: the host keeps the member list, shares it in every sync, and drops people who leave.
 t.S.started=false; t.S.voice=[];

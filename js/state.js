@@ -44,6 +44,7 @@ export const S = {
   opts: defaultOpts(GAMES[0]), // host-chosen game options, e.g. { clock: '5+0' } (games with options only)
   voice: [], // [player id, PeerJS id] for everyone in voice chat (kept by the host)
   tour: null, // tournament in progress (js/tour.js), kept by the host
+  lobbyMode: 'game', // the host's lobby choice, shared with guests: 'game' (one game) or 'tour' (setting up a tournament)
   successor: null, // who takes over the room if the host disappears
   backupHost: '', // host's explicitly trusted successor; empty disables migration
   backup: null, // successor only: the host's latest copy of the room

@@ -203,10 +203,13 @@ export function onHostMessage(conn, msg) {
     if (p && (p.id === S.token || p.bot || !S.credentials.some(([id, check]) => id === p.id && check === proof))) {
       return reject(conn, 'Cannot reconnect: invalid player credentials.');
     }
+    let seatedOut = false;
     if (!p) {
-      // Someone arriving after the start joins as a spectator.
-      if (S.started ? S.players.length >= MAX_ROOM + MAX_WATCHERS : seated().length >= MAX_ROOM) return reject(conn, 'Room is full.');
-      p = { id: String(msg.token), name, connected: true, ...(S.started ? { watch: true } : {}) };
+      // Someone arriving after the start, or when the chosen game's table is full, joins as a spectator.
+      const watching = S.started || seated().length >= seatLimit();
+      if (watching && S.players.length >= MAX_ROOM + MAX_WATCHERS) return reject(conn, 'Room is full.');
+      seatedOut = watching && !S.started;
+      p = { id: String(msg.token), name, connected: true, ...(watching ? { watch: true } : {}) };
       S.players.push(p);
       S.credentials.push([p.id, proof]);
     }
@@ -222,6 +225,7 @@ export function onHostMessage(conn, msg) {
     if (old && old !== conn) try { old.close(); } catch {}
     saveSession();
     broadcast();
+    if (seatedOut && conn.open) conn.send({ t: 'notice', msg: `${getGame(S.gameId).name} seats ${seatLimit()}, so you're watching for now. Tap "Take a seat" if one frees up.` });
   } else if (!ownConn(conn)) {
     return;
   } else if (msg.t === 'action') {
@@ -255,7 +259,7 @@ export function setWatch(pid, on) {
   const p = S.players.find((x) => x.id === pid);
   if (!p || p.bot) return 'Only people can watch.';
   if (S.started) return 'Wait until this game ends to change seats.';
-  if (!on && seated().length >= MAX_ROOM) return 'The table is full.';
+  if (!on && seated().length >= seatLimit()) return `The table is full: ${getGame(S.gameId).name} seats ${seatLimit()}.`;
   if (on) p.watch = true; else delete p.watch;
   saveSession();
   broadcast();
@@ -411,7 +415,7 @@ export function notice(msg) {
 // Each player gets their own view of the game. After the first full copy, only the changes are sent.
 function syncFor(c, pid, now) {
   const view = viewFor(pid);
-  const msg = { t: 'sync', v: VERSION, code: S.code, players: S.players, gameId: S.gameId, started: S.started, hostId: S.token, timerSec: S.timerSec, timer: S.timer, opts: S.opts, voice: S.voice, tour: S.tour, successor: S.successor, now, seq: (c.seq = (c.seq || 0) + 1) };
+  const msg = { t: 'sync', v: VERSION, code: S.code, players: S.players, gameId: S.gameId, started: S.started, hostId: S.token, timerSec: S.timerSec, timer: S.timer, opts: S.opts, voice: S.voice, tour: S.tour, mode: S.lobbyMode, successor: S.successor, now, seq: (c.seq = (c.seq || 0) + 1) };
   if (c.base && view) { msg.from = msg.seq - 1; const patch = diff(c.base, view); if (patch !== undefined) msg.patch = patch; } else msg.view = view;
   c.base = view;
   return msg;
@@ -473,8 +477,28 @@ function ping() {
   paintNet();
 }
 
+// How many can sit at the table: the chosen game's limit, or the whole room while a tournament is
+// set up or played (each of its games seats its own players).
+export function seatLimit() {
+  return S.tour || S.lobbyMode === 'tour' ? MAX_ROOM : Math.min(MAX_ROOM, getGame(S.gameId).maxPlayers);
+}
+// After the host picks a game with fewer seats: computer players leave first (newest first), then the
+// newest arrivals move to watching. The host keeps their seat; one-device players are never removed.
+export function fitTable() {
+  let over = seated().length - seatLimit();
+  if (over <= 0) return;
+  const g = getGame(S.gameId), gone = [], watching = [];
+  for (const p of [...S.players].reverse()) if (over > 0 && p.bot && !p.watch) { gone.push(p.id); over--; }
+  S.players = S.players.filter((p) => !gone.includes(p.id));
+  if (S.role === 'host') for (const p of [...S.players].reverse()) {
+    if (over > 0 && !p.bot && !p.watch && p.id !== S.token) { p.watch = true; watching.push(p.name); over--; }
+  }
+  if (watching.length) notice(`${g.name} seats ${seatLimit()}, so ${watching.join(' and ')} ${watching.length > 1 ? 'are' : 'is'} watching for now.`);
+  else if (gone.length) toast(`${g.name} seats ${seatLimit()}: removed ${gone.length > 1 ? gone.length + ' computer players' : 'a computer player'}.`, 'info');
+}
+
 export function addBot() {
-  if (seated().length >= MAX_ROOM) return toast('The table is full.');
+  if (seated().length >= seatLimit()) return toast(`The table is full: ${getGame(S.gameId).name} seats ${seatLimit()}.`);
   const used = new Set(S.players.map((p) => p.name));
   const name = (BOT_NAMES.find((n) => !used.has(n + ' 🤖')) || 'Bot' + S.players.length) + ' 🤖';
   S.players.push({ id: 'B' + uid(), name, connected: true, bot: true });
@@ -532,6 +556,8 @@ export function closeTour() {
   if (S.tour && !S.tour.done && !confirm('Cancel this tournament?')) return;
   restoreSeats();
   S.tour = null;
+  S.lobbyMode = 'game';
+  fitTable();
   saveSession();
   broadcast();
 }
@@ -691,7 +717,7 @@ export function onClientMessage(msg) {
     else { hostConn?.open && hostConn.send({ t: 'resync' }); return; } // missed an update: ask for a full copy
     viewSeq = msg.seq;
     if (msg.started && (!S.started || S.gameId !== msg.gameId)) rememberPlayed(msg.gameId);
-    Object.assign(S, { players: msg.players, gameId: msg.gameId, started: msg.started, view, hostId: msg.hostId, synced: true, timerSec: msg.timerSec || 0, timer: msg.timer || null, opts: msg.opts || {}, voice: msg.voice || [], tour: msg.tour || null, successor: msg.successor || null });
+    Object.assign(S, { players: msg.players, gameId: msg.gameId, started: msg.started, view, hostId: msg.hostId, synced: true, timerSec: msg.timerSec || 0, timer: msg.timer || null, opts: msg.opts || {}, voice: msg.voice || [], tour: msg.tour || null, lobbyMode: msg.mode === 'tour' ? 'tour' : 'game', successor: msg.successor || null });
     S.update = msg.v && msg.v !== VERSION ? { newer: newerVersion(msg.v, VERSION) } : null;
     if (S.successor !== S.token) S.backup = null;
     voice.sync(S.voice, peer);
