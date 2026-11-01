@@ -14,7 +14,7 @@ let memorySession = null; // a browser that can't keep anything (some private mo
 
 export const cloudAvailable = () => !!CONFIG.islandSaves;
 
-// { token, name } while signed in, else null.
+// { token, name, recovery } while signed in (recovery: the account has a recovery code), else null.
 export function account() {
   let s = memorySession;
   try { s = JSON.parse(localStorage.getItem(SESSION_NAME) || 'null') || memorySession; } catch {}
@@ -36,12 +36,12 @@ export class CloudError extends Error {
 }
 
 async function call(method, path, body, { signedIn = true, bearer = '' } = {}) {
-  if (!cloudAvailable()) throw new CloudError('setup', 'Cloud saves aren’t set up on this site yet. Save to a file instead.');
+  if (!cloudAvailable()) throw new CloudError('setup', 'Cloud saves aren’t set up on this site yet.');
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-    throw new CloudError('offline', 'You’re offline. Your game is still running: try again once you’re connected, or save to a file.');
+    throw new CloudError('offline', 'You’re offline. Your game is still running: try again once you’re connected.');
   }
   const me = account();
-  if (signedIn && !me) throw new CloudError('signin', 'Sign in to your explorer account to save to the cloud, or save to a file.');
+  if (signedIn && !me) throw new CloudError('signin', 'Sign in to your explorer account to save your adventure.');
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   let res;
@@ -55,8 +55,8 @@ async function call(method, path, body, { signedIn = true, bearer = '' } = {}) {
     });
   } catch {
     throw ctl.signal.aborted
-      ? new CloudError('timeout', 'The save service didn’t answer in time. Your game is still running: try again, or save to a file.')
-      : new CloudError('network', 'Couldn’t reach the save service. Check your connection and try again, or save to a file.');
+      ? new CloudError('timeout', 'The save service didn’t answer in time. Your game is still running: try again.')
+      : new CloudError('network', 'Couldn’t reach the save service. Check your connection and try again.');
   } finally {
     clearTimeout(timer);
   }
@@ -67,13 +67,23 @@ async function call(method, path, body, { signedIn = true, bearer = '' } = {}) {
   if (out?.error === 'signin' && signedIn) keep(null);
   if (out?.error) throw new CloudError(out.error, out.message || 'The save service refused this request.', { status: res.status, rev: out.rev, savedAt: out.savedAt, retryAt: out.retryAt, left: out.left });
   // Cloudflare answers with its own page when the free daily request limit is used up.
-  throw new CloudError('unavailable', `The save service is unavailable right now (error ${res.status}); it may have reached its free daily limit. Your game is still running: try again later, or save to a file.`, { status: res.status });
+  throw new CloudError('unavailable', `The save service is unavailable right now (error ${res.status}); it may have reached its free daily limit. Your game is still running: try again later.`, { status: res.status });
 }
 
-// Accounts. Both resolve to { name } once this device is signed in.
-export async function signUp(name, pin) { const out = await call('POST', '/account', { name, pin }, { signedIn: false }); keep({ token: out.token, name: out.name }); return { name: out.name }; }
-export async function signIn(name, pin) { const out = await call('POST', '/login', { name, pin }, { signedIn: false }); keep({ token: out.token, name: out.name }); return { name: out.name }; }
-export async function signOut() {
+// Accounts. All resolve to { name } once this device is signed in; a new account, a recovery and a "Get a
+// recovery code" also give { code }: the one-time recovery code, which the caller must show once.
+const enter = (out) => { keep({ token: out.token, name: out.name, recovery: !!out.recovery }); return { name: out.name, code: out.code || '' }; };
+export async function signUp(name, pin) { return enter(await call('POST', '/account', { name, pin }, { signedIn: false })); }
+export async function signIn(name, pin) { return enter(await call('POST', '/login', { name, pin }, { signedIn: false })); }
+// Forgot the PIN: the recovery code sets a new one, ends every older session and gives a fresh code.
+export async function recover(name, code, newPin) { return enter(await call('POST', '/recover', { name, code, newPin }, { signedIn: false })); }
+// For a signed-in account made before codes existed (or that lost its code): a new code, replacing the old.
+export async function getRecoveryCode() {
+  const out = await call('POST', '/recovery', {});
+  const me = account();
+  if (me) keep({ ...me, recovery: true });
+  return out.code;
+}export async function signOut() {
   const me = account();
   keep(null);
   if (me) try { await fetch(CONFIG.islandSaves.replace(/\/+$/, '') + '/session', { method: 'DELETE', headers: { authorization: 'Bearer ' + me.token } }); } catch {}
