@@ -21,7 +21,7 @@ export default {
   // Anonymous crash reports (js/report.js). Empty = off. node tools/deploy-error-reports.mjs deploys
   // server/error-reports.js and fills this in, e.g. 'https://gn-errors.you.workers.dev/report'.
   errorReports: 'https://gn-errors.coopp.workers.dev/report',
-  // Creature Island cloud saves (server/island-saves.js). Empty = players can still save to a file.
+  // Creature Island cloud saves (server/island-saves.js). Empty = nothing can be saved.
   // node tools/deploy-island-saves.mjs deploys the Worker and fills this in, e.g. 'https://island-saves.you.workers.dev'.
   islandSaves: 'https://island-saves.coopp.workers.dev',
 };

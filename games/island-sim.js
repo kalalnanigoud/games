@@ -123,6 +123,7 @@ export class World {
     this.raid = null;
     this.bossDue = {};
     this.worldVer = 1;
+    this.arena = null; // Arena Rush (island-arena.js) attaches itself here
     this.lastW = new Map();
     island();
   }
@@ -197,6 +198,7 @@ export class World {
     this.t += TICK; this.tick++;
     for (const p of this.players.values()) if (p.ready) this.stepPlayer(p);
     for (const e of [...this.ents.values()]) this.stepEnt(e);
+    this.arena?.step();
     if (this.tick % 20 === 0) this.everySecond();
     const sendNow = this.tick % 2 === 0;
     for (const p of this.players.values()) if (p.ready && (sendNow || p.local)) this.sendFrame(p);
@@ -257,6 +259,7 @@ export class World {
     this.personal(p, ['warp', Math.round(x), Math.round(y)]);
   }
   respawn(p) {
+    if (this.arena) return this.arena.respawn(p);
     p.downT = 0; p.body.down = 0; p.hp = this.maxHp(p); p.iT = 2; this.chan(p, null);
     const v = villageSpot(p.seat);
     this.warp(p, v.x, v.y);
@@ -268,6 +271,7 @@ export class World {
   // Unsaved: progress since the last confirmed save, or standing somewhere else than where it was saved
   // (a reload would put the explorer back there). Walking a couple of steps doesn't count.
   unsaved(p) {
+    if (this.arena) return false;
     if (p.prog > p.savedProg || !p.savedLoc) return true;
     const b = this.placeOf(p);
     return areaOf(b.x) !== areaOf(p.savedLoc.x) || Math.hypot(b.x - p.savedLoc.x, b.y - p.savedLoc.y) > MOVED;
@@ -280,11 +284,31 @@ export class World {
   }
   // A player saved and is leaving: their explorer leaves the island now, before anything else changes.
   park(p) {
-    p.ready = false; p.input.length = 0; this.chan(p, null);
+    p.ready = false; p.parked = true;
+    this.strip(p);
+    this.personal(p, ['parked']);
+  }
+  // Takes an explorer's companion and personal creatures off the island (the explorer's own record stays).
+  strip(p) {
+    p.input.length = 0; this.chan(p, null);
     if (p.comp) this.ents.delete(p.comp);
-    p.comp = null;
+    p.comp = null; p.escort = 0; p.dlg = null;
     for (const e of this.ents.values()) if (e.only === p.id) this.ents.delete(e.id);
     this.worldVer++;
+  }
+  // Safety net: a screen still on the island after a park asks to be put back where it stood.
+  unpark(p) {
+    if (!p.parked || p.ready || !p.ex) return;
+    if (p.tag && this.readyPlayers().some((o) => o.tag === p.tag)) throw new Error('This explorer is already on the island, perhaps in another tab.');
+    p.parked = false; p.ready = true; p.iT = 2; p.input.length = 0;
+    this.summon(p);
+    if (p.ex.quests.lost === 2) this.spawnEscort(p);
+    this.refreshGates();
+    this.worldVer++;
+    this.bump(p);
+    p.full = true;
+    this.personal(p, ['ready']);
+    this.personal(p, ['warp', Math.round(p.body.x), Math.round(p.body.y)]);
   }
 
   // ---- fighting ----
@@ -567,11 +591,17 @@ export class World {
   // ---- requests from the menus ----
   command(p, d) {
     const ex = p.ex, c = d.c;
+    if (this.arena?.command(p, d)) return;
+    if (c === 'unpark') return this.unpark(p);
     if (c === 'new' || c === 'load') {
-      if (p.ready) throw new Error('Your explorer is already on the island.');
+      // "Load adventure" from the menu: a ready explorer is replaced by the saved one (checked first, so a bad
+      // record changes nothing). A brand-new explorer can't be started over a living one.
+      if (p.ready && c === 'new') throw new Error('Your explorer is already on the island.');
       const tag = typeof d.tag === 'string' ? d.tag.slice(0, 40) : '';
-      if (tag && this.readyPlayers().some((o) => o.tag === tag)) throw new Error('This explorer is already on the island, perhaps in another tab.');
-      p.ex = c === 'new' ? newExplorer(p.name, d.look) : validateExplorer(d.rec, p.name);
+      if (tag && this.readyPlayers().some((o) => o !== p && o.tag === tag)) throw new Error('This explorer is already on the island, perhaps in another tab.');
+      const ex = c === 'new' ? newExplorer(p.name, d.look) : validateExplorer(d.rec, p.name);
+      if (p.ready) { this.strip(p); p.snaps?.clear(); p.escort = 0; }
+      p.ex = ex;
       p.tag = tag;
       p.prog = 0; p.savedProg = 0; p.lastSave = c === 'load' && Number.isFinite(d.savedAt) ? d.savedAt : 0;
       if (c === 'new') p.prog = 1; // a brand-new explorer isn't saved yet
@@ -704,7 +734,7 @@ export class World {
 
   spawn(p) {
     const ex = p.ex;
-    p.ready = true;
+    p.ready = true; p.parked = false;
     const at2 = ex.loc || villageSpot(p.seat);
     p.savedLoc = p.prog === 0 ? { x: at2.x, y: at2.y } : null;
     p.body = newBody(at2.x, at2.y);
@@ -790,6 +820,7 @@ export class World {
     return e;
   }
   everySecond() {
+    if (this.arena) return this.arena.second();
     const ready = this.readyPlayers();
     for (const p of ready) { const u = this.unsaved(p); if (u !== p.wasUnsaved) { p.wasUnsaved = u; this.bump(p); this.worldVer++; } }
     this.refreshGates();
@@ -1276,7 +1307,7 @@ export class World {
   // Most events ride along with the next frame; replies to a request (a save, a conversation) go at once.
   personal(p, ev) {
     p.events.push(ev);
-    if (!p.ready || ['dlg', 'snap', 'saved', 'ready', 'ui', 'warp', 'toast', 'boss', 'ending'].includes(ev[0])) this.send(p.id, { k: 'ev', ev: p.events.splice(0) });
+    if (!p.ready || ['dlg', 'snap', 'saved', 'ready', 'parked', 'ui', 'warp', 'toast', 'boss', 'ending'].includes(ev[0])) this.send(p.id, { k: 'ev', ev: p.events.splice(0) });
   }
   sendFrame(p) {
     const b = p.body, area = areaOf(b.x);
@@ -1335,6 +1366,7 @@ export class World {
     const boss = [...this.ents.values()].find((e) => e.type === 'b' && areaOf(e.x) === areaOf(p.body.x) && dist(e, p.body) < 1400);
     return {
       open: { ...this.open },
+      arena: this.arena ? this.arena.view() : null,
       roster: [...this.players.values()].map((o) => ({ id: o.id, name: o.name, seat: o.seat, ready: o.ready, connected: o.connected, lv: o.ex?.lv || 0, look: o.ex?.look || null, zone: o.zone, down: o.downT > 0, unsaved: o.ready && this.unsaved(o) })),
       boss: boss ? { kind: boss.kind } : null,
       raid: this.raid ? { wave: this.raid.wave, left: this.raid.left.length } : null,

@@ -14,7 +14,7 @@ let memorySession = null; // a browser that can't keep anything (some private mo
 
 export const cloudAvailable = () => !!CONFIG.islandSaves;
 
-// { token, name } while signed in, else null.
+// { token, name, recovery } while signed in (recovery: the account has a recovery code), else null.
 export function account() {
   let s = memorySession;
   try { s = JSON.parse(localStorage.getItem(SESSION_NAME) || 'null') || memorySession; } catch {}
@@ -35,28 +35,28 @@ export class CloudError extends Error {
   constructor(code, message, extra = {}) { super(message); this.code = code; Object.assign(this, extra); }
 }
 
-async function call(method, path, body, { signedIn = true } = {}) {
-  if (!cloudAvailable()) throw new CloudError('setup', 'Cloud saves aren’t set up on this site yet. Save to a file instead.');
+async function call(method, path, body, { signedIn = true, bearer = '' } = {}) {
+  if (!cloudAvailable()) throw new CloudError('setup', 'Cloud saves aren’t set up on this site yet.');
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-    throw new CloudError('offline', 'You’re offline. Your game is still running: try again once you’re connected, or save to a file.');
+    throw new CloudError('offline', 'You’re offline. Your game is still running: try again once you’re connected.');
   }
   const me = account();
-  if (signedIn && !me) throw new CloudError('signin', 'Sign in to your explorer account to save to the cloud, or save to a file.');
+  if (signedIn && !me) throw new CloudError('signin', 'Sign in to your explorer account to save your adventure.');
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   let res;
   try {
     res = await fetch(CONFIG.islandSaves.replace(/\/+$/, '') + path, {
       method,
-      headers: { ...(me ? { authorization: 'Bearer ' + me.token } : {}), ...(body ? { 'content-type': 'application/json' } : {}) },
+      headers: { ...(bearer ? { authorization: 'Bearer ' + bearer } : me ? { authorization: 'Bearer ' + me.token } : {}), ...(body ? { 'content-type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
       signal: ctl.signal,
       cache: 'no-store',
     });
   } catch {
     throw ctl.signal.aborted
-      ? new CloudError('timeout', 'The save service didn’t answer in time. Your game is still running: try again, or save to a file.')
-      : new CloudError('network', 'Couldn’t reach the save service. Check your connection and try again, or save to a file.');
+      ? new CloudError('timeout', 'The save service didn’t answer in time. Your game is still running: try again.')
+      : new CloudError('network', 'Couldn’t reach the save service. Check your connection and try again.');
   } finally {
     clearTimeout(timer);
   }
@@ -67,32 +67,57 @@ async function call(method, path, body, { signedIn = true } = {}) {
   if (out?.error === 'signin' && signedIn) keep(null);
   if (out?.error) throw new CloudError(out.error, out.message || 'The save service refused this request.', { status: res.status, rev: out.rev, savedAt: out.savedAt, retryAt: out.retryAt, left: out.left });
   // Cloudflare answers with its own page when the free daily request limit is used up.
-  throw new CloudError('unavailable', `The save service is unavailable right now (error ${res.status}); it may have reached its free daily limit. Your game is still running: try again later, or save to a file.`, { status: res.status });
+  throw new CloudError('unavailable', `The save service is unavailable right now (error ${res.status}); it may have reached its free daily limit. Your game is still running: try again later.`, { status: res.status });
 }
 
-// Accounts. Both resolve to { name } once this device is signed in.
-export async function signUp(name, pin) { const out = await call('POST', '/account', { name, pin }, { signedIn: false }); keep({ token: out.token, name: out.name }); return { name: out.name }; }
-export async function signIn(name, pin) { const out = await call('POST', '/login', { name, pin }, { signedIn: false }); keep({ token: out.token, name: out.name }); return { name: out.name }; }
-export async function signOut() {
+// Accounts. All resolve to { name } once this device is signed in; a new account, a recovery and a "Get a
+// recovery code" also give { code }: the one-time recovery code, which the caller must show once.
+const enter = (out) => { keep({ token: out.token, name: out.name, recovery: !!out.recovery }); return { name: out.name, code: out.code || '' }; };
+export async function signUp(name, pin) { return enter(await call('POST', '/account', { name, pin }, { signedIn: false })); }
+export async function signIn(name, pin) { return enter(await call('POST', '/login', { name, pin }, { signedIn: false })); }
+// Forgot the PIN: the recovery code sets a new one, ends every older session and gives a fresh code.
+export async function recover(name, code, newPin) { return enter(await call('POST', '/recover', { name, code, newPin }, { signedIn: false })); }
+// For a signed-in account made before codes existed (or that lost its code): a new code, replacing the old.
+export async function getRecoveryCode() {
+  const out = await call('POST', '/recovery', {});
+  const me = account();
+  if (me) keep({ ...me, recovery: true });
+  return out.code;
+}export async function signOut() {
   const me = account();
   keep(null);
   if (me) try { await fetch(CONFIG.islandSaves.replace(/\/+$/, '') + '/session', { method: 'DELETE', headers: { authorization: 'Bearer ' + me.token } }); } catch {}
 }
+const legacyKey = () => { let key = null; try { key = localStorage.getItem(LEGACY_KEY); } catch {} return /^[a-f0-9]{64}$/.test(key || '') ? key : null; };
+const dropKey = () => { try { localStorage.removeItem(LEGACY_KEY); } catch {} };
+export const hasLegacy = () => !!legacyKey();
 // A save made in this browser before accounts: move it into the signed-in account (if that has none yet).
-// Resolves to true when one was moved.
+// Resolves to true when one was moved. When the account already has a save, the browser's key is kept and
+// it resolves to { conflict: { theirs, old } } (each { rev, savedAt, data } or null) for the player to choose.
 export async function claimLegacy() {
-  let key = null;
-  try { key = localStorage.getItem(LEGACY_KEY); } catch {}
-  if (!/^[a-f0-9]{64}$/.test(key || '') || !account()) return false;
+  const key = legacyKey();
+  if (!key || !account()) return false;
   try {
     const out = await call('POST', '/claim', { key });
-    try { localStorage.removeItem(LEGACY_KEY); } catch {}
+    dropKey();
     return !!out.moved;
   } catch (e) {
-    if (e.code === 'none' || e.code === 'has-save') { try { localStorage.removeItem(LEGACY_KEY); } catch {} }
-    return false;
+    if (e.code === 'none') dropKey();
+    if (e.code !== 'has-save') return false;
+    const [theirs, old] = await Promise.all([loadExplorer().catch(() => null), call('GET', '/explorer', null, { signedIn: false, bearer: key }).catch(() => null)]);
+    return { conflict: { theirs, old } };
   }
 }
+// "Use this browser's older explorer instead": the Worker swaps them and keeps the account's save as the earlier one.
+export async function replaceWithLegacy() {
+  const key = legacyKey();
+  if (!key) throw new CloudError('none', 'Nothing was saved in this browser.');
+  const out = await call('POST', '/claim', { key, replace: true });
+  dropKey();
+  return out;
+}
+// "Discard the browser's save": the only path that forgets the key.
+export const discardLegacy = dropKey;
 
 // { rev, savedAt, data } for the signed-in account's explorer, or null when it has never been saved.
 export async function loadExplorer() {

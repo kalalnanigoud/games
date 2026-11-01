@@ -19,6 +19,7 @@ const NAME = { white: 'Diamond', blue: 'Sapphire', green: 'Emerald', red: 'Ruby'
 const ROMAN = ['', 'I', 'II', 'III'];
 const TIER_NAME = ['', 'Mine', 'Caravan', 'Palace'];
 const GOAL = 15;
+const GOALS = ['15', '12', '10'];
 const LIMIT = 10;
 const MAX_RES = 3;
 
@@ -259,9 +260,9 @@ function setup(players, opts) {
     nobles: shuffle(buildNobles()).slice(0, n + 1),
     nobleChoices: null, finalRound: false,
     over: false, winners: [], log: [], fx: [], fxSeq: 0,
-    level: levelOf(opts),
+    level: levelOf(opts), goal: GOALS.includes(String(opts?.goal)) ? +opts.goal : GOAL, // prestige that ends the game: 15, or fewer for a shorter game
   };
-  log(s, `${players[0].name} goes first. Reaching ${GOAL} prestige ends the game after the round.`);
+  log(s, `${players[0].name} goes first. Reaching ${s.goal} prestige ends the game after the round.`);
   return s;
 }
 
@@ -305,7 +306,7 @@ function endTurn(s) {
   s.phase = 'play';
   s.nobleChoices = null;
   if (!s.finalRound) {
-    const lead = s.players.find((p) => p.points >= GOAL);
+    const lead = s.players.find((p) => p.points >= (s.goal || GOAL));
     if (lead) {
       s.finalRound = true;
       log(s, `${lead.name} reached ${lead.points} prestige. Final round!`);
@@ -444,7 +445,7 @@ function view(s, pid) {
 
 function brain(v, me) {
   const lead = Math.max(...v.players.map((p) => p.points));
-  const late = Math.min(1, lead / GOAL);
+  const late = Math.min(1, lead / (v.goal || GOAL));
   const list = [];
   for (const t of [1, 2, 3]) v.market[t].forEach((c, i) => c && list.push({ card: c, where: 'market', t, i }));
   me.reserved.forEach((c, i) => !c.hidden && list.push({ card: c, where: 'reserved', t: c.t, i }));
@@ -659,11 +660,11 @@ function playout(v, pid, first, turns) {
     return true;
   };
   if (!step(first)) return -Infinity;
-  const late = Math.min(1, lead / GOAL);
+  const late = Math.min(1, lead / (s.goal || GOAL));
   let prev = hardWorth(me, s.nobles, late), total = prev;
   // Later turns count for less: plans made now grow less certain, so a gain now beats the same gain later.
   const others = s.players.map((p, i) => (seat + 1 + i) % s.players.length).slice(0, -1);
-  for (let k = 1; k <= turns && !s.over && me.points < GOAL; k++) {
+  for (let k = 1; k <= turns && !s.over && me.points < (s.goal || GOAL); k++) {
     for (const i of others) {
       const r = s.players[i];
       s.cur = i;
@@ -728,7 +729,7 @@ function botHard(v, me, pick) {
   const rivalCards = (r, without) => [...cards.filter((c) => c !== without), ...r.reserved.filter((c) => !c.hidden)];
   const threat = (without) => Math.max(0, ...rivals.map((r) => {
     const g = rivalGain(v, r, rivalCards(r, without));
-    return g + (r.points + g >= GOAL && r.points + g >= me.points ? 6 : 0);
+    return g + (r.points + g >= (v.goal || GOAL) && r.points + g >= me.points ? 6 : 0);
   }));
   const now = threat(null);
   const deny = (card) => (now ? (now - threat(card)) * 0.5 : 0);
@@ -1883,10 +1884,10 @@ export default {
   description: 'Trade sparkling gems, buy mines, caravans and palaces that pay you forever, and court royal patrons. First to 15 prestige ends the round.',
   minPlayers: 2,
   maxPlayers: 4,
-  options: [levelOption()],
+  options: [{ id: 'goal', label: '🏆 Prestige to win', default: '15', choices: [['15', '15 prestige'], ['12', '12 prestige (shorter)'], ['10', '10 prestige (quick)']] }, levelOption()],
   cover: coverSVG(),
   howTo: {
-    goal: 'Earn <b>15 prestige</b> by buying gem cards and winning patrons. When someone reaches 15, the round is finished so everyone has had the same number of turns; most prestige wins.',
+    goal: 'Earn <b>15 prestige</b> (the host can pick 12 or 10 for a shorter game) by buying gem cards and winning patrons. When someone reaches 15, the round is finished so everyone has had the same number of turns; most prestige wins.',
     turn: [
       ['💎', 'Take gems', 'Take <b>3 different</b> colours, or <b>2 of the same</b> colour if that pile has at least 4.'],
       ['🃏', 'Or buy a card', 'Pay its cost in gems. Gold coins count as any colour. Bought cards may give prestige (top-left number).'],

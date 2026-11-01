@@ -222,5 +222,112 @@ assert.ok(VILLAGE[2] > 0 && npcPos('elder').x > 0);
   const shells = d.ex.shells;
   steps(40);
   assert.equal(d.ex.shells, shells, 'and earns nothing more');
+  assert.ok(events('D').some((e) => e[0] === 'parked'), 'the screen is told it was parked');
+  // Safety net: a screen still on the island after a park asks for its explorer back.
+  w.message('A', { k: 'cmd', c: 'unpark' });
+  assert.ok(P('A').ready, 'unpark does nothing for someone who was never parked');
+  w.message('D', { k: 'cmd', c: 'unpark' });
+  assert.ok(d.ready, 'unpark puts the explorer back');
+  assert.ok(!d.ex.team.some((m) => m.hp > 0) || w.ents.get(d.comp)?.companion, 'with their companion');
+  assert.equal(d.ex.shells, shells, 'with everything they had');
+  assert.ok(events('D').filter((e) => e[0] === 'ready').length > 0 && events('D').some((e) => e[0] === 'warp'), 'and tells the screen');
+  steps(5);
+  w.message('D', { k: 'cmd', c: 'unpark' });
+  assert.ok(d.ready, 'a second unpark changes nothing');
+  // A parked explorer can't come back while the same explorer is on the island elsewhere.
+  d.tag = 'tag-A';
+  w.park(d);
+  assert.ok(!d.ready);
+  w.message('D', { k: 'cmd', c: 'unpark' });
+  assert.ok(!d.ready, 'unpark refuses when the same explorer is already on the island');
+  d.tag = 'tag-D';
+  w.message('D', { k: 'cmd', c: 'unpark' });
+  assert.ok(d.ready);
+}
+// Load adventure mid-session: a ready explorer is swapped for the saved record, checked first.
+{
+  const a = P('A');
+  w.message('A', { k: 'cmd', c: 'save' });
+  const rec = events('A').filter((e) => e[0] === 'snap').pop()[2];
+  const oldComp = a.comp, oldShells = rec.shells;
+  a.ex.shells += 7; w.bump(a, true);
+  const mark = (sent.get('A') || []).length;
+  const since = () => (sent.get('A') || []).slice(mark).flatMap((m) => m.ev || []);
+  w.message('A', { k: 'cmd', c: 'load', rec: { ...rec, kind: 'nope' }, tag: 'tag-A' });
+  assert.ok(a.ready && a.comp === oldComp && a.ex.shells === oldShells + 7, 'a bad record changes nothing');
+  w.message('A', { k: 'cmd', c: 'load', rec, savedAt: 1234, tag: 'tag-B' });
+  assert.ok(a.ready && a.comp === oldComp, 'another explorer’s tag is refused');
+  w.message('A', { k: 'cmd', c: 'load', rec, savedAt: 1234, tag: 'tag-A' });
+  assert.ok(a.ready && a.ex.shells === oldShells && a.lastSave === 1234, 'the explorer is replaced from the saved record');
+  assert.ok(a.comp && a.comp !== oldComp && !w.ents.has(oldComp) && w.ents.get(a.comp).companion, 'with a fresh companion, the old one gone');
+  assert.ok(since().some((e) => e[0] === 'ready') && !since().some((e) => e[0] === 'parked'), 'the screen is told it is ready, not parked');
+  assert.ok(!w.unsaved(a), 'what was just loaded counts as saved');
+  w.message('A', { k: 'cmd', c: 'new', look: { skin: 0, hair: 0 } });
+  assert.equal(a.ex.shells, oldShells, 'a new explorer can’t be started over a living one');
 }
 console.log('Creature Island checks passed: four explorers at once, first companion, befriending, exact movement prediction, saves (one consistent capture, unsaved tracking including moving away, save-and-leave only when the save has everything, forged saves cleaned), gates in story order, all three bosses, the village raid, reconnecting.');
+
+// Arena Rush: a five-minute survival run, no saving, in a walled chamber.
+{
+  const { attachArena, ARENA } = await import('../games/island-arena.js');
+  const msgs = new Map();
+  const aw = new World({ send: (pid, msg) => { if (!msgs.has(pid)) msgs.set(pid, []); msgs.get(pid).push(msg); } });
+  const arena = attachArena(aw);
+  aw.room([{ id: 'A', name: 'Ann', connected: true }, { id: 'B', name: 'Bo', connected: true }]);
+  const ap = (id) => aw.players.get(id);
+  const aevents = (id) => (msgs.get(id) || []).flatMap((m) => m.ev || []);
+  const run = (n, inp = () => [0, 0, 0]) => { for (let i = 0; i < n; i++) { for (const id of ['A', 'B']) { const p = ap(id); if (p?.ready) aw.message(id, { k: 'in', s: p.lastSeq + 1 + p.input.length, i: [inp(id, i)] }); } aw.step(); } };
+  assert.equal(arena.state, 'wait');
+  run(10);
+  assert.ok(ap('A').ready && ap('B').ready, 'everyone is in the arena without choosing or loading anything');
+  assert.equal(arena.state, 'run');
+  assert.deepEqual([ap('A').ex.lv, ap('A').ex.team.length, ap('A').ex.quests.starter], [5, 1, 9], 'a fresh level-5 explorer with a companion');
+  const cx = ARENA.at[0] * T, cy = ARENA.at[1] * T;
+  const inArena = (p) => Math.hypot(p.body.x - cx, p.body.y - cy) < (ARENA.r + 1) * T;
+  assert.ok(inArena(ap('A')) && inArena(ap('B')) && ap('A').body.x >= 128 * T, 'in the stone chamber');
+  assert.equal(aw.unsaved(ap('A')), false, 'nothing is ever unsaved');
+  for (const c of ['save', 'saved', 'new', 'load', 'buy', 'respawn']) {
+    aw.message('A', { k: 'cmd', c, snap: 1, rec: {} });
+    assert.ok(aevents('A').slice(-3).some((e) => e[0] === 'toast'), `${c} is refused in the arena`);
+  }
+  assert.ok(!aevents('A').some((e) => e[0] === 'snap'), 'no save capture is ever made');
+  // The wall: walking at the one way out never gets past it.
+  for (let i = 0; i < 400; i++) { run(1, () => [0, 100, 0]); if (i % 40 === 0) for (const id of ['A', 'B']) ap(id).hp = 1e5; }
+  assert.ok(inArena(ap('A')) && ap('A').body.y < (ARENA.at[1] + ARENA.r) * T + 4, 'the way out is sealed');
+  // Waves arrive on the clock and the score counts what is beaten.
+  for (const id of ['A', 'B']) ap(id).hp = 1e5;
+  run(20 * 25);
+  assert.ok(arena.wave >= 3, `waves come (wave ${arena.wave})`);
+  const view = aw.worldView(ap('A')).arena;
+  assert.ok(view.s === 'run' && view.dur === 300 && view.wave === arena.wave, 'the screen is told the clock and wave');
+  assert.ok(aw.worldView(ap('A')).open.arena, 'and the wall');
+  assert.ok(arena.foes.size > 0 && [...arena.foes].every((id) => aw.ents.get(id)?.hp > 0 && aw.ents.get(id).arena));
+  const score0 = arena.score, kills0 = arena.kills;
+  const foe = aw.ents.get([...arena.foes][0]);
+  aw.hurt(foe, 9999, 'none', { pid: 'A' });
+  run(2);
+  assert.equal(arena.kills, kills0 + 1, 'a beaten foe counts');
+  assert.ok(arena.score >= score0 + 10, 'and scores');
+  const at = arena.score;
+  // The clock ends the run: foes go, the result stands, then Play again starts fresh.
+  arena.skip(arena.dur);
+  run(25);
+  assert.equal(arena.state, 'over');
+  assert.equal(arena.result.reason, 'time');
+  assert.ok(arena.result.score >= at + 150, 'surviving to the end adds a bonus');
+  assert.equal(arena.foes.size, 0);
+  assert.ok(![...aw.ents.values()].some((e) => e.arena), 'no foes are left');
+  assert.equal(aw.worldView(ap('B')).arena.res.score, arena.result.score);
+  aw.message('B', { k: 'cmd', c: 'again' });
+  assert.deepEqual([arena.state, arena.score, arena.wave], ['run', 0, 0], 'play again starts a fresh run');
+  assert.ok(ap('A').ready && ap('A').ex.lv === 5);
+  // Everyone knocked out at once ends it early.
+  run(25 * 20);
+  for (const id of ['A', 'B']) Object.assign(ap(id), { downT: 20, hp: 0 });
+  run(25);
+  assert.equal(arena.state, 'over');
+  assert.equal(arena.result.reason, 'down');
+  assert.ok(ap('A').downT === 0 && ap('A').hp > 0, 'and everyone is back on their feet for the end card');
+  assert.equal(w.arena, null, 'an adventure world is untouched');
+  console.log('Arena Rush checks passed: fresh explorers, walled chamber, waves, score, clock end, play again, all-down end, nothing saved.');
+}
