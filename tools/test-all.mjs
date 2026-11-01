@@ -18,6 +18,8 @@ const suites = [
   { name: 'multiplayer-ci', what: `real WebRTC rooms, ${web}`, file: 'tools/multiplayer-ci.mjs' },
   { name: 'island-ci', what: `Creature Island, four live players, ${web}`, file: 'tools/island-ci.mjs' },
   { name: 'arena-ci', what: 'Arena Rush: lobby option, timer, score, no saving', file: 'tools/arena-ci.mjs' },
+  { name: 'onboarding-ci', what: 'practice, samples, controls, touch layouts', file: 'tools/onboarding-ci.mjs' },
+  { name: 'fx-toggle', what: 'Lower effects button in the Guide tab, phone and desktop', file: 'tools/fx-toggle-shot.mjs' },
   { name: 'island-faults', what: `slow/failed/cancelled saves, dropped network, Worker and audio failures, ${web}`, file: 'tools/island-faults.mjs' },
   ...(args.includes('--perf') ? [{ name: 'perf-island', what: 'frame time, heap and wire bytes under 4x CPU throttling', file: 'tools/perf-island.mjs' }] : []),
 ].filter((s) => !only || only.includes(s.name));

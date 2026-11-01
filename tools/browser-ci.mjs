@@ -8,9 +8,12 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { CATALOG } from '../games/catalog.js';
 import fs from 'node:fs/promises';
+import net from 'node:net';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const PORT = 8099, base = `http://127.0.0.1:${PORT}`;
+// A free port (or PORT=...), so parallel runs never collide.
+const PORT = Number(process.env.PORT) || await new Promise((res) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
+const base = `http://127.0.0.1:${PORT}`;
 const server = spawn(process.execPath, ['serve.js'], { cwd: root, env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1' }, stdio: 'inherit' });
 const stop = (code) => { server.kill(); process.exit(code); };
 for (let i = 0; i < 50; i++) { try { if ((await fetch(base)).ok) break; } catch {} await new Promise((r) => setTimeout(r, 200)); }

@@ -4,7 +4,7 @@
 import { TILE, TICK, SPECIES, ITEMS, GEAR, SHOP, SEATS, QUESTS, QUEST_ORDER, STARTERS, ABILITIES, NPCS, ELEMENTS, BOSSES, CATCH_HP, TEAM_MAX } from './island-data.js';
 import { stepBody, newBody, BITS, objective, interactables } from './island-sim.js';
 import { island, zoneAt, areaName, TRACKS, G, W } from './island-map.js';
-import { createView, minimap } from './island-view.js';
+import { createView, minimap, setEffects, effectsMode, effectsAreLow } from './island-view.js';
 import { createInput, bindTouch, touchHTML, actionOf, keysFor, openControls, MOVES, ACTION_BITS } from './island-input.js';
 import { shouldPractice, startPractice } from './island-practice.js';
 import { cloudAvailable, explorerTag, loadExplorer, account } from './island-cloud.js';
@@ -553,7 +553,7 @@ export function createClient(opts) {
         ${done.length ? `<h4>Done</h4><ul class="isl-quests done">${done.map((q) => `<li><b>${IC.check}${esc(QUESTS[q].name)}</b></li>`).join('')}</ul>` : ''}
         <p class="small muted">Played ${Math.floor(me.time / 3600)} h ${Math.floor((me.time % 3600) / 60)} min.</p>`;
     } else if (tab === 'guide') {
-      body = `<div class="isl-row"><button class="small" data-ctl="keys">Controls</button><button class="small" data-ctl="practice">Replay practice</button></div>
+      body = `<div class="isl-row"><button class="small" data-ctl="keys">Controls</button><button class="small" data-ctl="practice">Replay practice</button><button class="small" data-ctl="fx" title="Fewer particles, no rain and simpler water, for slower phones. Auto follows your device's reduced-motion setting.">Lower effects: ${effectsMode() === 'auto' ? `auto (${effectsAreLow() ? 'on' : 'off'})` : effectsMode() === 'low' ? 'on' : 'off'}</button></div>
         <p class="small muted">${me.dex.caught.length} befriended · ${me.dex.seen.length} seen of ${Object.keys(SPECIES).length}</p><ul class="isl-dex">${Object.keys(SPECIES).map((sp) => {
         const seen = me.dex.seen.includes(sp), caught = me.dex.caught.includes(sp);
         return `<li class="${caught ? 'caught' : seen ? 'seen' : ''}"><img alt="" src="${art.icon('sp:' + sp, 48)}" ${seen ? '' : 'style="filter:brightness(0) opacity(.35)"'}><b>${seen ? esc(SPECIES[sp].name) : '???'}</b><small>${caught ? esc(SPECIES[sp].blurb) : seen ? 'Seen, not yet befriended' : 'Not seen yet'}</small></li>`;
@@ -831,6 +831,7 @@ export function createClient(opts) {
     if (d.pick === 'cloud' && st.picker.cloud) return startExplorer('cloud', st.picker.cloud.data, st.picker.cloud.savedAt);
     if (d.pick === 'new') return shouldPractice() ? runPractice(() => startExplorer('new')) : startExplorer('new');
     if (d.ctl === 'keys') return openControls(b, { onPractice: () => runPractice(null, 'Back to the island') });
+    if (d.ctl === 'fx') { setEffects({ auto: 'low', low: 'normal', normal: 'auto' }[effectsMode()]); return paintPanel(); }
     if (d.ctl === 'practice') return runPractice(null, 'Back to the island');
     if (d.skin != null) { st.picker.look.skin = +d.skin; delete el('.isl-overlay').dataset.html; return paintOverlay(); }
     if (d.hair != null) { st.picker.look.hair = +d.hair; delete el('.isl-overlay').dataset.html; return paintOverlay(); }
