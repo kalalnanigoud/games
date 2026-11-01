@@ -33,6 +33,9 @@ async function open(browser, opts = {}, prefs = {}) {
     // Once per tab session so a reload keeps what the page itself stored.
     if (!sessionStorage.getItem('ob-init')) { sessionStorage.setItem('ob-init', '1'); for (const [k, v] of Object.entries(p)) if (localStorage.getItem(k) == null) localStorage.setItem(k, v); }
   }, { 'gn-onboard-force': '1', 'gn-help-island': '1', 'gn-name': 'Tester', ...prefs });
+  return tab(context);
+}
+async function tab(context) {
   const page = await context.newPage();
   page.setDefaultTimeout(20000);
   page.on('pageerror', (e) => errors.push(e.message));
@@ -40,12 +43,14 @@ async function open(browser, opts = {}, prefs = {}) {
   await page.goto(base + '/');
   return page;
 }
-// Back to the home page with no unfinished game to resume (leaving a page can save its session again).
-const home = async (page) => {
-  await page.evaluate(() => { sessionStorage.clear(); localStorage.removeItem('gn-session'); });
-  await page.goto(base + '/');
-  await page.waitForSelector('[data-local="island"], #forgetBtn');
-  if (await page.locator('#forgetBtn').count()) { await page.click('#forgetBtn'); await page.waitForSelector('[data-local="island"]'); }
+// A fresh tab on the home page (same device storage), with no unfinished game to resume.
+const home = async (old) => {
+  const context = old.context();
+  await old.close();
+  const page = await tab(context);
+  await page.waitForSelector('[data-local="island"]');
+  if (await page.locator('#forgetBtn').count()) { await page.click('#forgetBtn'); await page.waitForSelector('#forgetBtn', { state: 'detached' }); }
+  return page;
 };
 async function startIsland(page) {
   await page.waitForSelector('[data-local="island"]');
@@ -64,7 +69,7 @@ const hold = async (page, key, ms) => { await page.keyboard.down(key); await wai
 
 /* ---------------- island practice: once, Skip, replay (Chromium and WebKit) ---------------- */
 async function practiceFlow(browser, label) {
-  const page = await open(browser, { viewport: { width: 1100, height: 760 } });
+  let page = await open(browser, { viewport: { width: 1100, height: 760 } });
   await startIsland(page);
   await page.click('.isl-pick [data-pick="new"]');
   await page.waitForSelector('.isl-practice');
@@ -86,6 +91,7 @@ async function practiceFlow(browser, label) {
   await islandReady(page);
   assert.equal(await page.locator('.isl-practice').count(), 0, `${label}: the adventure starts after Skip`);
   // The world did not see the practice walk: the explorer is where a new explorer starts.
+  await page.waitForSelector('.isl-bagbtn', { state: 'visible' });
   // Replay: bag -> Guide -> Replay practice.
   await page.keyboard.press('KeyB');
   await page.click('[data-tab="guide"]');
@@ -99,7 +105,7 @@ async function practiceFlow(browser, label) {
   await page.waitForSelector('.isl-practice', { state: 'detached' });
   console.log(`PASS ${label}: practice appears, Skip works, replay works`);
   // A second visit on this device (same storage): no practice.
-  await home(page);
+  page = await home(page);
   await startIsland(page);
   await page.click('.isl-pick [data-pick="new"]');
   await islandReady(page);
@@ -109,7 +115,7 @@ async function practiceFlow(browser, label) {
 
 /* ---------------- controls: remap, gamepad ---------------- */
 async function controlsFlow(browser) {
-  const page = await open(browser, { viewport: { width: 1100, height: 760 } }, { 'gn-ob-island-practice': '1' });
+  let page = await open(browser, { viewport: { width: 1100, height: 760 } }, { 'gn-ob-island-practice': '1' });
   await playIsland(page);
   await page.keyboard.press('KeyB');
   await page.click('[data-tab="guide"]');
@@ -162,7 +168,7 @@ async function controlsFlow(browser) {
 
 /* ---------------- touch layouts at two phone sizes ---------------- */
 async function touchFlow(browser, [w, h, name]) {
-  const page = await open(browser, { viewport: { width: w, height: h }, hasTouch: true, isMobile: true }, {});
+  let page = await open(browser, { viewport: { width: w, height: h }, hasTouch: true, isMobile: true }, {});
   // Practice with touch controls first (fresh device), then the adventure.
   await startIsland(page);
   await page.click('.isl-pick [data-pick="new"]');
@@ -221,19 +227,19 @@ async function localGame(page, id, bot = true) {
   await page.click('#startBtn');
 }
 async function sampleFlow(browser) {
-  const page = await open(browser, { viewport: { width: 1100, height: 800 } }, {});
+  let page = await open(browser, { viewport: { width: 1100, height: 800 } }, {});
   await localGame(page, 'chess');
   await page.waitForSelector('#obSample', { timeout: 15000 });
   assert.match(await page.textContent('#obSample'), /Pick a piece/, 'the sample is the game’s own first step');
   await shot(page, 'onboarding-sample-desktop');
   await page.click('#obSample [data-ob-ok]');
   assert.equal(await page.locator('#obSample').count(), 0, 'Got it dismisses the sample');
-  await home(page);
+  page = await home(page);
   await localGame(page, 'chess');
   await page.waitForSelector('#gamebox [class]');
   await wait(2500);
   assert.equal(await page.locator('#obSample').count(), 0, 'the chess sample does not come back');
-  await home(page);
+  page = await home(page);
   await localGame(page, 'gems');
   await page.waitForSelector('#obSample', { timeout: 15000 });
   assert.match(await page.evaluate(() => document.getElementById('obSample').dataset.g), /gems/, 'each game gets its own sample');
@@ -247,7 +253,7 @@ async function sampleFlow(browser) {
   await shot(ph, 'onboarding-sample-phone');
 }
 async function sketchFlow(browser) {
-  const page = await open(browser, { viewport: { width: 1100, height: 800 } }, {});
+  let page = await open(browser, { viewport: { width: 1100, height: 800 } }, {});
   await localGame(page, 'sketch');
   await page.waitForSelector('#skWarm', { timeout: 15000 });
   assert.match(await page.textContent('#skWarm'), /Warm-up 1 of 3/);
@@ -260,7 +266,7 @@ async function sketchFlow(browser) {
   assert.match(await page.textContent('#skWarm'), /Warm-up 2 of 3/);
   await page.click('#skWarm [data-sw="skip"]');
   assert.equal(await page.locator('#skWarm').count(), 0, 'Skip closes the warm-up');
-  await home(page);
+  page = await home(page);
   await localGame(page, 'sketch');
   await page.waitForSelector('#gamebox .sk-root', { timeout: 15000 });
   await wait(1500);
