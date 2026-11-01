@@ -209,7 +209,7 @@ function gameCard(g, saved) {
       <h3>${esc(g.name)}</h3>
       <div class="game-meta"><span>${icon('users')}${range(g)} players</span><span>${icon('clock')}${info.quick && +libraryFilters.minutes > 0 && +libraryFilters.minutes < info.minutes ? `${esc(info.quick.label)} · ${info.quick.minutes}` : info.duration} min</span><span>${icon('level')}${info.difficulty}</span></div>
       <p>${esc(g.description)}</p>
-      <div class="card-actions"><button class="primary" data-host="${g.id}">${icon('globe')}Host online</button>${g.soloOnDevice ? `<button data-local="${g.id}" title="Play on your own on this device">${icon('phone')}Play solo</button>` : `<button data-local="${g.id}" title="Pass one device around, or play against computer players">${icon('phone')}One device</button>`}</div>
+      <div class="card-actions">${g.localOnly ? '' : `<button class="primary" data-host="${g.id}">${icon('globe')}Host online</button>`}${g.soloOnDevice ? `<button data-local="${g.id}" title="Play on your own on this device">${icon('phone')}Play solo</button>` : `<button data-local="${g.id}" title="Pass one device around, or play against computer players">${icon('phone')}One device</button>`}</div>
       ${info.quick ? `<div class="card-actions"><button data-quick="${g.id}" data-mode="${info.quick.value}">${icon('play')}${esc(info.quick.label)} · ${info.quick.minutes} min</button></div>` : ''}
     </div></article>`;
 }
@@ -442,7 +442,7 @@ const TROPHY = `<svg viewBox="0 0 160 100" aria-hidden="true"><defs>
 
 // "Change game": every game as a cover, with games that don't fit the table marked.
 function chooseGame(id) {
-  if (id === S.gameId) return;
+  if (id === S.gameId || (S.role !== 'local' && getGame(id).localOnly)) return;
   S.gameId = id; S.timerSec = defaultTimer(getGame(id)); S.opts = defaultOpts(getGame(id));
   loadGame(id).catch(() => {});
   fitTable();
@@ -460,7 +460,7 @@ function showPicker(event) {
     <div class="modal panel picker" role="dialog" aria-modal="true" aria-labelledby="pickTitle">
       <button class="icon-btn picker-x" aria-label="Close">${icon('close')}</button>
       <div class="picker-head"><h2 id="pickTitle">Choose a game</h2><p class="muted small">${plural(n, 'player')} at the table.</p></div>
-      <div class="picker-grid">${GAMES.map((x) => {
+      <div class="picker-grid">${GAMES.filter(x => S.role === 'local' || !x.localOnly).map((x) => {
         const fits = n >= x.minPlayers && n <= x.maxPlayers, info = GAME_INFO[x.id], on = x.id === S.gameId;
         return `<button class="pick-card ${on ? 'on' : ''} ${fits ? '' : 'nofit'}" data-game="${x.id}" aria-pressed="${on}">
           <span class="pick-cover">${x.cover || ''}</span>

@@ -63,9 +63,9 @@ const inGame = async (page) => { for (let i = 0; i < 100; i++) { if ((await game
 async function checkQuickPlay(page, label) {
   const leave = () => page.evaluate(async () => (await import('/js/net.js')).leave());
   await page.waitForSelector('#quickBtn');
-  // The 5 min filter finds only the island (its Arena Rush option); 15 min still holds the short party games too.
+  // The 5 min filter finds Arena Rush and Pocket Rally; 15 min still holds the short party games too.
   await page.selectOption('[data-filter="minutes"]', '5');
-  assert.deepEqual(await page.locator('.game-card [data-host]').evaluateAll((b) => b.map((x) => x.dataset.host)), ['island'], `${label}: 5 min filter`);
+  assert.deepEqual(await page.locator('.game-card [data-local]').evaluateAll((b) => b.map((x) => x.dataset.local).sort()), ['island', 'rally'], `${label}: 5 min filter`);
   await page.click('#clearFilters');
   assert.equal(await page.locator('#continueBtn').isVisible(), false, `${label}: no Continue without an account`);
   assert.equal(await page.locator('#quickGame').inputValue(), 'island', `${label}: Quick Play defaults to Creature Island`);

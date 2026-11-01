@@ -81,7 +81,7 @@ function draw(g, r) {
 
 export default {
   id: 'rally', name: 'Pocket Rally', description: 'A quick top-down race around Seabreeze Circuit. Steer, brake and boost past three computer rivals across three laps.', minPlayers: 1, maxPlayers: 1,
-  live: true, manualSave: true, soloOnDevice: true, simultaneous: true, cover: COVER,
+  live: true, manualSave: true, soloOnDevice: true, localOnly: true, simultaneous: true, cover: COVER,
   options: [levelOption('Computer racers')],
   howTo: { goal: 'Finish three laps ahead of the computer racers.', turn: [['🏎️', 'Steer', 'Your car accelerates automatically. Steer with A/D, arrow keys, or the on-screen buttons.'], ['💨', 'Boost and brake', 'Hold Space or Boost for extra speed. Brake with Down or S before corners. Boost recharges when released.'], ['🏁', 'Follow the circuit', 'Grass slows you down. Complete checkpoints in order; cutting across the middle will not count a lap.']], tips: ['Press P to pause. Changing tabs pauses the race.', 'Races are short sessions and are not saved.'] },
   setup(players, opts) { return { sid: uid(), phase: 'race', over: false, level: opts?.level || 'normal' }; },

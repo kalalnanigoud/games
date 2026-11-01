@@ -30,6 +30,7 @@ const coverOf = (g) => {
 const entries = GAMES.map((g) => ({
   id: g.id, name: g.name, description: g.description, minPlayers: g.minPlayers, maxPlayers: g.maxPlayers,
   cover: coverOf(g), howTo: g.howTo, options: g.options,
+  ...(g.localOnly ? { localOnly: true } : {}),
   // Flags the lobby needs before the game's code has loaded.
   bot: !!g.bot, onTimeout: !!g.onTimeout, defaultTimer: g.defaultTimer, simultaneous: !!g.simultaneous, keepDom: !!g.keepDom,
   // Live games (characters moving in a shared world): seats open mid-game, one player per device,

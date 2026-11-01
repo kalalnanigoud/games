@@ -2,12 +2,21 @@ import assert from 'node:assert/strict';
 import { chromium, webkit } from 'playwright';
 import { startEnv, wait, waitFor, out } from './island-harness.mjs';
 import { fileURLToPath } from 'node:url';
-const env = await startEnv();
+const env = await startEnv({ withBroker: true });
 try {
   for (const [name, engine] of [['Chromium', chromium], ['WebKit', webkit]]) {
     const browser = await engine.launch(); env.browsers.push(browser);
     for (const phone of [false, true]) {
       const page = await env.open(browser, { viewport: phone ? { width: 390, height: 844 } : { width: 1280, height: 900 }, hasTouch: phone });
+      assert.equal(await page.locator('[data-host="rally"]').count(), 0, 'solo race offers no online host action');
+      await page.evaluate(async () => (await import('/js/net.js')).hostRoom('rally'));
+      assert.equal(await page.evaluate(async () => (await import('/js/state.js')).S.role), null, 'direct host request is rejected');
+      await page.fill('#nameIn', 'Driver');
+      await page.click('[data-host="island"]');
+      await page.click('[data-pick]');
+      assert.equal(await page.locator('[data-game="rally"]').count(), 0, 'online picker excludes solo race');
+      await page.click('#pickerModal .picker-x');
+      await page.evaluate(async () => (await import('/js/net.js')).leave());
       await page.click('[data-local="rally"]'); await page.click('#startBtn');
       await page.waitForSelector('.rally canvas');
       await waitFor(page, async () => (await import('/games/rally.js')).debug.race.countdown === 0);

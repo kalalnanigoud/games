@@ -42,6 +42,8 @@ jobs:
         run: node tools/multiplayer-ci.mjs
       - name: Creature Island with four live players
         run: node tools/island-ci.mjs
+      - name: Pocket Rally
+        run: node tools/rally-ci.mjs
       - name: Arena Rush
         run: node tools/arena-ci.mjs
       - name: Creature Island fault injection (Chromium and WebKit)

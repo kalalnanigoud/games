@@ -105,6 +105,7 @@ function whenLoaded() {
 /* ---------------- host ---------------- */
 
 export function hostRoom(gameId, resume = null) {
+  if (getGame(resume?.gameId || gameId).localOnly) return toast('This game is available in solo play only.');
   if (!requireMultiplayer()) return;
   cleanup();
   Object.assign(S, {
@@ -550,6 +551,7 @@ export function addBot() {
 
 // rematch: keep everyone in their seats, and let the game know the previous result (chess swaps colours).
 export function startGame(rematch = false) {
+  if (S.role !== 'local' && getGame(S.gameId).localOnly) return toast('This game is available in solo play only.');
   const g = getGame(S.gameId);
   const table = seated();
   const n = table.length;

@@ -278,4 +278,10 @@ assert.deepEqual(voiceCalls.at(-1), ['unreachable', 'gone-phone-1'], 'voice chat
 clientPeer.handlers.error({ type: 'peer-unavailable', message: 'Could not connect to peer ' + t.roomPeerId('VOICE') });
 assert.equal(t.S.status, 'host not found', 'the host itself missing still counts');
 t.cleanup(); tasks.clear(); delete context.Peer;
+t.S.role = null;
+t.hostRoom('rally');
+assert.equal(t.S.role, null, 'solo-only game cannot create an online room');
+Object.assign(t.S, { role: 'host', gameId: 'rally', started: false });
+t.startGame();
+assert.equal(t.S.started, false, 'solo-only game cannot start in an existing online room');
 console.log('Platform regression checks passed: identity, secret fingerprints, valid reconnect, stale connections, rules enforcement, change-only syncs, version check, saved credentials, legacy sessions, stand-ins, backup host takeover, rematch, local fallback, timers, spectators, game options, voice chat membership and tournaments.');
