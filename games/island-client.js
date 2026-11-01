@@ -186,7 +186,7 @@ export function createClient(opts) {
     if (!down && inp.release(e.code)) return;
     if (practice || typing(e) || modalOpen()) return;
     const act = actionOf(e.code);
-    if (MOVES.has(act)) { inp.keys.add(act); e.preventDefault(); return; }
+    if (MOVES.has(act)) { inp.hold(act); e.preventDefault(); return; }
     if (!down) return;
     if (e.code === 'Escape') { if (st.leave) { if (st.leave.state !== 'leaving') closeLeave(); return; } if (st.dlg) return closeDialog(); if (st.ui) return closeUi(); if (st.panel) return togglePanel(null); return; }
     // Enter and Space on a focused button press that button, not the game.

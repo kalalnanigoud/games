@@ -296,7 +296,7 @@ export function startPractice(root, opts) {
     if (e.code === 'Escape') return finish('skip');
     if ((e.code === 'Enter' || e.code === 'Space') && t?.closest?.('button')) return;
     const a = actionOf(e.code);
-    if (MOVES.has(a)) { inp.keys.add(a); e.preventDefault(); }
+    if (MOVES.has(a)) { inp.hold(a); e.preventDefault(); }
     else if (ACTION_BITS[a]) { inp.bits |= ACTION_BITS[a]; e.preventDefault(); }
   }
   function close() {

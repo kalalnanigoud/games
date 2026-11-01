@@ -79,6 +79,8 @@ async function practiceFlow(browser, label) {
   // The practice explorer walks with the keys.
   const before = await page.evaluate(() => document.querySelector('.isl-practice')._p.me.x);
   await hold(page, 'KeyD', 500);
+  // Software-rendered WebKit runs only a few frames a second; the held time still has to move the explorer.
+  await page.waitForFunction((b) => document.querySelector('.isl-practice')._p.me.x > b + 30, before, { timeout: 8000 }).catch(() => {});
   const after = await page.evaluate(() => document.querySelector('.isl-practice')._p.me.x);
   assert.ok(after > before + 30, `${label}: practice explorer walks right (${before} -> ${after})`);
   if (label === 'chromium') await shot(page, 'onboarding-practice-desktop');
@@ -283,7 +285,11 @@ try {
   if (only('touch')) for (const size of [[360, 640, 'portrait'], [640, 360, 'landscape']]) await touchFlow(chromiumBrowser, size);
   if (only('sample')) await sampleFlow(chromiumBrowser);
   if (only('sketch')) await sketchFlow(chromiumBrowser);
-  if (only('webkit')) { webkitBrowser = await webkit.launch(); await practiceFlow(webkitBrowser, 'webkit'); }
+  if (only('webkit')) {
+    // Software-rendered WebKit is CPU-bound: let Chromium's finished pages go before it runs.
+    for (const c of contexts.splice(0)) await c.close().catch(() => {});
+    await chromiumBrowser.close().catch(() => {});
+    webkitBrowser = await webkit.launch(); await practiceFlow(webkitBrowser, 'webkit'); }
   assert.deepEqual([...new Set(errors)], [], 'no page errors');
   console.log('onboarding-ci: all checks passed.');
 } catch (e) {

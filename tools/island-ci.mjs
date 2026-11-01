@@ -445,6 +445,8 @@ async function webkitSolo() {
     const x = () => page.evaluate(async () => (await import('/games/island.js')).debug.client.state.body.x);
     const x0 = await x();
     await page.keyboard.down('KeyD'); await wait(900); await page.keyboard.up('KeyD');
+    // Software-rendered WebKit can run only a few frames a second; the held time still has to move the explorer.
+    await waitFor(page, async (x0) => (await import('/games/island.js')).debug.client.state.body.x - x0 > 40, x0, 8000).catch(() => {});
     assert.ok((await x()) - x0 > 40, 'WebKit: the explorer moves');
     await page.evaluate(async () => { // stand beside Elder Maru
       const { debug } = await import('/games/island.js'), { TILE: T } = await import('/games/island-data.js');

@@ -129,12 +129,24 @@ const results = [];
 const engines = [['Chromium', () => chromium.launch({ args: ['--disable-background-timer-throttling', '--disable-renderer-backgrounding'] })]];
 if (!process.env.SKIP_WEBKIT) engines.push(['WebKit', () => webkit.launch()]);
 for (const [name, launch] of engines) {
-  const browser = await launch();
+  let browser = await launch();
   env.browsers.push(browser);
   for (const [title, fn] of Object.entries(tests)) {
     env.errors.length = 0; env.saves = 0;
     try {
-      await fn(browser);
+      // Software-rendered WebKit on Linux can lose its web process under load; that is the browser dying, not the
+      // island failing, so a test that ends in "closed" is run once more on a fresh browser. Assertions are untouched.
+      for (let attempt = 0; ; attempt++) {
+        try { await fn(browser); break; }
+        catch (e) {
+          if (attempt || name !== 'WebKit' || !/has been closed|Target crashed|Browser closed/i.test(String(e.message))) throw e;
+          console.warn(`RETRY ${name}: ${title} (the browser closed under it)`);
+          for (const c of env.contexts.splice(0)) await c.close().catch(() => {});
+          await browser.close().catch(() => {});
+          env.errors.length = 0; env.saves = 0;
+          browser = await launch(); env.browsers.push(browser);
+        }
+      }
       assert.deepEqual(env.errors, [], 'no page errors');
       console.log(`PASS ${name}: ${title}`); results.push(true);
     } catch (e) {

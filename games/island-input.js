@@ -2,6 +2,7 @@
 // keyboard, gamepad and touch input for the explorer, and the Controls panel. island-client.js and the
 // practice scene both read the explorer's input from here.
 import { BITS } from './island-sim.js';
+import { TICK } from './island-data.js';
 import { injectCSS } from '../js/fx.js';
 import { openModal, closeModal } from '../js/dialog.js';
 import { esc, toast } from '../js/util.js';
@@ -74,14 +75,17 @@ export function createInput(hooks = {}) {
   listeners.add(clear);
   const onPadOn = () => { try { toast('Controller connected.', 'info'); } catch {} };
   addEventListener('gamepadconnected', onPadOn);
-  inp.clear = () => { inp.keys.clear(); inp.bits = 0; if (inp.joy) { inp.joy.on = false; inp.joy.dx = inp.joy.dy = 0; } for (const reset of resets) reset(); };
+  // A key held and let go between two frames (a slow device, a stalled first frame) still walks as long as it was held.
+  const since = {}, credit = {}, draining = {};
+  inp.hold = (a) => { if (!inp.keys.has(a)) { inp.keys.add(a); since[a] = performance.now(); } };
+  inp.clear = () => { inp.keys.clear(); for (const a of MOVES) { credit[a] = 0; draining[a] = false; } inp.bits = 0; if (inp.joy) { inp.joy.on = false; inp.joy.dx = inp.joy.dy = 0; } for (const reset of resets) reset(); };
   inp.onClear = (fn) => resets.add(fn);
   inp.onDestroy = (fn) => cleanups.add(fn);
   const visibility = () => { if (document.hidden) clear(); };
   addEventListener('blur', clear);
   document.addEventListener('visibilitychange', visibility);
   document.addEventListener('gn-input-suspend', clear);
-  inp.release = (code) => { const a = actionOf(code); if (MOVES.has(a)) { inp.keys.delete(a); return true; } return false; };
+  inp.release = (code) => { const a = actionOf(code); if (MOVES.has(a)) { if (inp.keys.delete(a)) credit[a] = Math.min(0.75, (credit[a] || 0) + (performance.now() - (since[a] || 0)) / 1000); return true; } return false; };
   inp.destroy = () => { clear(); for (const cleanup of cleanups) cleanup(); resets.clear(); cleanups.clear(); listeners.delete(clear); removeEventListener('gamepadconnected', onPadOn); removeEventListener('blur', clear); document.removeEventListener('visibilitychange', visibility); document.removeEventListener('gn-input-suspend', clear); };
   // Where the explorer is headed, and what was pressed since the last look: [dx, dy, bits] (-100 to 100).
   inp.sample = () => {
@@ -90,10 +94,19 @@ export function createInput(hooks = {}) {
     const pad = readPad(), now = performance.now();
     if (inp.joy?.on) { dx = inp.joy.dx; dy = inp.joy.dy; }
     else {
-      if (inp.keys.has('left')) dx -= 100;
-      if (inp.keys.has('right')) dx += 100;
-      if (inp.keys.has('up')) dy -= 100;
-      if (inp.keys.has('down')) dy += 100;
+      // Held time not yet seen by a step counts only when frames fell well behind (over two steps), so normal play is unchanged.
+      const on = (a) => {
+        if (inp.keys.has(a)) { since[a] = now; return true; }
+        if (!draining[a] && (credit[a] || 0) >= 2 * TICK) draining[a] = true;
+        if (!draining[a]) return false;
+        credit[a] -= TICK;
+        if (credit[a] <= 0) { credit[a] = 0; draining[a] = false; }
+        return true;
+      };
+      if (on('left')) dx -= 100;
+      if (on('right')) dx += 100;
+      if (on('up')) dy -= 100;
+      if (on('down')) dy += 100;
       if (dx && dy) { dx *= 0.7071; dy *= 0.7071; }
       if (!dx && !dy && pad) { dx = pad.x * 100; dy = pad.y * 100; }
     }
