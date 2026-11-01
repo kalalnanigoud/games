@@ -42,6 +42,8 @@ jobs:
         run: node tools/multiplayer-ci.mjs
       - name: Creature Island with four live players
         run: node tools/island-ci.mjs
+      - name: Creature Island fault injection (Chromium and WebKit)
+        run: node tools/island-faults.mjs
       - name: Upload browser traces and screenshots
         if: always()
         uses: actions/upload-artifact@v4
@@ -49,3 +51,31 @@ jobs:
           name: browser-results
           path: test-results/
           retention-days: 7
+
+  performance:
+    name: Creature Island performance (phone budget)
+    runs-on: ubuntu-24.04 # pinned: ubuntu-latest moves to Ubuntu 26, which the headless browser may not support yet
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Install a headless browser
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Frame time, memory and network under 4x CPU throttling
+        run: node tools/perf-island.mjs
+      - name: Upload performance results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: island-performance
+          path: |
+            test-results/perf-island.json
+            test-results/perf-island.md
+          retention-days: 30
+      - name: Show the summary
+        if: always()
+        run: cat test-results/perf-island.md >> "$GITHUB_STEP_SUMMARY"

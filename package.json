@@ -3,8 +3,9 @@
   "private": true,
   "scripts": {
     "test": "node tools/test.mjs 10",
-    "test:browser": "node tools/browser-ci.mjs && node tools/multiplayer-ci.mjs && node tools/island-ci.mjs",
-    "test:all": "npm test && npm run test:browser"
+    "test:browser": "node tools/browser-ci.mjs && node tools/multiplayer-ci.mjs && node tools/island-ci.mjs && node tools/island-faults.mjs",
+    "test:all": "node tools/test-all.mjs",
+    "perf": "node tools/perf-island.mjs"
   },
   "devDependencies": {
     "peer": "1.0.2",
