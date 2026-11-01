@@ -643,7 +643,7 @@ export function createClient(opts) {
     else if (sc.modal()) html = sc.overlayHTML();
     else if (!st.ready) html = pickerHTML();
     else if (st.ending) html = `<div class="isl-card isl-end"><h2>The storm is calmed!</h2><p>Sunlight spills over Stormcrown Peak for the first time in weeks. The island’s creatures, and its people, will remember this.</p><p class="small muted">Keep exploring: befriend every kind and find every treasure. Remember to save.</p><div class="isl-row"><button class="primary" data-end="ok">Keep exploring</button></div></div>`;
-    else if (st.downT > 0) html = `<div class="isl-down"><b>Knocked out</b><span>A friend can revive you: they stand beside you and press ${matchMedia('(pointer: coarse)').matches ? 'Revive' : 'E'}.</span><button data-respawn>Return to the village</button></div>`;
+    else if (st.downT > 0) html = `<div class="isl-down"><b>Knocked out</b><span>A friend can revive you: they stand beside you and press ${matchMedia('(pointer: coarse)').matches ? 'Revive' : esc(keysFor('interact')[0] || 'E')}.</span><button data-respawn>Return to the village</button></div>`;
     if (box.dataset.html === html) return;
     box.dataset.html = html;
     box.innerHTML = html;

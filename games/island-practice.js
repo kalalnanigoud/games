@@ -99,7 +99,7 @@ export function startPractice(root, opts) {
     rect = { x0: 36 / Z, x1: W - 36 / Z, y0: top, y1: Math.max(top + 90 / Z, H - bottom) };
     if (!S.props) { me.x = (rect.x0 + rect.x1) / 2; me.y = (rect.y0 + rect.y1) / 2; S.since = t; beginStep(0); }
     const pk = W + 'x' + H;
-    if (S.pk !== pk) S.props = [['pine', 0.04, 0.5], ['bush', 0.12, 0.92], ['rock', 0.9, 0.58], ['flowers', 0.2, 0.5], ['bush', 0.93, 0.9], ['pine', 0.97, 0.52], ['flowers', 0.78, 0.96], ['rock', 0.45, 0.97]].map(([kind, fx, fy]) => ({ kind, x: fx * W, y: Math.max(top + 24 / Z, fy * H) }));
+    if (S.pk !== pk) S.props = [['pine', 0.04, 0.5], ['bush', 0.12, 0.92], ['rock', 0.9, 0.58], ['flowers', 0.2, 0.5], ['bush', 0.93, 0.9], ['pine', 0.97, 0.52], ['flowers', 0.78, 0.96], ['rock', 0.45, 0.97]].map(([kind, fx, fy]) => ({ kind, x: fx * W, y: Math.max(top + 24 / Z, fy * H) })).filter((p) => !touch || p.y < rect.y1 + 20 / Z);
     S.pk = pk;
     el.querySelector('.isl-touch').hidden = !touch;
     el.querySelector('[data-pr="controls"]').hidden = touch;
