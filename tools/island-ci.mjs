@@ -35,7 +35,7 @@ const CONFIG = (await fs.readFile(new URL('../js/config.js', import.meta.url), '
 const saveUrl = /islandSaves:\s*'([^']+)'/.exec(CONFIG)?.[1] || 'https://island-saves.test';
 
 const errors = [], contexts = [];
-let browser;
+let browser, saveDelay = 0;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 async function waitFor(page, fn, arg, timeout = 20000) {
   const end = Date.now() + timeout;
@@ -49,6 +49,7 @@ async function open(opts = {}) {
   await context.route(/https:\/\/fonts\./, (r) => r.abort());
   await context.route(saveUrl.replace(/\/+$/, '') + '/**', async (route) => {
     const req = route.request();
+    if (saveDelay && req.method() === 'PUT') await wait(saveDelay); // [save-flows] a slow save, for the Escape test
     const res = await worker.fetch(new Request(req.url(), { method: req.method(), headers: req.headers(), body: ['GET', 'HEAD', 'OPTIONS'].includes(req.method()) ? undefined : req.postData() }), { DB: D1, PIN_PEPPER: 'ci-pepper' });
     route.fulfill({ status: res.status, headers: Object.fromEntries(res.headers), body: Buffer.from(await res.arrayBuffer()) });
   });
@@ -222,6 +223,55 @@ try {
   await pick(fifth);
   assert.equal((await hw()).length, 4, 'the watcher took the free seat');
   console.log('PASS a watcher takes a freed seat mid-adventure');
+
+  // [save-flows] Cancelling "Save and leave" mid-upload keeps the explorer on the island.
+  {
+    const phoneId = ids.phone;
+    const hostSees = () => host.evaluate(async (id) => { const p = (await import('/games/island.js')).debug.world.players.get(id); return p ? { ready: p.ready, parked: !!p.parked } : null; }, phoneId);
+    await host.evaluate(async (id) => { const w = (await import('/games/island.js')).debug.world; w.bump(w.players.get(id), true); }, phoneId);
+    await waitFor(phone, async () => (await import('/games/island.js')).debug.client.state.me?.unsaved === true);
+    await wait(2100);
+    saveDelay = 1500;
+    await phone.evaluate(async () => { (await import('/js/net.js')).leave(); });
+    await phone.waitForSelector('.isl-overlay:has-text("Save before you go?")');
+    await phone.click('[data-leave="save"]');
+    await phone.waitForSelector('.isl-overlay:has-text("Saving…")');
+    await phone.keyboard.press('Escape');
+    await phone.waitForSelector('.isl-overlay', { state: 'hidden' });
+    await wait(saveDelay + 2500); // the save lands, then the host would have parked a leaving explorer
+    saveDelay = 0;
+    assert.deepEqual(await hostSees(), { ready: true, parked: false }, 'Escape during the upload: the explorer is still simulated');
+    assert.ok((await S(phone)).started && await phone.locator('.isl-pick').count() === 0, 'and the screen stays in the game');
+    assert.equal(await phone.evaluate(async () => (await import('/games/island.js')).debug.client.state.leave), null);
+    // Safety net: if the host does park an explorer that is still on screen, the screen asks for it back.
+    await host.evaluate(async (id) => { const w = (await import('/games/island.js')).debug.world; w.park(w.players.get(id)); }, phoneId);
+    await waitFor(host, async (id) => (await import('/games/island.js')).debug.world.players.get(id).ready === true, phoneId, 8000);
+    console.log('PASS Escape during Save and leave keeps the explorer on the island (and a stray park is undone)');
+  }
+
+  // [save-flows] A browser's older save and an account that already has one: the key stays until the player discards it.
+  {
+    const lk = '1'.repeat(64);
+    const apiUrl = saveUrl.replace(/\/+$/, '');
+    const put = await worker.fetch(new Request(apiUrl + '/explorer', { method: 'PUT', headers: { authorization: 'Bearer ' + lk, 'content-type': 'application/json' }, body: JSON.stringify({ rev: 0, data: { kind: 'island-explorer', v: 1, name: 'Old Browser', lv: 2 } }) }), { DB: D1, PIN_PEPPER: 'ci-pepper' });
+    assert.equal(put.status, 200);
+    await fifth.evaluate((k) => localStorage.setItem('island-explorer-key', k), lk);
+    await fifth.click('.isl-bagbtn');
+    await fifth.click('.isl-tabs [data-tab="save"]');
+    await fifth.click('[data-acct="open"]');
+    await fifth.fill('[name="acctName"]', 'Phone Explorer');
+    await fifth.fill('[name="acctPin"]', '4826');
+    await fifth.click('[data-acct-form] button[type="submit"]');
+    await fifth.waitForSelector('.isl-overlay', { state: 'hidden' });
+    await fifth.click('.isl-bagbtn');
+    await fifth.waitForSelector('[data-legacy="use"]');
+    assert.equal(await fifth.evaluate(() => localStorage.getItem('island-explorer-key')), lk, 'the conflict leaves the browser’s key in place');
+    await fifth.click('[data-legacy="keep"]');
+    assert.equal(await fifth.locator('[data-legacy]').count(), 0, 'Keep it for later hides the choice');
+    assert.equal(await fifth.evaluate(() => localStorage.getItem('island-explorer-key')), lk, 'and keeps the key');
+    assert.equal((await worker.fetch(new Request(apiUrl + '/explorer', { headers: { authorization: 'Bearer ' + lk } }), { DB: D1, PIN_PEPPER: 'ci-pepper' })).status, 200, 'and the save on the server');
+    console.log('PASS a legacy conflict keeps the browser’s key until it is discarded');
+  }
 
   // Phone layout: the world fills the screen, nothing scrolls sideways.
   assert.ok(await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'no sideways scrolling on the phone');

@@ -5,7 +5,7 @@ import { TILE, TICK, SPECIES, ITEMS, GEAR, SHOP, SEATS, QUESTS, QUEST_ORDER, STA
 import { stepBody, newBody, BITS, objective, interactables } from './island-sim.js';
 import { island, zoneAt, areaName, TRACKS, G, W } from './island-map.js';
 import { createView, minimap } from './island-view.js';
-import { cloudAvailable, explorerTag, keyIsKept, loadExplorer, saveExplorer, account, signIn, signUp, signOut, claimLegacy } from './island-cloud.js';
+import { cloudAvailable, explorerTag, keyIsKept, loadExplorer, saveExplorer, account, signIn, signUp, signOut, claimLegacy, replaceWithLegacy, discardLegacy } from './island-cloud.js';
 import { esc, toast } from '../js/util.js';
 import { sound } from '../js/sound.js';
 import { morph } from '../js/fx.js';
@@ -42,7 +42,7 @@ export function createClient(opts) {
     body: null, prev: { x: 0, y: 0 }, vis: { x: 0, y: 0 }, history: [], seq: 0, buf: [], acc: 0, last: 0,
     frames: [], offset: null, cam: { x: 64 * T, y: 69.5 * T }, nodes: {}, dlg: null, dlgLine: 0, panel: null, tab: 'team', ui: null,
     picker: { state: cloudAvailable() ? 'checking' : 'choose', cloud: null, error: '', look: { skin: 0, hair: 0 } },
-    acct: { mode: 'signin', name: '', error: '', busy: false }, acctOpen: false,
+    acct: { mode: 'signin', name: '', error: '', busy: false }, acctOpen: false, legacy: null, legacyLater: false, parked: false,
     cloudRev: 0, cloudName: '', fromCloud: false, replaceOk: false, save: null, snapWait: null,
     keys: new Set(), bits: 0, joy: null, holdAttack: null, banners: [], bannerEl: null, zone: '', zonesSeen: new Set(),
     downAt: 0, ending: false, leave: null, boss: null, bossHp: 0, hudCache: {}, spectator: false,
@@ -112,7 +112,10 @@ export function createClient(opts) {
       case 'dlg': openDialog(e[1]); break;
       case 'snap': if (st.snapWait) { const w = st.snapWait; st.snapWait = null; w(e[1], e[2], e[3]); } break;
       case 'saved': if (st.ackWait?.snap === e[1]) { const w = st.ackWait; st.ackWait = null; w.resolve(!!e[2]); } break;
-      case 'ready': st.ready = true; st.joining = false; paintOverlay(); paintHud(); break;
+      case 'ready': st.ready = true; st.joining = false; st.parked = false; paintOverlay(); paintHud(); break;
+      // The host took our explorer off the island. If we are still here shortly after (a leave that didn't go
+      // through), ask for it back.
+      case 'parked': st.parked = true; setTimeout(() => { if (st.parked && !disposed && root?.isConnected) { st.parked = false; send({ k: 'cmd', c: 'unpark' }); } }, 2500); break;
       case 'warp': if (st.body) { st.body.x = e[1]; st.body.y = e[2]; } else st.body = newBody(e[1], e[2]); st.prev = { x: e[1], y: e[2] }; st.vis = { x: 0, y: 0 }; st.history = []; st.cam = { x: e[1], y: e[2] - 20 }; break;
       case 'down': st.downAt = now; paintOverlay(); sound('bad'); break;
       case 'lvl': banner(e[1] === 'you' ? `Level ${e[3]}!` : `${e[2]} reached level ${e[3]}!`, e[1] === 'you' ? 'You feel stronger' : 'Your companion grew stronger'); sound('win'); break;
@@ -149,7 +152,7 @@ export function createClient(opts) {
     if (typing(e) || modalOpen()) return;
     if (KEYMAP[e.code]) { st.keys.add(KEYMAP[e.code]); e.preventDefault(); return; }
     if (!down) return;
-    if (e.code === 'Escape') { if (st.leave) return closeLeave(); if (st.dlg) return closeDialog(); if (st.ui) return closeUi(); if (st.panel) return togglePanel(null); return; }
+    if (e.code === 'Escape') { if (st.leave) { if (st.leave.state !== 'leaving') closeLeave(); return; } if (st.dlg) return closeDialog(); if (st.ui) return closeUi(); if (st.panel) return togglePanel(null); return; }
     // Enter and Space on a focused button press that button, not the game.
     if ((e.code === 'Enter' || e.code === 'Space') && e.target?.closest?.('button, a, label')) return;
     if (st.dlg && (e.code === 'KeyE' || e.code === 'Enter' || e.code === 'Space')) { e.preventDefault(); return advanceDialog(); }
@@ -563,6 +566,7 @@ export function createClient(opts) {
       : `<p class="isl-save-state good">${IC.check}<span>Everything is saved${me.lastSave ? ` (${fmtTime(me.lastSave)})` : ''}.</span></p>`;
     return `${status}
       ${cloud ? accountRow() : ''}
+      ${legacyHTML()}
       ${!s || s.state === 'done' ? `<div class="isl-row">${cloud && account() ? `<button class="primary" data-save="cloud">${IC.cloud}Save adventure</button>` : ''}<button class="${cloud && account() ? '' : 'primary'}" data-save="file">${IC.file}Save to a file</button></div>` : ''}
       <p class="small muted">Saves keep your explorer: level, creatures, items and story. Nothing is saved until you choose to. ${cloud ? `Cloud saves belong to your explorer account (a name and a 4-digit PIN), so you can continue on any device${keyIsKept() ? '' : '. This browser can’t keep you signed in (private browsing?): save to a file too'}.` : 'Cloud saves aren’t set up on this site, so keep the file somewhere safe.'}</p>
       <p class="small muted">Friends save their own explorers from their own menus.</p>`;
@@ -613,18 +617,51 @@ export function createClient(opts) {
     }
     repaintOverlay(); paintPanel();
   }
-  async function afterSignIn() {
-    if (await claimLegacy()) toast('The explorer saved in this browser is now in your account.', 'info');
-    if (!st.ready) return checkCloud();
-    // Signed in while playing: find out what the account holds, so saving over a different explorer asks first.
+  // A save from before accounts: moved in, or (when the account already has one) offered as a choice.
+  async function tryClaim() {
+    const r = await claimLegacy();
+    if (r === true) toast('The explorer saved in this browser is now in your account.', 'info');
+    st.legacy = r?.conflict && !st.legacyLater ? r.conflict : null;
+  }
+  async function resyncAccount() {
+    // Find out what the account holds, so saving over a different explorer asks first.
     try { const found = await loadExplorer(); st.cloudRev = found?.rev || 0; st.cloudName = found?.data?.name || ''; } catch { st.cloudRev = 0; }
     st.fromCloud = false; st.replaceOk = false; st.conflict = null;
+  }
+  async function afterSignIn() {
+    await tryClaim();
+    if (!st.ready) return checkCloud();
+    await resyncAccount();
     st.acctOpen = false; repaintOverlay(); paintPanel();
+  }
+  async function legacyChoice(what) {
+    if (what === 'keep') { st.legacyLater = true; st.legacy = null; repaintOverlay(); return paintPanel(); }
+    if (what === 'discard') {
+      if (!confirm('Discard the explorer saved in this browser? It will no longer be offered here, and this can’t be undone.')) return;
+      discardLegacy(); st.legacy = null; repaintOverlay(); return paintPanel();
+    }
+    if (!confirm('Use this browser’s older explorer instead? It becomes your account’s saved explorer. The one in your account now is kept as the earlier save.')) return;
+    st.legacy.busy = true; repaintOverlay(); paintPanel();
+    try {
+      await replaceWithLegacy();
+      st.legacy = null;
+      toast('The older explorer from this browser is now your account’s.', 'info');
+      if (st.ready) await resyncAccount(); else await checkCloud();
+    } catch (e) { st.legacy.busy = false; st.legacy.error = e.message || 'That didn’t work.'; }
+    repaintOverlay(); paintPanel();
+  }
+  function legacyHTML() {
+    const L = st.legacy;
+    if (!L || !account()) return '';
+    const line = (x) => x?.data ? `${esc(x.data.name || 'Explorer')}, level ${x.data.lv ?? 1}${x.savedAt ? `, saved ${ago(x.savedAt)}` : ''}` : 'a saved explorer';
+    return `<div class="isl-legacy"><p class="isl-save-state warn"><span>This browser holds an older explorer, and your account already has one.<br>In your account: <b>${line(L.theirs)}</b><br>In this browser: <b>${line(L.old)}</b></span></p>
+      ${L.error ? `<p class="isl-save-state bad">${esc(L.error)}</p>` : ''}
+      <div class="isl-col"><button data-legacy="use" ${L.busy ? 'disabled' : ''}>${L.busy ? 'One moment…' : 'Use this browser’s older explorer instead'}</button><button data-legacy="keep" ${L.busy ? 'disabled' : ''}>Keep it for later</button><button class="bad" data-legacy="discard" ${L.busy ? 'disabled' : ''}>Discard the browser’s save</button></div></div>`;
   }
   async function doSignOut() {
     await signOut();
     st.cloudRev = 0; st.cloudName = ''; st.fromCloud = false; st.replaceOk = false; st.conflict = null;
-    st.picker.cloud = null;
+    st.picker.cloud = null; st.legacy = null; st.legacyLater = false;
     toast('Signed out.', 'info');
     repaintOverlay(); paintPanel();
   }
@@ -640,8 +677,10 @@ export function createClient(opts) {
   }
   // Tells the host the save is stored; resolves to whether that save covers everything (false if the
   // world moved on during the upload, or the host didn't answer).
-  function confirmSaved(snap, leaving = false) {
+  // leaving may be a function, asked at the last moment: it says whether the player still wants to leave.
+  function confirmSaved(snap, leavingArg = false) {
     return new Promise((resolve) => {
+      const leaving = typeof leavingArg === 'function' ? leavingArg() : leavingArg;
       const timer = setTimeout(() => { if (st.ackWait?.snap === snap) st.ackWait = null; resolve(false); }, 6000);
       st.ackWait = { snap, resolve: (v) => { clearTimeout(timer); resolve(v); } };
       if (!send({ k: 'cmd', c: 'saved', snap, leaving })) { clearTimeout(timer); st.ackWait = null; resolve(false); }
@@ -698,7 +737,7 @@ export function createClient(opts) {
     if (!cloudAvailable() || !account()) { st.picker.state = 'choose'; st.picker.cloud = null; return paintOverlay(); }
     st.picker.state = 'checking'; st.picker.error = ''; paintOverlay();
     try {
-      if (await claimLegacy()) toast('The explorer saved in this browser is now in your account.', 'info');
+      await tryClaim();
       const found = await loadExplorer();
       st.picker.cloud = found;
       if (found) { st.cloudRev = found.rev; st.cloudName = found.data?.name || ''; }
@@ -755,6 +794,7 @@ export function createClient(opts) {
       <h2>Creature Island</h2>
       <p class="muted small">Explore together, befriend creatures, calm the storm. Your explorer is yours: it comes with you to any friend’s island.</p>
       ${cloudAvailable() ? (account() ? accountRow() : accountHTML(false)) : ''}
+      ${legacyHTML()}
       ${p.state === 'checking' ? `<p class="isl-save-state">${IC.cloud}<span>Looking for your saved explorer…</span></p>` : ''}
       ${p.error ? `<p class="isl-save-state bad">${esc(p.error)}</p><div class="isl-row"><button data-pick="recheck">Try again</button></div>` : ''}
       ${c ? `<button class="isl-continue" data-pick="cloud"><img alt="" src="${view.art().icon(c.team?.[0]?.sp ? 'sp:' + c.team[0].sp : 'charm', 52)}"><span><b>Continue as ${esc(c.name || 'your explorer')}</b><small>Level ${c.lv} · ${(c.team?.length || 0) + (c.ranch?.length || 0)} creatures · ${Object.values(c.quests || {}).filter((s) => s === 9).length} quests done · saved ${ago(p.cloud.savedAt)}</small></span></button>` : ''}
@@ -788,7 +828,8 @@ export function createClient(opts) {
     const L = st.leave;
     const others = opts.isHost ? (st.w.roster || []).filter((r) => r.id !== st.pid && r.unsaved).map((r) => r.name) : [];
     const what = L.kind === 'leave' ? (opts.isHost ? 'Leaving closes the island for everyone.' : 'You can come back any time with your saved explorer.') : 'This ends the adventure for everyone.';
-    if (L.state === 'saving') return `<div class="isl-card"><h2>Saving…</h2><p class="muted">One moment.</p></div>`;
+    if (L.state === 'leaving') return `<div class="isl-card"><h2>Leaving…</h2><p class="muted">Your explorer is saved. One moment.</p><div class="isl-col"><button disabled>Cancel</button></div></div>`;
+    if (L.state === 'saving') return `<div class="isl-card"><h2>Saving…</h2><p class="muted">One moment. Press Escape to cancel leaving.</p></div>`;
     const mine = st.ready && isUnsaved();
     return `<div class="isl-card"><h2>${mine ? 'Save before you go?' : 'Close the island?'}</h2>
       <p>${mine ? unsavedText() + ' ' : ''}${esc(what)}</p>
@@ -807,13 +848,17 @@ export function createClient(opts) {
     paintOverlay();
     return true;
   }
-  function closeLeave() { st.leave = null; paintOverlay(); }
+  // Escape and Cancel stop here, except in the short final "Leaving…" step.
+  function closeLeave() { if (st.leave?.state === 'leaving') return; st.leave = null; paintOverlay(); }
   async function leaveSave(force = false) {
     const L = st.leave;
     L.state = 'saving'; L.error = ''; L.conflict = false; paintOverlay();
     // "Replace and leave" was the button the player pressed when a different explorer is in the cloud.
     if (st.cloudRev && !st.fromCloud) st.replaceOk = true;
-    const r = cloudAvailable() && account() ? await saveCloud(force, { leaving: true }) : await saveFile({ leaving: true });
+    // The host is only told "leaving" if this very prompt is still open when the save is stored; a cancel
+    // before then (Escape) sends a plain "saved", so the explorer stays on the island.
+    const leaving = () => { if (st.leave !== L) return false; L.state = 'leaving'; paintOverlay(); return true; };
+    const r = cloudAvailable() && account() ? await saveCloud(force, { leaving }) : await saveFile({ leaving });
     if (st.leave !== L) return;
     // The world keeps running while a save uploads. Leave only once the host confirms the save has
     // everything (it then takes the explorer off the island, so nothing more can be earned or lost).
@@ -970,6 +1015,7 @@ export function createClient(opts) {
     if (d.acct === 'close') { st.acctOpen = false; return repaintOverlay(); }
     if (d.acct === 'mode-create' || d.acct === 'mode-signin') { st.acct.mode = d.acct.slice(5); st.acct.error = ''; return repaintOverlay(); }
     if (d.acct === 'signout') return doSignOut();
+    if (d.legacy) return legacyChoice(d.legacy);
     if (d.pick === 'recheck') return checkCloud();
     if (d.pick === 'cloud' && st.picker.cloud) return startExplorer('cloud', st.picker.cloud.data, st.picker.cloud.savedAt);
     if (d.pick === 'new') return startExplorer('new');
