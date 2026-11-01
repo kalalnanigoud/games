@@ -1,7 +1,7 @@
 // Creature Island: up to four friends explore one island together in real time, befriend creatures,
 // raise companions and calm the storm on Stormcrown Peak. The host's device runs the world
-// (island-sim.js); everyone's screen is island-client.js. Explorers are saved only when a player asks:
-// to the cloud (island-cloud.js) or to a file.
+// (island-sim.js); everyone's screen is island-client.js. Explorers are saved only when a player asks,
+// to their explorer account in the cloud (island-cloud.js, save-centre.js); without an account nothing is kept.
 import { injectCSS } from '../js/fx.js';
 import { uid } from '../js/util.js';
 import { TICK } from './island-data.js';
@@ -69,7 +69,7 @@ export default {
       ['⚔️', 'Fight in real time', 'Attack with J, Space or a click (the sword button on a phone); dodge with K or Shift. Red shapes on the ground show where an attack is about to land: dodge out of them. Your companion fights beside you; L or Q (the paw) uses its special move.'],
       ['🎀', 'Befriend creatures', 'Weaken a wild creature to a third of its health: a gold ring and its chance appear over it. Then press C (Befriend) to throw a Bond Charm. Up to three travel with you; the rest wait at the village ranch.'],
       ['💬', 'Talk, gather, help', 'E (or the hand button) talks to people, picks berries and shells, opens chests and revives a knocked-out friend. Healer Sana rests everyone; Toma sells charms, berries and gear.'],
-      ['💾', 'Saving', 'Nothing saves by itself. Open the bag (B) → Save and choose Save adventure, or save to a file. Each player saves their own explorer, and can bring it to any friend’s island later.'],
+      ['💾', 'Saving', 'Nothing saves by itself. Open the bag (B) → Save and choose Save adventure; Load adventure brings your last save back. Saving needs an explorer account (a name and a 4-digit PIN, with a recovery code in case you forget it): without one, nothing is kept when you leave. Each player saves their own explorer, and can bring it to any friend’s island later.'],
     ],
     tips: [
       'Elements matter: Leaf beats Tide and Stone, Tide beats Ember, Ember beats Leaf, Spark beats Tide, Stone beats Spark and Ember.',
@@ -293,9 +293,13 @@ const ISLAND_CSS = `
 .isl-acct-fields.three { grid-template-columns: minmax(0, 1fr) 84px 84px; }
 .isl-acct-fields input { min-height: 44px; font-size: 16px; padding: 0 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,.18); background: rgba(5,10,30,.55); color: #fff; min-width: 0; }
 .isl-acct-fields input[type="password"] { letter-spacing: .3em; text-align: center; }
+.isl-acct-fields input[type="password"]::placeholder { letter-spacing: normal; font-size: .85rem; }
 .isl-acct-fields input:focus { outline: 2px solid #7c6cff; outline-offset: 1px; }
 @media (max-width: 420px) { .isl-acct-fields.three { grid-template-columns: 1fr 1fr; } .isl-acct-fields.three input[name="acctName"] { grid-column: 1 / -1; } }
-.isl-file { display: inline-flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--line-2, rgba(255,255,255,.2)); cursor: pointer; font-weight: 700; }
+.isl-acct-fields.one { grid-template-columns: minmax(0, 1fr); }
+.isl-acct-fields.one input { font-family: ui-monospace, Menlo, Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; }
+.isl-code { font: 800 1.6rem/1.2 ui-monospace, Menlo, Consolas, monospace; letter-spacing: .12em; text-align: center; padding: 14px 8px; margin: 10px 0; border-radius: 14px; background: rgba(5,10,30,.55); border: 1px dashed rgba(255,255,255,.3); color: #ffe066; user-select: all; -webkit-user-select: all; word-break: break-all; }
+@media (max-width: 420px) { .isl-code { font-size: 1.25rem; } }
 .isl-down { margin-bottom: 120px; display: grid; gap: 6px; justify-items: center; padding: 14px 18px; border-radius: 18px; background: rgba(120,20,30,.88); text-align: center; max-width: 340px; }
 .isl-down b { font-family: var(--font-display); font-size: 1.3rem; }
 .isl-down span { font-size: .85rem; }

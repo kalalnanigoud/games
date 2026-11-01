@@ -148,18 +148,29 @@ the setup.
 ## Cloud saves for Creature Island (optional)
 
 Creature Island players can keep their explorer (their character, creatures, items and story progress) in a
-free Cloudflare Worker with a D1 database. Nothing is saved until a player chooses **Save adventure**; live
-play never touches the service. Without the service, players can still save to a file.
+free Cloudflare Worker with a D1 database. The cloud is the only place an adventure is saved. Nothing is saved
+until a player chooses **Save adventure** (never automatically); live play never touches the service. Without an
+account, or without the service, players can still play, but nothing is kept, and the game says so.
 
 Saves belong to an **explorer account**, a name and a 4-digit PIN, so a player can continue on any device.
-Players sign in on the island's start screen, or later from the bag's Save tab.
+Players sign in on the island's start screen, or later from the bag's Save tab (the **Save centre**: Save
+adventure, Load adventure, the time of the last cloud save). A failed save shows its reason and a **Retry**;
+the game keeps running and the last good save stays. **Load adventure** (after a confirm) replaces the explorer
+being played with the saved one. The account and Save centre screens live in `games/save-centre.js`, so other
+persistent games can reuse them.
 - **What's stored:** no PINs. A PIN is kept only as a keyed fingerprint, made with a secret held by the
   Worker (`PIN_PEPPER`), so a copy of the database alone can't reveal it. Session tokens are stored only as
   their SHA-256, and IP addresses never.
 - **Guessing:** 4 digits are only 10,000 possibilities, so each name pauses after wrong PINs: 15 minutes
   after 5, an hour after 10, a day after 15 or more. Each try is counted before its PIN is checked, so
   guesses sent all at once can't get around it.
-- **Forgotten PINs:** a PIN can't be reset, so players should remember it.
+- **Forgotten PINs:** a new account gets a one-time **recovery code** (like `K7QM-2XPA-9TNE`, about 60 bits from
+  an alphabet without look-alike characters), shown once with Copy and "I've saved it". It is stored only as an
+  HMAC with `PIN_PEPPER`. "Forgot PIN?" on the sign-in form takes the name, the code and a new PIN
+  (`POST /recover`); wrong codes are counted and paused exactly like wrong PINs. A successful recovery sets the
+  new PIN, ends every older session and gives a fresh code. A signed-in account made before codes existed gets a
+  "Get a recovery code" button (`POST /recovery`, needs the session). The new `rec_hash` column is added to an
+  existing database automatically the first time it is needed.
 - **Saves from before accounts:** a save made before accounts (under a private browser key) moves into the
   account the first time its owner signs in on that browser.
 
@@ -323,7 +334,7 @@ same time, each with their own explorer and creature companion, and can split up
   bring that explorer to any friend's island later.
 - Nothing is saved automatically, and the island is never kept in the browser's storage. Leaving with
   unsaved progress asks to save first.
-- Saves go to the optional cloud service above or to a file. A save is captured at one moment, so anything
+- Saves go to the optional cloud service above, and only there; without an account nothing is kept. A save is captured at one moment, so anything
   that happens while it uploads stays marked as unsaved.
 - The host checks every save before loading it, so a save edited by hand can't break the island.
 

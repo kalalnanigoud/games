@@ -244,6 +244,27 @@ assert.ok(VILLAGE[2] > 0 && npcPos('elder').x > 0);
   w.message('D', { k: 'cmd', c: 'unpark' });
   assert.ok(d.ready);
 }
+// Load adventure mid-session: a ready explorer is swapped for the saved record, checked first.
+{
+  const a = P('A');
+  w.message('A', { k: 'cmd', c: 'save' });
+  const rec = events('A').filter((e) => e[0] === 'snap').pop()[2];
+  const oldComp = a.comp, oldShells = rec.shells;
+  a.ex.shells += 7; w.bump(a, true);
+  const mark = (sent.get('A') || []).length;
+  const since = () => (sent.get('A') || []).slice(mark).flatMap((m) => m.ev || []);
+  w.message('A', { k: 'cmd', c: 'load', rec: { ...rec, kind: 'nope' }, tag: 'tag-A' });
+  assert.ok(a.ready && a.comp === oldComp && a.ex.shells === oldShells + 7, 'a bad record changes nothing');
+  w.message('A', { k: 'cmd', c: 'load', rec, savedAt: 1234, tag: 'tag-B' });
+  assert.ok(a.ready && a.comp === oldComp, 'another explorer’s tag is refused');
+  w.message('A', { k: 'cmd', c: 'load', rec, savedAt: 1234, tag: 'tag-A' });
+  assert.ok(a.ready && a.ex.shells === oldShells && a.lastSave === 1234, 'the explorer is replaced from the saved record');
+  assert.ok(a.comp && a.comp !== oldComp && !w.ents.has(oldComp) && w.ents.get(a.comp).companion, 'with a fresh companion, the old one gone');
+  assert.ok(since().some((e) => e[0] === 'ready') && !since().some((e) => e[0] === 'parked'), 'the screen is told it is ready, not parked');
+  assert.ok(!w.unsaved(a), 'what was just loaded counts as saved');
+  w.message('A', { k: 'cmd', c: 'new', look: { skin: 0, hair: 0 } });
+  assert.equal(a.ex.shells, oldShells, 'a new explorer can’t be started over a living one');
+}
 console.log('Creature Island checks passed: four explorers at once, first companion, befriending, exact movement prediction, saves (one consistent capture, unsaved tracking including moving away, save-and-leave only when the save has everything, forged saves cleaned), gates in story order, all three bosses, the village raid, reconnecting.');
 
 // Arena Rush: a five-minute survival run, no saving, in a walled chamber.

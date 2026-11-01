@@ -284,12 +284,17 @@ export class World {
   }
   // A player saved and is leaving: their explorer leaves the island now, before anything else changes.
   park(p) {
-    p.ready = false; p.parked = true; p.input.length = 0; this.chan(p, null);
+    p.ready = false; p.parked = true;
+    this.strip(p);
+    this.personal(p, ['parked']);
+  }
+  // Takes an explorer's companion and personal creatures off the island (the explorer's own record stays).
+  strip(p) {
+    p.input.length = 0; this.chan(p, null);
     if (p.comp) this.ents.delete(p.comp);
-    p.comp = null;
+    p.comp = null; p.escort = 0; p.dlg = null;
     for (const e of this.ents.values()) if (e.only === p.id) this.ents.delete(e.id);
     this.worldVer++;
-    this.personal(p, ['parked']);
   }
   // Safety net: a screen still on the island after a park asks to be put back where it stood.
   unpark(p) {
@@ -589,10 +594,14 @@ export class World {
     if (this.arena?.command(p, d)) return;
     if (c === 'unpark') return this.unpark(p);
     if (c === 'new' || c === 'load') {
-      if (p.ready) throw new Error('Your explorer is already on the island.');
+      // "Load adventure" from the menu: a ready explorer is replaced by the saved one (checked first, so a bad
+      // record changes nothing). A brand-new explorer can't be started over a living one.
+      if (p.ready && c === 'new') throw new Error('Your explorer is already on the island.');
       const tag = typeof d.tag === 'string' ? d.tag.slice(0, 40) : '';
-      if (tag && this.readyPlayers().some((o) => o.tag === tag)) throw new Error('This explorer is already on the island, perhaps in another tab.');
-      p.ex = c === 'new' ? newExplorer(p.name, d.look) : validateExplorer(d.rec, p.name);
+      if (tag && this.readyPlayers().some((o) => o !== p && o.tag === tag)) throw new Error('This explorer is already on the island, perhaps in another tab.');
+      const ex = c === 'new' ? newExplorer(p.name, d.look) : validateExplorer(d.rec, p.name);
+      if (p.ready) { this.strip(p); p.snaps?.clear(); p.escort = 0; }
+      p.ex = ex;
       p.tag = tag;
       p.prog = 0; p.savedProg = 0; p.lastSave = c === 'load' && Number.isFinite(d.savedAt) ? d.savedAt : 0;
       if (c === 'new') p.prog = 1; // a brand-new explorer isn't saved yet
