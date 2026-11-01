@@ -8,6 +8,7 @@ import { TICK } from './island-data.js';
 import { World } from './island-sim.js';
 import { createClient } from './island-client.js';
 import * as islandArt from './island-art.js';
+import { attachArena, arenaUi, ARENA_CSS } from './island-arena.js';
 
 let world = null, api = null, timer = null, client = null, clientKey = '', lastCtx = null, ticker = null;
 // For the browser tests (tools/island-ci.mjs): the running world and this screen.
@@ -44,12 +45,12 @@ function startTicker() {
   } catch { fallback(); }
 }
 
-function ensureClient(pid, isHost, local) {
-  const key = `${pid}:${isHost}`;
+function ensureClient(pid, isHost, local, arena) {
+  const key = `${pid}:${isHost}:${arena ? 'arena' : ''}`;
   if (client && clientKey === key) return client;
   client?.destroy();
   clientKey = key;
-  client = createClient({ pid, isHost, local, send: (d) => !!lastCtx?.live?.send?.(d) });
+  client = createClient({ pid, isHost, local, arena: arena ? arenaUi : null, send: (d) => !!lastCtx?.live?.send?.(d) });
   return client;
 }
 
@@ -58,6 +59,7 @@ export default {
   name: 'Creature Island',
   description: 'Explore a living island with up to three friends: befriend creatures, raise companions and fight side by side to calm the storm on Stormcrown Peak.',
   minPlayers: 1, maxPlayers: 4,
+  options: [{ id: 'mode', label: '🏟️ Mode', default: 'adventure', choices: [['adventure', 'Adventure (save when you like)'], ['arena', 'Arena Rush (5 min, no saving)']] }],
   live: true, dropIn: true, soloOnDevice: true, manualSave: true, simultaneous: true,
   cover: islandArt.COVER_SVG || '',
   howTo: {
@@ -76,7 +78,7 @@ export default {
     ],
   },
 
-  setup() { return { sid: uid(), phase: 'explore', over: false }; },
+  setup(players, opts) { return { sid: uid(), phase: 'explore', over: false, mode: opts?.mode === 'arena' ? 'arena' : 'adventure' }; },
   act() { throw new Error('Creature Island is played live.'); },
   turnOf() { return []; },
   view(state) { return state; },
@@ -92,6 +94,7 @@ export default {
       },
     });
     world.sid = state.sid;
+    if (state.mode === 'arena') attachArena(world);
     startTicker();
   },
   hostRoom(list) {
@@ -112,9 +115,10 @@ export default {
 
   render(el, view, ctx) {
     injectCSS('island', ISLAND_CSS);
+    if (view?.mode === 'arena') injectCSS('island-arena', ARENA_CSS);
     lastCtx = ctx;
     if (world) { world.localPid = ctx.me; for (const p of world.players.values()) p.local = p.id === ctx.me; }
-    const c = ensureClient(ctx.me, !!ctx.isHost, !!ctx.isHost);
+    const c = ensureClient(ctx.me, !!ctx.isHost, !!ctx.isHost, view?.mode === 'arena');
     c.mount(el, ctx);
   },
 };
