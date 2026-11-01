@@ -9,6 +9,7 @@ import { sound } from '../js/sound.js';
 import { icon } from '../js/icons.js';
 import { portrait } from '../js/avatar.js';
 import { levelOption, levelOf } from '../js/levels.js';
+import { needsWarmup, openWarmup } from './sketch-warmup.js';
 
 const browser = typeof document !== 'undefined';
 const W = 1000, H = 750;
@@ -543,6 +544,9 @@ function render(el, v, ctx) {
   UI.gid = v.players.map((p) => p.id).join() + v.used + v.phase;
   if (fresh && v.phase !== 'draw') { UI.local = []; UI.pending = null; UI.drawing = false; }
   UI.v = v; UI.ctx = ctx;
+  // A device's first round starts with a skippable doodle warm-up; it gives way if you're the drawer and the clock runs out.
+  if (UI.warm?.el.isConnected) { if (v.phase === 'draw' && v.drawer === ctx.me) UI.warm.close(); }
+  else if (v.round === 1 && v.turn === 0 && v.phase === 'choose' && v.players.some((p) => p.id === ctx.me) && needsWarmup()) UI.warm = openWarmup();
   draw();
 }
 

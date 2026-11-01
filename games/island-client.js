@@ -5,6 +5,8 @@ import { TILE, TICK, SPECIES, ITEMS, GEAR, SHOP, SEATS, QUESTS, QUEST_ORDER, STA
 import { stepBody, newBody, BITS, objective, interactables } from './island-sim.js';
 import { island, zoneAt, areaName, TRACKS, G, W } from './island-map.js';
 import { createView, minimap } from './island-view.js';
+import { createInput, bindTouch, touchHTML, actionOf, keysFor, openControls, MOVES, ACTION_BITS } from './island-input.js';
+import { shouldPractice, startPractice } from './island-practice.js';
 import { cloudAvailable, explorerTag, keyIsKept, loadExplorer, saveExplorer, account, signIn, signUp, signOut, claimLegacy } from './island-cloud.js';
 import { esc, toast } from '../js/util.js';
 import { sound } from '../js/sound.js';
@@ -137,43 +139,49 @@ export function createClient(opts) {
   const cmd = (c, extra = {}) => { if (!send({ k: 'cmd', c, ...extra })) toast('Not connected to the host right now.'); };
 
   /* ---------------- input ---------------- */
-  const KEYMAP = { KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right' };
-  const ACTKEYS = { KeyJ: BITS.attack, Space: BITS.attack, KeyK: BITS.dodge, ShiftLeft: BITS.dodge, ShiftRight: BITS.dodge, KeyL: BITS.ability, KeyQ: BITS.ability, KeyE: BITS.interact, Enter: BITS.interact, KeyC: BITS.catch };
+  // Keys, controller and touch live in island-input.js (the keymap is a device preference); a gamepad press
+  // that closes a window or moves a conversation on is used here instead of reaching the world.
+  const inp = createInput({
+    onPad: (a) => {
+      if (a === 'menu') { if (!st.dlg && !st.leave && !st.ui && !st.acctOpen) togglePanel(st.panel ? null : st.tab || 'team'); return true; }
+      if (st.dlg && (a === 'interact' || a === 'attack')) { advanceDialog(); return true; }
+      if (a === 'dodge' && (st.dlg || st.ui || st.panel)) { if (st.dlg) closeDialog(); else if (st.ui) closeUi(); else togglePanel(null); return true; }
+      return false;
+    },
+  });
+  st.keys = inp.keys;
+  let practice = null;
+  // The first adventure starts with a skippable practice; "Replay practice" in the Guide tab runs it again.
+  function runPractice(then, finishLabel) {
+    if (practice) return;
+    practice = startPractice(root, { icons: IC, look: st.me?.look || st.picker.look, finishLabel, onDone: () => { practice = null; inp.clear(); then?.(); } });
+  }
   function typing(e) { const t = e.target; return t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable); }
   const modalOpen = () => !!document.querySelector('.modal-bg');
   function onKey(e) {
     if (!root?.isConnected) return;
     const down = e.type === 'keydown';
     // Letting go of a key always counts, even inside a dialog, so nothing stays held behind it.
-    if (!down && KEYMAP[e.code]) { st.keys.delete(KEYMAP[e.code]); return; }
-    if (typing(e) || modalOpen()) return;
-    if (KEYMAP[e.code]) { st.keys.add(KEYMAP[e.code]); e.preventDefault(); return; }
+    if (!down && inp.release(e.code)) return;
+    if (practice || typing(e) || modalOpen()) return;
+    const act = actionOf(e.code);
+    if (MOVES.has(act)) { inp.keys.add(act); e.preventDefault(); return; }
     if (!down) return;
     if (e.code === 'Escape') { if (st.leave) return closeLeave(); if (st.dlg) return closeDialog(); if (st.ui) return closeUi(); if (st.panel) return togglePanel(null); return; }
     // Enter and Space on a focused button press that button, not the game.
     if ((e.code === 'Enter' || e.code === 'Space') && e.target?.closest?.('button, a, label')) return;
-    if (st.dlg && (e.code === 'KeyE' || e.code === 'Enter' || e.code === 'Space')) { e.preventDefault(); return advanceDialog(); }
-    if (e.code === 'KeyB' || e.code === 'KeyI') { e.preventDefault(); return togglePanel(st.panel ? null : 'team'); }
+    if (st.dlg && (act === 'interact' || e.code === 'Enter' || e.code === 'Space')) { e.preventDefault(); return advanceDialog(); }
+    if (act === 'menu') { e.preventDefault(); return togglePanel(st.panel ? null : 'team'); }
     if (e.code === 'KeyM') return togglePanel(st.panel === 'map' ? null : 'map');
     if (/^Digit[1-3]$/.test(e.code) && st.me) { const m = st.me.team[+e.code.slice(5) - 1]; if (m && !m.out) cmd('active', { uid: m.uid }); return; }
-    if (ACTKEYS[e.code]) { st.bits |= ACTKEYS[e.code]; e.preventDefault(); }
+    if (ACTION_BITS[act]) { inp.bits |= ACTION_BITS[act]; e.preventDefault(); }
   }
   function sampleInput() {
-    // A window over the game (How to play, the site's dialogs) stops your explorer and lets go of keys.
-    if (modalOpen()) { st.keys.clear(); st.bits = 0; if (st.joy) st.joy.dx = st.joy.dy = 0; return [0, 0, 0]; }
-    let dx = 0, dy = 0;
-    if (st.joy?.on) { dx = st.joy.dx; dy = st.joy.dy; }
-    else {
-      if (st.keys.has('left')) dx -= 100;
-      if (st.keys.has('right')) dx += 100;
-      if (st.keys.has('up')) dy -= 100;
-      if (st.keys.has('down')) dy += 100;
-      if (dx && dy) { dx *= 0.7071; dy *= 0.7071; }
-    }
-    if (st.dlg || st.leave || st.ui || st.acctOpen) { dx = 0; dy = 0; st.bits = 0; }
-    const bits = st.bits;
-    st.bits = 0;
-    return [Math.round(dx), Math.round(dy), bits];
+    // A window over the game (How to play, the site's dialogs, practice) stops your explorer and lets go of keys.
+    if (modalOpen() || practice) { inp.clear(); return [0, 0, 0]; }
+    const [dx, dy, bits] = inp.sample();
+    if (st.dlg || st.leave || st.ui || st.acctOpen) return [0, 0, 0];
+    return [dx, dy, bits];
   }
 
   /* ---------------- the loop ---------------- */
@@ -386,7 +394,7 @@ export function createClient(opts) {
       const weak = (st.frames[st.frames.length - 1] ? [...st.frames[st.frames.length - 1].ents.values()] : []).filter((e) => e[0] === 'c' && e[9] & 1 && !(e[9] & 2) && !(e[9] & 4) && Math.hypot(e[3] - me.x, e[4] - me.y) < 150);
       if (weak.length) { const e = weak[0]; catchLabel = `${Math.round(Math.max(0.1, Math.min(0.95, (SPECIES[e[2]]?.catch || 0) + (CATCH_HP - e[7] / 100) * 1.2)) * 100)}%`; }
     }
-    const key = label + '|' + catchLabel;
+    const key = label + '|' + catchLabel + '|' + keysFor('interact')[0] + keysFor('catch')[0];
     if (st.hudCache.ctx === key) return;
     st.hudCache.ctx = key;
     const act = el('.isl-act'), cat = el('.isl-catch');
@@ -394,7 +402,7 @@ export function createClient(opts) {
     if (label) act.innerHTML = `${kind === 'heart' ? IC.heart : kind === 'talk' ? IC.quest : IC.hand}<span>${esc(label)}</span>`;
     if (catchLabel) cat.innerHTML = `${IC.charm}<span>Befriend<small>${catchLabel}</small></span>`;
     const hint = el('.isl-keyhint');
-    if (hint) hint.innerHTML = `${label ? `<kbd>E</kbd> ${esc(label)}` : '<kbd>E</kbd> talk / gather'}${catchLabel ? ` · <kbd>C</kbd> befriend ${catchLabel}` : ''}`;
+    if (hint) hint.innerHTML = `${label ? `<kbd>${esc(keysFor('interact')[0] || '—')}</kbd> ${esc(label)}` : `<kbd>${esc(keysFor('interact')[0] || '—')}</kbd> talk / gather`}${catchLabel ? ` · <kbd>${esc(keysFor('catch')[0] || '—')}</kbd> befriend ${catchLabel}` : ''}`;
   }
   const shapeSvg = (shape) => {
     const p = { circle: '<circle cx="8" cy="8" r="6"/>', triangle: '<path d="M8 1.8l6.5 11.4h-13z"/>', square: '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/>', diamond: '<path d="M8 1l7 7-7 7-7-7z"/>' }[shape] || '';
@@ -524,7 +532,8 @@ export function createClient(opts) {
         ${done.length ? `<h4>Done</h4><ul class="isl-quests done">${done.map((q) => `<li><b>${IC.check}${esc(QUESTS[q].name)}</b></li>`).join('')}</ul>` : ''}
         <p class="small muted">Played ${Math.floor(me.time / 3600)} h ${Math.floor((me.time % 3600) / 60)} min.</p>`;
     } else if (tab === 'guide') {
-      body = `<p class="small muted">${me.dex.caught.length} befriended · ${me.dex.seen.length} seen of ${Object.keys(SPECIES).length}</p><ul class="isl-dex">${Object.keys(SPECIES).map((sp) => {
+      body = `<div class="isl-row"><button class="small" data-ctl="keys">Controls</button><button class="small" data-ctl="practice">Replay practice</button></div>
+        <p class="small muted">${me.dex.caught.length} befriended · ${me.dex.seen.length} seen of ${Object.keys(SPECIES).length}</p><ul class="isl-dex">${Object.keys(SPECIES).map((sp) => {
         const seen = me.dex.seen.includes(sp), caught = me.dex.caught.includes(sp);
         return `<li class="${caught ? 'caught' : seen ? 'seen' : ''}"><img alt="" src="${art.icon('sp:' + sp, 48)}" ${seen ? '' : 'style="filter:brightness(0) opacity(.35)"'}><b>${seen ? esc(SPECIES[sp].name) : '???'}</b><small>${caught ? esc(SPECIES[sp].blurb) : seen ? 'Seen, not yet befriended' : 'Not seen yet'}</small></li>`;
       }).join('')}</ul>`;
@@ -843,16 +852,7 @@ export function createClient(opts) {
         <div class="isl-keyhint"></div>
       </div>
       <div class="isl-banner" hidden></div>
-      <div class="isl-touch" hidden>
-        <div class="isl-stickzone"><div class="isl-stick"><i></i></div></div>
-        <div class="isl-pad">
-          <button class="isl-btn isl-attack" aria-label="Attack">${IC.sword}</button>
-          <button class="isl-btn isl-dodge" aria-label="Dodge">${IC.dodge}</button>
-          <button class="isl-btn isl-ability" aria-label="Companion ability">${IC.paw}<svg class="isl-cd" viewBox="0 0 36 36"><circle cx="18" cy="18" r="16"/></svg></button>
-          <button class="isl-btn isl-act" hidden></button>
-          <button class="isl-btn isl-catch" hidden></button>
-        </div>
-      </div>
+      <div class="isl-touch" hidden>${touchHTML(IC)}</div>
       <div class="isl-dialog" hidden></div>
       <div class="isl-ui" hidden></div>
       <div class="isl-panel" hidden></div>
@@ -888,59 +888,21 @@ export function createClient(opts) {
     root.style.height = h + 'px';
     const r = root.getBoundingClientRect();
     view.resize(r.width, r.height, devicePixelRatio || 1);
-    const touch = matchMedia('(pointer: coarse)').matches || st.touchSeen;
+    const touch = matchMedia('(pointer: coarse)').matches || inp.touchSeen;
     el('.isl-touch').hidden = !touch;
     root.classList.toggle('touch', !!touch);
   }
-  function clearKeys() { st.keys.clear(); if (st.joy) st.joy.on = false; }
+  function clearKeys() { inp.keys.clear(); if (inp.joy) inp.joy.on = false; }
   function onUnload(e) { if (st.ready && isUnsaved()) { e.preventDefault(); e.returnValue = ''; } }
   function bindUi() {
     root.addEventListener('contextmenu', (e) => e.preventDefault());
-    // Joystick: put a thumb anywhere on the left side of the screen.
-    const zone = el('.isl-stickzone'), stick = el('.isl-stick'), knob = stick.querySelector('i');
-    zone.addEventListener('pointerdown', (e) => {
-      st.touchSeen = true;
-      const r = zone.getBoundingClientRect();
-      st.joy = { on: true, id: e.pointerId, ox: e.clientX, oy: e.clientY, dx: 0, dy: 0 };
-      stick.style.left = (e.clientX - r.left) + 'px'; stick.style.top = (e.clientY - r.top) + 'px';
-      stick.classList.add('on');
-      zone.setPointerCapture?.(e.pointerId);
-      e.preventDefault();
-    });
-    zone.addEventListener('pointermove', (e) => {
-      if (!st.joy?.on || e.pointerId !== st.joy.id) return;
-      let dx = e.clientX - st.joy.ox, dy = e.clientY - st.joy.oy;
-      const d = Math.hypot(dx, dy), max = 46;
-      if (d > max) { dx *= max / d; dy *= max / d; }
-      knob.style.transform = `translate(${dx}px, ${dy}px)`;
-      const k = d < 8 ? 0 : 100 / max;
-      st.joy.dx = dx * k; st.joy.dy = dy * k;
-    });
-    const end = (e) => { if (st.joy && e.pointerId === st.joy.id) { st.joy.on = false; st.joy.dx = st.joy.dy = 0; knob.style.transform = ''; stick.classList.remove('on'); } };
-    zone.addEventListener('pointerup', end); zone.addEventListener('pointercancel', end);
-    const press = (sel, bit, repeat = 0) => {
-      const b = el(sel);
-      b.addEventListener('pointerdown', (e) => {
-        e.preventDefault(); st.touchSeen = true;
-        st.bits |= bit;
-        b.classList.add('down');
-        if (repeat) { clearInterval(b._rep); b._rep = setInterval(() => (st.bits |= bit), repeat); }
-        if (navigator.userActivation?.hasBeenActive) try { navigator.vibrate?.(8); } catch {}
-      });
-      const up = () => { b.classList.remove('down'); clearInterval(b._rep); };
-      b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('pointerleave', up);
-    };
-    press('.isl-attack', BITS.attack, 360);
-    press('.isl-dodge', BITS.dodge);
-    press('.isl-ability', BITS.ability);
-    press('.isl-act', BITS.interact);
-    press('.isl-catch', BITS.catch);
+    bindTouch(inp, root); // the stick and buttons (island-input.js)
     root.addEventListener('click', onClick);
     root.addEventListener('submit', (e) => { if (e.target.matches('[data-acct-form]')) { e.preventDefault(); submitAccount(e.target); } });
     root.addEventListener('input', (e) => { if (e.target.name === 'acctName') st.acct.name = e.target.value; });
     root.addEventListener('change', (e) => { if (e.target.matches('.isl-file input') && e.target.files?.[0]) loadFile(e.target.files[0]); });
     // Clicking the world on a computer swings your staff.
-    root.querySelector('.isl-canvas').addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse' && e.button === 0 && st.ready) st.bits |= BITS.attack; });
+    root.querySelector('.isl-canvas').addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse' && e.button === 0 && st.ready) inp.bits |= BITS.attack; });
   }
   function onClick(e) {
     const b = e.target.closest('button');
@@ -972,7 +934,9 @@ export function createClient(opts) {
     if (d.acct === 'signout') return doSignOut();
     if (d.pick === 'recheck') return checkCloud();
     if (d.pick === 'cloud' && st.picker.cloud) return startExplorer('cloud', st.picker.cloud.data, st.picker.cloud.savedAt);
-    if (d.pick === 'new') return startExplorer('new');
+    if (d.pick === 'new') return shouldPractice() ? runPractice(() => startExplorer('new')) : startExplorer('new');
+    if (d.ctl === 'keys') return openControls(b, { onPractice: () => runPractice(null, 'Back to the island') });
+    if (d.ctl === 'practice') return runPractice(null, 'Back to the island');
     if (d.skin != null) { st.picker.look.skin = +d.skin; delete el('.isl-overlay').dataset.html; return paintOverlay(); }
     if (d.hair != null) { st.picker.look.hair = +d.hair; delete el('.isl-overlay').dataset.html; return paintOverlay(); }
     if (d.respawn != null) return cmd('respawn');
@@ -992,6 +956,7 @@ export function createClient(opts) {
     removeEventListener('keyup', onKey);
     removeEventListener('blur', clearKeys);
     removeEventListener('beforeunload', onUnload);
+    practice?.close(); practice = null; inp.destroy();
     root = null; view = null;
   }
   return { receive, mount, update, destroy, beforeExit, state: st };
