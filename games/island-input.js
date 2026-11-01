@@ -97,7 +97,7 @@ export function createInput(hooks = {}) {
       // Held time not yet seen by a step counts only when frames fell well behind (over two steps), so normal play is unchanged.
       const on = (a) => {
         if (inp.keys.has(a)) { since[a] = now; return true; }
-        if (!draining[a] && (credit[a] || 0) >= 2 * TICK) draining[a] = true;
+        if (!draining[a]) { if ((credit[a] || 0) >= 2 * TICK) draining[a] = true; else credit[a] = 0; } // small leftovers never add up into a step
         if (!draining[a]) return false;
         credit[a] -= TICK;
         if (credit[a] <= 0) { credit[a] = 0; draining[a] = false; }
