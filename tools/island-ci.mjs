@@ -233,6 +233,7 @@ try {
   await host.screenshot({ path: fileURLToPath(new URL('island-desktop.png', out)) });
   assert.deepEqual(errors, [], 'no browser errors');
   console.log('PASS phone layout fills the screen with no sideways scrolling; no browser errors');
+  await webkitSolo();
 } catch (e) {
   console.error(e);
   console.error('Browser errors:', errors.slice(0, 8));
@@ -240,4 +241,66 @@ try {
   for (const [i, c] of contexts.entries()) for (const p of c.pages()) await p.screenshot({ path: fileURLToPath(new URL(`island-failure-${i}.png`, out)) }).catch(() => {});
 } finally {
   await browser?.close(); broker.kill(); server.close();
+}
+
+// WebKit, one explorer alone on the host's device: the world's ticker must start (WebKit reports a failed
+// Worker only after the fact), and moving, talking and saving to the cloud must work. Set SKIP_WEBKIT=1 to skip.
+async function webkitSolo() {
+  if (process.env.SKIP_WEBKIT) return console.log('SKIP WebKit solo (SKIP_WEBKIT is set)');
+  const { webkit } = await import('playwright');
+  const wk = await webkit.launch().catch((e) => { throw Error('WebKit is not available (run: npx playwright install webkit, or set SKIP_WEBKIT=1): ' + e.message); });
+  const wkErrors = [];
+  try {
+    const context = await wk.newContext({ viewport: { width: 1100, height: 700 } });
+    await context.route(/https:\/\/(unpkg\.com|cdn\.jsdelivr\.net)\/.*peerjs.*\.js/, (r) => r.fulfill({ contentType: 'text/javascript', body: localPeer }));
+    await context.route(/https:\/\/fonts\./, (r) => r.abort());
+    await context.route(saveUrl.replace(/\/+$/, '') + '/**', async (route) => {
+      const req = route.request();
+      const res = await worker.fetch(new Request(req.url(), { method: req.method(), headers: req.headers(), body: ['GET', 'HEAD', 'OPTIONS'].includes(req.method()) ? undefined : req.postData() }), { DB: D1, PIN_PEPPER: 'ci-pepper' });
+      route.fulfill({ status: res.status, headers: Object.fromEntries(res.headers), body: Buffer.from(await res.arrayBuffer()) });
+    });
+    await context.addInitScript(() => localStorage.setItem('gn-help-island', '1'));
+    const page = await context.newPage();
+    page.setDefaultTimeout(20000);
+    page.on('pageerror', (e) => wkErrors.push(e.message));
+    await page.goto(base);
+    await page.fill('#nameIn', 'Solo');
+    await page.click('[data-local="island"]');
+    await page.click('#startBtn');
+    await signUpOn(page, 'Webkit Explorer', '3917');
+    await pick(page);
+    const tick = () => page.evaluate(async () => (await import('/games/island.js')).debug.world.tick);
+    const t1 = await tick();
+    await wait(1000);
+    assert.ok((await tick()) > t1 + 10, 'WebKit: the host world keeps ticking');
+    await page.waitForSelector('.isl-hud:not([hidden])');
+    console.log('PASS WebKit: the world ticks and the HUD shows');
+
+    const x = () => page.evaluate(async () => (await import('/games/island.js')).debug.client.state.body.x);
+    const x0 = await x();
+    await page.keyboard.down('KeyD'); await wait(900); await page.keyboard.up('KeyD');
+    assert.ok((await x()) - x0 > 40, 'WebKit: the explorer moves');
+    await page.evaluate(async () => { // stand beside Elder Maru
+      const { debug } = await import('/games/island.js'), { TILE: T } = await import('/games/island-data.js');
+      const p = [...debug.world.players.values()][0]; p.body.x = 68 * T; p.body.y = 65.6 * T + 20;
+    });
+    await wait(400);
+    await page.keyboard.press('KeyE');
+    await page.waitForSelector('.isl-dialog:not([hidden]) .isl-dlg-head:has-text("Maru")');
+    console.log('PASS WebKit: moving and talking to the elder work');
+
+    await page.keyboard.press('Escape');
+    const before = db.prepare('SELECT COUNT(*) AS n FROM explorers').get().n;
+    await page.click('.isl-bagbtn');
+    await page.click('.isl-tabs [data-tab="save"]');
+    await page.click('[data-save="cloud"]');
+    await waitFor(page, async () => { const { debug } = await import('/games/island.js'); return debug.client.state.me && !debug.client.state.me.unsaved; });
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM explorers').get().n, before + 1, 'WebKit: the cloud save is stored');
+    console.log('PASS WebKit: Save adventure reaches the save service');
+    assert.deepEqual(wkErrors, [], 'WebKit: no page errors');
+  } catch (e) {
+    for (const p of wk.contexts().flatMap((c) => c.pages())) await p.screenshot({ path: fileURLToPath(new URL('island-failure-webkit.png', out)) }).catch(() => {});
+    console.error('WebKit errors:', wkErrors.slice(0, 8));
+    throw e;
+  } finally { await wk.close(); }
 }

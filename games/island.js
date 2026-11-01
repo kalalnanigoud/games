@@ -26,16 +26,22 @@ function stepper() {
 // (timers on the page itself slow to once a second there). Plain setInterval if workers aren't allowed.
 function startTicker() {
   ticker = { at: performance.now(), acc: 0 };
+  let src, wk, id = 0, boot = 0, mine = true;
+  const cleanup = () => { clearTimeout(boot); try { wk?.terminate(); } catch {} wk = null; if (src) URL.revokeObjectURL(src); src = null; };
+  const fallback = () => { // the worker never ran (WebKit reports that after the fact): use the page's own timer
+    if (!mine || id) return;
+    cleanup();
+    id = setInterval(stepper, 25);
+  };
+  timer = { stop: () => { mine = false; cleanup(); clearInterval(id); } };
   try {
-    const src = URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 25);'], { type: 'text/javascript' }));
-    const wk = new Worker(src);
-    URL.revokeObjectURL(src);
-    wk.onmessage = stepper;
-    timer = { stop: () => wk.terminate() };
-  } catch {
-    const id = setInterval(stepper, 25);
-    timer = { stop: () => clearInterval(id) };
-  }
+    src = URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 25);'], { type: 'text/javascript' }));
+    wk = new Worker(src);
+    // The blob URL stays valid until the worker's first message: WebKit loads the script after this returns.
+    wk.onmessage = () => { if (id) return; clearTimeout(boot); if (src) { URL.revokeObjectURL(src); src = null; } stepper(); };
+    wk.onerror = (e) => { e?.preventDefault?.(); fallback(); };
+    boot = setTimeout(fallback, 1500);
+  } catch { fallback(); }
 }
 
 function ensureClient(pid, isHost, local) {
