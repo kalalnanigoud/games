@@ -78,6 +78,8 @@ export async function signUp(page, name, pin) {
   await page.fill('[name="acctPin"]', pin);
   await page.fill('[name="acctPin2"]', pin);
   await page.click('[data-acct-form] button[type="submit"]');
+  await page.waitForSelector('.isl-code'); // the recovery code is shown once
+  await page.click('[data-code-done]');
   await page.waitForSelector('.isl-pick .isl-acct.signed');
 }
 export const islandReady = (page) => waitFor(page, async () => { const m = await import('/games/island.js'); return !!m.debug.client?.state.ready; });

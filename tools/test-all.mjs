@@ -17,6 +17,7 @@ const suites = [
   { name: 'browser-ci', what: 'every game at phone and desktop sizes', file: 'tools/browser-ci.mjs' },
   { name: 'multiplayer-ci', what: `real WebRTC rooms, ${web}`, file: 'tools/multiplayer-ci.mjs' },
   { name: 'island-ci', what: `Creature Island, four live players, ${web}`, file: 'tools/island-ci.mjs' },
+  { name: 'arena-ci', what: 'Arena Rush: lobby option, timer, score, no saving', file: 'tools/arena-ci.mjs' },
   { name: 'island-faults', what: `slow/failed/cancelled saves, dropped network, Worker and audio failures, ${web}`, file: 'tools/island-faults.mjs' },
   ...(args.includes('--perf') ? [{ name: 'perf-island', what: 'frame time, heap and wire bytes under 4x CPU throttling', file: 'tools/perf-island.mjs' }] : []),
 ].filter((s) => !only || only.includes(s.name));

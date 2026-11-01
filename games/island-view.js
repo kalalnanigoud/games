@@ -28,6 +28,25 @@ const FPS = { idle: 2.2, walk: 8, attack: 10, dodge: 10, hurt: 1, down: 1, faint
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, Math.ceil(w)); c.height = Math.max(1, Math.ceil(h)); return c; };
 const rgb = ([r, g, b], k = 1) => `rgb(${Math.round(Math.min(255, r * k))},${Math.round(Math.min(255, g * k))},${Math.round(Math.min(255, b * k))})`;
 
+// "Lower effects": a device preference (not a save). Fewer particles, no rain, simpler water and a smaller
+// sprite resolution, for slow phones. 'low' / 'normal' are explicit choices; unset follows the device's
+// prefers-reduced-motion. Normal effects draw exactly as before.
+const FX_KEY = 'gn-island-effects';
+const fxQuery = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
+let fxChoice = null, lowFx = false;
+const fxApply = () => { lowFx = fxChoice ? fxChoice === 'low' : !!fxQuery?.matches; };
+try { const v = localStorage.getItem(FX_KEY); fxChoice = v === 'low' || v === 'normal' ? v : null; } catch {}
+fxQuery?.addEventListener?.('change', fxApply);
+fxApply();
+export const effectsMode = () => fxChoice || 'auto'; // 'low' | 'normal' | 'auto'
+export const effectsAreLow = () => lowFx;
+// mode: 'low', 'normal' or 'auto' (follow the device). Remembered on this device; drawing picks it up on the next frame.
+export function setEffects(mode) {
+  fxChoice = mode === 'low' || mode === 'normal' ? mode : null;
+  try { fxChoice ? localStorage.setItem(FX_KEY, fxChoice) : localStorage.removeItem(FX_KEY); } catch {}
+  fxApply();
+}
+
 let groundCanvas = null;
 // The colour of one kind of ground at a point (tile units): deeper water away from the shore, wet sand.
 function groundColour(m, g, wx, wy) {
@@ -171,7 +190,7 @@ function roundRect(g2, x, y, w, h, r) {
 
 export function createView(canvas) {
   const g = canvas.getContext('2d');
-  let res = 0, art = null, zoom = 1, dpr = 1, vw = 0, vh = 0;
+  let res = 0, art = null, zoom = 1, dpr = 1, vw = 0, vh = 0, pr = 1, lowSeen = lowFx, dustN = 0;
   const chunks = new Map(); // "cx,cy" -> canvas
   const waterTiles = new Map(); // "cx,cy" -> [[x, y, edges]]
   const lightCanvas = mk(4, 4);
@@ -182,7 +201,7 @@ export function createView(canvas) {
   const ambient = [];
 
   function resize(cssW, cssH, pixelRatio) {
-    dpr = Math.min(2, pixelRatio || 1);
+    pr = pixelRatio; dpr = Math.min(2, pixelRatio || 1);
     vw = cssW; vh = cssH;
     canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssH * dpr);
     canvas.style.width = cssW + 'px'; canvas.style.height = cssH + 'px';
@@ -190,7 +209,7 @@ export function createView(canvas) {
     // Phones get a little closer (about 10.5 tiles across) so explorers and creatures stay easy to see.
     zoom = Math.max(0.75, Math.min(2.2, Math.min(cssW, cssH) / ((cssW < 520 ? 10.5 : 12) * T)));
     if (cssW > 900) zoom = Math.max(zoom, Math.min(2, cssW / (26 * T)));
-    const r = Math.round(Math.min(2.5, zoom * dpr) * 4) / 4;
+    const r = Math.round(Math.min(lowFx ? 1.5 : 2.5, zoom * dpr) * 4) / 4;
     if (r !== res) { res = r; art = createArt(res); chunks.clear(); }
     lightCanvas.width = Math.ceil(cssW / 2); lightCanvas.height = Math.ceil(cssH / 2);
   }
@@ -258,23 +277,25 @@ export function createView(canvas) {
     else if (kind === 'faint') burst(0, 0, '#fff', 0, now);
   }
   function burst(x, y, color, n, now, speed = 1) {
+    if (lowFx) n = Math.ceil(n / 2);
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2, v = (40 + Math.random() * 90) * speed;
       particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 30, t0: now, dur: 0.4 + Math.random() * 0.35, color, r: 1.5 + Math.random() * 2 });
     }
   }
   function leaves(x, y, now) {
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < (lowFx ? 4 : 8); i++) {
       const a = -Math.PI / 2 + (Math.random() - 0.5) * 2;
       particles.push({ x: x + (Math.random() - 0.5) * 20, y, vx: Math.cos(a) * 60, vy: Math.sin(a) * 70, t0: now, dur: 0.7, color: i % 2 ? '#8ce99a' : '#51cf66', r: 2.2, leaf: true });
     }
   }
-  const dust = (x, y, now, color = 'rgba(210,190,150,.6)') => particles.push({ x: x + (Math.random() - 0.5) * 8, y, vx: (Math.random() - 0.5) * 20, vy: -12, t0: now, dur: 0.45, color, r: 2.5, dust: true });
+  const dust = (x, y, now, color = 'rgba(210,190,150,.6)') => (!lowFx || ++dustN % 2) && particles.push({ x: x + (Math.random() - 0.5) * 8, y, vx: (Math.random() - 0.5) * 20, vy: -12, t0: now, dur: 0.45, color, r: 2.5, dust: true });
 
   // ---- one picture ----
   // s: { now, cam, me, others, ents, props state, open, zone, ... } built by the client.
   function draw(s) {
     const now = s.now;
+    if (lowFx !== lowSeen) { lowSeen = lowFx; resize(vw, vh, pr); } // sprite resolution follows the setting
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.fillStyle = s.cave ? '#0b0812' : '#1f5f99';
     g.fillRect(0, 0, vw, vh);
@@ -295,7 +316,7 @@ export function createView(canvas) {
       if (cx < 0 || cy < 0 || cx * CH >= W || cy * CH >= H) continue;
       for (const [tx, ty, edges, h] of waters(cx, cy)) {
         const X = tx * T, Y = ty * T;
-        if (h < 0.45) {
+        if (h < 0.45 && !lowFx) {
           const a = 0.12 + 0.14 * Math.sin(now * 1.8 + h * 40);
           if (a > 0.05) {
             g.strokeStyle = `rgba(230,250,255,${a.toFixed(3)})`; g.lineWidth = 1.4;
@@ -304,13 +325,13 @@ export function createView(canvas) {
           }
         }
         if (edges) {
-          const al = 0.35 + 0.3 * Math.sin(now * 2.2 + h * 30);
+          const al = lowFx ? 0.5 : 0.35 + 0.3 * Math.sin(now * 2.2 + h * 30);
           g.strokeStyle = `rgba(255,255,255,${al.toFixed(3)})`; g.lineWidth = 2;
           g.beginPath();
           for (let i = 0; i < 4; i++) {
             if (!(edges & (1 << i))) continue;
             // along: where on the edge; in: how far into the water (pulses in and out like a wave)
-            const along = 6 + ((h * (37 + i * 11)) % 1) * 14, inset = 4 + Math.sin(now * 1.6 + h * 12 + i) * 2.2, len = 9 + ((h * 53) % 1) * 7;
+            const along = 6 + ((h * (37 + i * 11)) % 1) * 14, inset = lowFx ? 4 : 4 + Math.sin(now * 1.6 + h * 12 + i) * 2.2, len = 9 + ((h * 53) % 1) * 7;
             const [ax, ay, ux, uy, nx, ny] = [[X, Y, 1, 0, 0, 1], [X + T, Y, 0, 1, -1, 0], [X, Y + T, 1, 0, 0, -1], [X, Y, 0, 1, 1, 0]][i];
             const sx = ax + ux * along + nx * inset, sy = ay + uy * along + ny * inset;
             g.moveTo(sx, sy); g.quadraticCurveTo(sx + ux * len / 2 + nx * 2.5, sy + uy * len / 2 + ny * 2.5, sx + ux * len, sy + uy * len);
@@ -631,7 +652,7 @@ export function createView(canvas) {
   }
   function drawAmbient(s, now, cx0, cy0, ww, wh) {
     // A few butterflies, fireflies and falling leaves near the camera: life only you see.
-    const want = s.cave ? 10 : s.storm ? 0 : 9;
+    const want = s.cave ? (lowFx ? 5 : 10) : s.storm ? 0 : lowFx ? 4 : 9;
     while (ambient.length < want) ambient.push({ x: cx0 + Math.random() * ww, y: cy0 + Math.random() * wh, seed: Math.random() * 100, born: now });
     if (ambient.length > want) ambient.length = want;
     for (const a of ambient) {
@@ -684,6 +705,7 @@ export function createView(canvas) {
   let nextBolt = 0;
   function drawStorm(now) {
     g.fillStyle = 'rgba(30,40,80,.28)'; g.fillRect(0, 0, vw, vh);
+    if (lowFx) { if (now > nextBolt) { nextBolt = now + 4 + Math.random() * 6; flash = 0.22; } return; } // no rain
     g.strokeStyle = 'rgba(200,215,255,.35)'; g.lineWidth = 1;
     g.beginPath();
     for (const r of rain) {

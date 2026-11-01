@@ -10,7 +10,7 @@ import { chromium } from 'playwright';
 import { startEnv, pickNew, wait, waitFor, out } from './island-harness.mjs';
 
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
-const SECONDS = Number(arg('seconds', 8)), BUDGET = Number(arg('budget', 40)), THROTTLE = Number(arg('throttle', 4));
+const SECONDS = Number(arg('seconds', 8)), BUDGET = Number(arg('budget', process.env.PERF_BUDGET_MS || 40)), THROTTLE = Number(arg('throttle', 4));
 const effects = arg('effects', 'normal') === 'both' ? ['normal', 'low'] : [arg('effects', 'normal')];
 const scenes = arg('scenes', 'village,shore,peak').split(',');
 const sizes = { phone: { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 }, desktop: { viewport: { width: 1280, height: 760 } } };
@@ -58,6 +58,7 @@ try {
       const end = Date.now() + ms;
       while (Date.now() < end) for (const k of ['KeyD', 'KeyS', 'KeyA', 'KeyW']) { await page.keyboard.down(k); await wait(500); if (Math.random() < 0.5) await page.keyboard.press('KeyJ'); await page.keyboard.up(k); if (Date.now() > end) break; }
     };
+    await Promise.all([walk(host, 6000), walk(guest, 6000)]); // warm-up: sprites, chunks and the JIT settle first
     for (const mode of effects) {
       for (const scene of scenes) {
         for (const page of [host, guest]) await page.evaluate(async (mode) => { (await import('/games/island-view.js')).setEffects?.(mode); }, mode);
