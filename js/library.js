@@ -1,5 +1,6 @@
 // Browse metadata is editorial: durations are estimates, not timers or promises.
 export const GAME_INFO = {
+  rally: { category: 'Arcade', minutes: 3, duration: '1–3', difficulty: 'Easy' },
   hexisle: { category: 'Strategy', minutes: 60, duration: '45–60', difficulty: 'Deep' },
   gems: { category: 'Strategy', minutes: 30, duration: '20–30', difficulty: 'Medium' },
   mosaic: { category: 'Strategy', minutes: 30, duration: '20–30', difficulty: 'Medium' },
@@ -16,7 +17,7 @@ export const GAME_INFO = {
 // Quick Play: games that are good on your own. The island is a solo adventure; the board games have
 // computer players, and `seats` is the table size Quick Play fills (you plus computers).
 export const QUICK_GAMES = [
-  { id: 'island', seats: 1 }, { id: 'gems', seats: 3 }, { id: 'mosaic', seats: 3 },
+  { id: 'island', seats: 1 }, { id: 'rally', seats: 1 }, { id: 'gems', seats: 3 }, { id: 'mosaic', seats: 3 },
   { id: 'bluff', seats: 3 }, { id: 'hexisle', seats: 3 }, { id: 'chess', seats: 2 },
 ];
 export const QUICK_DEFAULT = 'island';

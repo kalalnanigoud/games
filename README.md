@@ -1,6 +1,22 @@
 # 🎲 Game Night
 
 Free multiplayer party games, strategy, and cooperative adventures in the browser, on phones and computers.
+
+Arena Rush is Creature Island's five-minute survival mode. Start it directly from its library button,
+or choose it in the lobby to select a starting kit: Starter squad (varied companions), Swift striker
+(Emberkit and faster movement), or Bubble guardian (Dewpaw and 30 extra HP). The lobby's kit applies to
+the explorers in that run and stays selected for Play again. Forest, tide and crystal waves rotate as
+new enemies unlock, with a Brute assault every fifth wave. Arena runs do not save adventure progress.
+
+In Adventure, healthy calm wildlife gathers near its own kind and pauses to watch nearby explorers or
+companions, with an occasional curiosity cue. Injured creatures, hostile encounters, rare quests and
+Arena Rush retain their existing behaviour.
+
+Pocket Rally is a solo arcade prototype: three laps around Seabreeze Circuit against three computer
+racers, with Easy, Normal and Hard opponents. The car accelerates automatically; steer with A/D or
+Left/Right, brake with Down/S, and hold Space for boost. Phone controls are on screen. P pauses, and
+leaving the tab also pauses. Race again starts fresh. Races are not saved; multiplayer racing and
+additional tracks are future work.
 One player hosts a room, friends join with a 5-letter code. No sign-up, no game server.
 
 ## How it works (and why it's free)

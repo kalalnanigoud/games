@@ -973,10 +973,36 @@ export class World {
     if ((e.t -= TICK) <= 0) {
       e.t = 1.2 + Math.random() * 2.4;
       e.wAng = Math.random() < 0.4 ? null : Math.random() * Math.PI * 2;
+      this.wildInterest(e, sp);
       if (dist(e, { x: e.home[0], y: e.home[1] }) > 160) e.wAng = angTo(e, { x: e.home[0], y: e.home[1] });
     }
     if (e.wAng != null) this.moveEnt(e, e.wAng, speed * 0.35);
     else e.anim = 'idle';
+  }
+  // Only ordinary, healthy, calm wildlife socialises. Decisions happen on the
+  // existing wander cadence; combat, rare quests and arena encounters keep their AI.
+  wildInterest(e, sp) {
+    if (this.arena || sp.temper !== 'calm' || e.murk || e.raid || e.quest || e.boss || e.angry || e.hp < e.max || dist(e, { x: e.home[0], y: e.home[1] }) > 160) return;
+    const key = this.nearestFoe(e, 170), visitor = key && this.targetOfKey(key);
+    if (visitor && !inVillage(visitor.x, visitor.y)) {
+      e.wAng = null;
+      e.dir = dirOf(visitor.x - e.x, visitor.y - e.y);
+      if (this.t >= (e.curiousAt || 0)) {
+        this.event(e, ['float', e.x, e.y - 38, '?', '#ffe066']);
+        e.curiousAt = this.t + 12;
+      }
+      return;
+    }
+    let friend = null, nearest = 180;
+    for (const other of this.ents.values()) {
+      if (other === e || other.type !== 'c' || other.sp !== e.sp || other.companion || other.raid || other.quest || other.boss || other.angry || other.state !== 'wander' || other.hp < other.max || areaOf(other.x) !== areaOf(e.x)) continue;
+      const d = dist(e, other);
+      if (d < nearest) { friend = other; nearest = d; }
+    }
+    if (!friend) return;
+    // Keep a small gap rather than stacking into one sprite.
+    e.wAng = nearest < 36 ? angTo(friend, e) : nearest > 70 ? angTo(e, friend) : null;
+    if (e.wAng == null) e.dir = dirOf(friend.x - e.x, friend.y - e.y);
   }
   targetOfKey(key) { const s = { target: key }; return this.targetOf(s); }
   foesAt(e, r) {

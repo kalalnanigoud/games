@@ -296,7 +296,8 @@ console.log('Creature Island checks passed: four explorers at once, first compan
   assert.ok(inArena(ap('A')) && ap('A').body.y < (ARENA.at[1] + ARENA.r) * T + 4, 'the way out is sealed');
   // Waves arrive on the clock and the score counts what is beaten.
   for (const id of ['A', 'B']) ap(id).hp = 1e5;
-  run(20 * 25);
+  // Isolate wave/timer assertions from combat balance while enemies accumulate.
+  run(20 * 25, id => { ap(id).hp = 1e5; return [0, 0, 0]; });
   assert.ok(arena.wave >= 3, `waves come (wave ${arena.wave})`);
   const view = aw.worldView(ap('A')).arena;
   assert.ok(view.s === 'run' && view.dur === 300 && view.wave === arena.wave, 'the screen is told the clock and wave');

@@ -8,7 +8,7 @@ import { TICK } from './island-data.js';
 import { World } from './island-sim.js';
 import { createClient } from './island-client.js';
 import * as islandArt from './island-art.js';
-import { attachArena, arenaUi, ARENA_CSS } from './island-arena.js';
+import { attachArena, arenaUi, ARENA_CSS, ARENA_KITS } from './island-arena.js';
 
 let world = null, api = null, timer = null, client = null, clientKey = '', lastCtx = null, ticker = null;
 // For the browser tests (tools/island-ci.mjs): the running world and this screen.
@@ -59,7 +59,10 @@ export default {
   name: 'Creature Island',
   description: 'Explore a living island with up to three friends: befriend creatures, raise companions and fight side by side to calm the storm on Stormcrown Peak.',
   minPlayers: 1, maxPlayers: 4,
-  options: [{ id: 'mode', label: '🏟️ Mode', default: 'adventure', choices: [['adventure', 'Adventure (save when you like)'], ['arena', 'Arena Rush (5 min, no saving)']] }],
+  options: [
+    { id: 'mode', label: '🏟️ Mode', default: 'adventure', choices: [['adventure', 'Adventure (save when you like)'], ['arena', 'Arena Rush (5 min, no saving)']] },
+    { id: 'arenaKit', label: 'Arena Rush starting kit', default: 'classic', choices: [['classic', 'Starter squad · varied companions'], ['swift', 'Swift striker · Emberkit, faster movement'], ['guardian', 'Bubble guardian · Dewpaw, +30 HP']] },
+  ],
   live: true, dropIn: true, soloOnDevice: true, manualSave: true, simultaneous: true,
   cover: islandArt.COVER_SVG || '',
   howTo: {
@@ -73,13 +76,14 @@ export default {
     ],
     tips: [
       'Elements matter: Leaf beats Tide and Stone, Tide beats Ember, Ember beats Leaf, Spark beats Tide, Stone beats Spark and Ember.',
+      'Healthy calm creatures gather near their own kind and may stop to watch you or your companion. A question mark means curiosity; shy creatures still flee and feisty ones defend their territory.',
       'A friend’s open bridge or gate opens for everyone on the island, so a new explorer can join the adventure anywhere.',
       'If the host closes their page, the island closes too: save before long breaks. Friends who drop out keep their explorer while the island stays open.',
       'Controls: keys can be remapped, a controller works, and the first-time practice can be replayed: open the bag (B) → Guide.',
     ],
   },
 
-  setup(players, opts) { return { sid: uid(), phase: 'explore', over: false, mode: opts?.mode === 'arena' ? 'arena' : 'adventure' }; },
+  setup(players, opts) { return { sid: uid(), phase: 'explore', over: false, mode: opts?.mode === 'arena' ? 'arena' : 'adventure', arenaKit: Object.hasOwn(ARENA_KITS, opts?.arenaKit) ? opts.arenaKit : 'classic' }; },
   act() { throw new Error('Creature Island is played live.'); },
   turnOf() { return []; },
   view(state) { return state; },
@@ -95,7 +99,7 @@ export default {
       },
     });
     world.sid = state.sid;
-    if (state.mode === 'arena') attachArena(world);
+    if (state.mode === 'arena') attachArena(world, { kit: state.arenaKit });
     startTicker();
   },
   hostRoom(list) {

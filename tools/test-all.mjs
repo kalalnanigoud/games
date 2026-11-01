@@ -17,6 +17,7 @@ const suites = [
   { name: 'browser-ci', what: 'every game at phone and desktop sizes', file: 'tools/browser-ci.mjs' },
   { name: 'multiplayer-ci', what: `real WebRTC rooms, ${web}`, file: 'tools/multiplayer-ci.mjs' },
   { name: 'island-ci', what: `Creature Island, four live players, ${web}`, file: 'tools/island-ci.mjs' },
+  { name: 'rally-ci', what: 'Pocket Rally: solo driving, touch controls, pause and retry in both engines', file: 'tools/rally-ci.mjs' },
   { name: 'arena-ci', what: 'Arena Rush: lobby option, timer, score, no saving', file: 'tools/arena-ci.mjs' },
   { name: 'onboarding-ci', what: 'practice, samples, controls, touch layouts', file: 'tools/onboarding-ci.mjs' },
   { name: 'fx-toggle', what: 'Lower effects button in the Guide tab, phone and desktop', file: 'tools/fx-toggle-shot.mjs' },

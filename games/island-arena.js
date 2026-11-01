@@ -14,13 +14,25 @@ export const ARENA = {
   dur: 300, intro: 5, level: 5,
 };
 const POOL = [['nettlebug', 1], ['clackle', 2], ['gullwisp', 3], ['gemmole', 4], ['fizzwing', 5], ['ripplefin', 6], ['cindermite', 7]];
+export const ARENA_KITS = {
+  classic: { name: 'Starter squad', charm: null },
+  swift: { name: 'Swift striker', sp: 'emberkit', charm: 'feather' },
+  guardian: { name: 'Bubble guardian', sp: 'dewpaw', charm: 'tidecharm' },
+};
+const THEMES = [
+  { name: 'Forest swarm', species: ['nettlebug'] },
+  { name: 'Tide rush', species: ['clackle', 'gullwisp', 'ripplefin'] },
+  { name: 'Crystal storm', species: ['gemmole', 'fizzwing', 'cindermite'] },
+];
 const BLOCKED = new Set(['new', 'load', 'save', 'saved', 'buy', 'sell', 'craft', 'ranch', 'release', 'respawn']);
 const spotFor = (seat) => { const a = (seat / 4) * Math.PI * 2 + 0.6; return { x: ARENA.at[0] * T + Math.cos(a) * 52, y: ARENA.at[1] * T + Math.sin(a) * 52 }; };
 
-export function arenaExplorer(name, seat) {
+export function arenaExplorer(name, seat, kitId = 'classic') {
+  const kit = Object.hasOwn(ARENA_KITS, kitId) ? ARENA_KITS[kitId] : ARENA_KITS.classic;
   const ex = newExplorer(name, { skin: seat, hair: seat + 1 });
-  ex.lv = ARENA.level; ex.hp = playerMax(ex.lv, null); ex.shells = 0; ex.inv = { sunberry: 3 };
-  const sp = STARTERS[seat % STARTERS.length];
+  if (kit.charm) { ex.gear.push(kit.charm); ex.equip.charm = kit.charm; }
+  ex.lv = ARENA.level; ex.hp = playerMax(ex.lv, kit.charm); ex.shells = 0; ex.inv = { sunberry: 3 };
+  const sp = kit.sp || STARTERS[seat % STARTERS.length];
   ex.team = [{ uid: 'arena' + seat + Math.random().toString(36).slice(2, 7), sp, lv: ex.lv, xp: 0, hp: creatureMax(sp, ex.lv) }];
   ex.quests = { starter: 9 };
   ex.loc = spotFor(seat);
@@ -32,6 +44,7 @@ export class Arena {
     this.w = world;
     this.dur = o.dur || ARENA.dur;
     this.gap = o.gap || 20;
+    this.kit = Object.hasOwn(ARENA_KITS, o.kit) ? o.kit : 'classic';
     world.arena = this;
     world.open.arena = [ARENA.at[0], ARENA.at[1], ARENA.r]; // a circular wall: see solidTile in island-map.js
     world.worldVer++;
@@ -43,6 +56,7 @@ export class Arena {
     this.score = 0; this.kills = 0; this.wave = 0; this.nextWave = ARENA.intro; this.cleared = true;
     this.foes = new Set();
     this.result = null;
+    this.theme = '';
   }
   get elapsed() { return this.state === 'wait' ? 0 : this.w.t - this.t0 + this.shift; }
   // For tests and the browser check: move the clock on without playing the minutes.
@@ -51,10 +65,10 @@ export class Arena {
   // ---- explorers ----
   join(p) {
     const w = this.w;
-    p.ex = arenaExplorer(p.name, p.seat);
+    p.ex = arenaExplorer(p.name, p.seat, this.kit);
     p.tag = ''; p.prog = 0; p.savedProg = 0; p.lastSave = 0;
     w.spawn(p);
-    w.personal(p, ['banner', 'Arena Rush', `Survive ${Math.round(this.dur / 60)} minutes`]);
+    w.personal(p, ['banner', 'Arena Rush', `${ARENA_KITS[this.kit].name} · Survive ${Math.round(this.dur / 60)} minutes`]);
     if (this.state === 'wait') { this.state = 'run'; this.t0 = w.t; }
   }
   respawn(p) {
@@ -112,7 +126,11 @@ export class Arena {
     this.wave++; this.cleared = false;
     this.nextWave = this.elapsed + Math.max(13, this.gap - Math.floor(this.wave / 2));
     const lv = Math.min(14, Math.round(2 + this.wave * 0.9 + (n - 1) * 0.5));
-    const pool = POOL.filter(([, from]) => from <= this.wave).map(([sp]) => sp);
+    const unlocked = POOL.filter(([, from]) => from <= this.wave).map(([sp]) => sp);
+    const theme = THEMES[(this.wave - 1) % THEMES.length];
+    const themed = unlocked.filter(sp => theme.species.includes(sp));
+    const pool = themed.length ? themed : unlocked;
+    this.theme = this.wave % 5 === 0 ? 'Brute assault' : themed.length ? theme.name : 'Mixed skirmish';
     const count = Math.min(3 + Math.floor(this.wave * 0.9) + (n - 1) * 2, 18 - this.foes.size);
     const kinds = [];
     for (let i = 0; i < count; i++) kinds.push(pool.length && i % 3 === 2 ? pool[(i + this.wave) % pool.length] : 'murk');
@@ -131,7 +149,7 @@ export class Arena {
       p.hp = Math.min(w.maxHp(p), p.hp + w.maxHp(p) * 0.25);
       const m = p.ex.team.find((x) => x.hp <= 0);
       if (m && !p.comp) { m.hp = Math.round(creatureMax(m.sp, m.lv) / 2); w.summon(p); }
-      w.personal(p, ['banner', `Wave ${this.wave}`, `${kinds.length} coming`]);
+      w.personal(p, ['banner', `Wave ${this.wave} · ${this.theme}`, `${kinds.length} coming`]);
       w.bump(p);
     }
   }
@@ -155,7 +173,7 @@ export class Arena {
   }
   // Hook: what each screen shows (rides along with the world view).
   view() {
-    return { s: this.state, el: Math.round(this.elapsed * 10) / 10, dur: this.dur, score: this.score, kills: this.kills, wave: this.wave, left: this.foes.size, res: this.result };
+    return { s: this.state, el: Math.round(this.elapsed * 10) / 10, dur: this.dur, score: this.score, kills: this.kills, wave: this.wave, theme: this.theme, kit: ARENA_KITS[this.kit].name, left: this.foes.size, res: this.result };
   }
 }
 
@@ -186,7 +204,7 @@ export const arenaUi = {
       if (!a) return;
       const left = a.s === 'run' ? a.dur - a.el - (performance.now() - at) / 1000 : a.s === 'over' ? 0 : a.dur;
       const b = hud.firstChild, s = hud.lastChild;
-      const t1 = `${clock(left)}`, t2 = a.wave ? `Wave ${a.wave} · ${a.score.toLocaleString()} pts` : `Get ready · ${a.score} pts`;
+      const t1 = `${clock(left)}`, t2 = a.wave ? `Wave ${a.wave} · ${a.score.toLocaleString()} pts` : `${a.kit || 'Get ready'} · ${a.score} pts`;
       if (b.textContent !== t1) b.textContent = t1;
       if (s.textContent !== t2) s.textContent = t2;
       const r = a.s === 'over' && a.res;
@@ -201,6 +219,7 @@ function endHtml(r, st) {
   const names = (st.w.roster || []).filter((x) => x.ready).map((x) => esc(x.name)).join(', ');
   return `<div class="isl-card isl-end"><h2>${r.reason === 'time' ? 'You held the arena!' : 'The arena overran you'}</h2>
     <p class="isl-arena-score">${r.score.toLocaleString()} <small>points</small></p>
+    ${st.w.arena?.kit ? `<p class="small muted">${esc(st.w.arena.kit)}</p>` : ''}
     <ul class="isl-list isl-arena-stats"><li><span><b>${r.kills}</b><small>foes beaten</small></span></li><li><span><b>${r.wave}</b><small>waves</small></span></li><li><span><b>${clock(r.time)}</b><small>survived</small></span></li></ul>
     ${names ? `<p class="small muted">${names}</p>` : ''}
     <p class="small muted">Nothing is saved from an Arena Rush run. Leave from the game bar, or go again.</p>

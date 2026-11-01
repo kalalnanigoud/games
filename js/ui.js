@@ -189,7 +189,7 @@ export function renderUpdateBar() {
 
 const libraryFilters = { query: '', category: '', players: '', minutes: '', difficulty: '', collection: '' };
 const FILTERS = [
-  ['category', 'Type', [['', 'All types'], ...['Party', 'Strategy', 'Adventure', 'Cooperative'].map((x) => [x, x])]],
+  ['category', 'Type', [['', 'All types'], ...['Arcade', 'Party', 'Strategy', 'Adventure', 'Cooperative'].map((x) => [x, x])]],
   ['players', 'Players', [['', 'Any group'], ...Array.from({ length: 8 }, (_, i) => [i + 1, `${i + 1} player${i ? 's' : ''}`])]],
   ['minutes', 'Estimated time', [['', 'Any length'], [5, 'Up to 5 min'], [15, 'Up to 15 min'], [30, 'Up to 30 min'], [60, 'Up to 60 min']]],
   ['difficulty', 'Difficulty', [['', 'Any level'], ...['Easy', 'Medium', 'Deep'].map((x) => [x, x])]],
@@ -207,9 +207,10 @@ function gameCard(g, saved) {
     <div class="body">
       <div class="cat cat-${info.category}">${info.category}${info.coop ? ' · <span class="coop">Co-op</span>' : ''}</div>
       <h3>${esc(g.name)}</h3>
-      <div class="game-meta"><span>${icon('users')}${range(g)} players</span><span>${icon('clock')}${info.duration} min</span><span>${icon('level')}${info.difficulty}</span></div>
+      <div class="game-meta"><span>${icon('users')}${range(g)} players</span><span>${icon('clock')}${info.quick && +libraryFilters.minutes > 0 && +libraryFilters.minutes < info.minutes ? `${esc(info.quick.label)} · ${info.quick.minutes}` : info.duration} min</span><span>${icon('level')}${info.difficulty}</span></div>
       <p>${esc(g.description)}</p>
       <div class="card-actions"><button class="primary" data-host="${g.id}">${icon('globe')}Host online</button>${g.soloOnDevice ? `<button data-local="${g.id}" title="Play on your own on this device">${icon('phone')}Play solo</button>` : `<button data-local="${g.id}" title="Pass one device around, or play against computer players">${icon('phone')}One device</button>`}</div>
+      ${info.quick ? `<div class="card-actions"><button data-quick="${g.id}" data-mode="${info.quick.value}">${icon('play')}${esc(info.quick.label)} · ${info.quick.minutes} min</button></div>` : ''}
     </div></article>`;
 }
 
@@ -242,8 +243,8 @@ export function renderHome() {
     <section class="home-hero">
       <div class="hero-copy">
         <span class="eyebrow">${icon('sparkle')} Free · no sign-up · any device</span>
-        <h1>Game night, <span class="hl">anywhere.</span></h1>
-        <p>Party games, strategy and cooperative adventures for friends near and far. Host a room, share the code, and play together.</p>
+        <h1>A little play, <span class="hl">anytime.</span></h1>
+        <p>Fill a short break, explore an adventure, or challenge yourself to a new game. Play on your own or invite friends to join.</p>
       </div>
       <div class="panel hero-card">
         <div class="field"><label for="nameIn">Your name</label>
@@ -341,6 +342,7 @@ export function renderHome() {
     }
     if (b.dataset.host && needName()) hostRoom(b.dataset.host);
     if (b.dataset.local) { S.name = nameIn.value.trim(); localRoom(b.dataset.local); }
+    if (b.dataset.quick) { S.name = nameIn.value.trim().slice(0, 20); quickPlay(b.dataset.quick, { mode: b.dataset.mode }); }
   });
   drawLibrary();
   if (session) {

@@ -10,7 +10,7 @@ try {
   const browser = await chromium.launch();
   env.browsers.push(browser);
   for (const [name, opts] of [['phone', { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true }], ['desktop', { viewport: { width: 1280, height: 760 } }]]) {
-    const page = await env.open(browser, opts);
+    const page = await env.open(browser, { ...opts, deviceScaleFactor: 2 });
     await page.fill('#nameIn', 'Solo'); await page.click('[data-local="island"]'); await page.click('#startBtn');
     await page.waitForSelector('.isl-pick [data-pick="new"]');
     await page.click('.isl-pick [data-pick="new"]');
@@ -25,9 +25,17 @@ try {
     const label = () => btn.innerText();
     const stored = () => page.evaluate(() => localStorage.getItem('gn-island-effects'));
     assert.match(await label(), /Lower effects: auto \(off\)/);
+    const normalWidth = await page.locator('.isl-canvas').evaluate(c => c.width);
     await btn.click(); assert.match(await label(), /Lower effects: on/); assert.equal(await stored(), 'low');
+    await page.waitForFunction(() => {
+      const c = document.querySelector('.isl-canvas');
+      return Math.abs(c.width - c.getBoundingClientRect().width) <= 1;
+    });
+    const lowWidth = await page.locator('.isl-canvas').evaluate(c => c.width);
+    assert.ok(Math.abs(normalWidth - lowWidth * 2) <= 1, 'low effects halves backing resolution on a 2x display');
     await page.screenshot({ path: fileURLToPath(new URL(`fx-toggle-${name}.png`, out)) });
     await btn.click(); assert.match(await label(), /Lower effects: off/); assert.equal(await stored(), 'normal');
+    await page.waitForFunction(w => document.querySelector('.isl-canvas').width === w, normalWidth);
     await btn.click(); assert.match(await label(), /Lower effects: auto/); assert.equal(await stored(), null);
     const row = await page.evaluate(() => { const r = document.querySelector('[data-ctl="fx"]').parentElement.getBoundingClientRect(); const p = document.querySelector('.isl-panel').getBoundingClientRect(); return r.right <= p.right + 1 && document.documentElement.scrollWidth <= innerWidth + 1; });
     assert.ok(row, name + ': the row fits without sideways scrolling');

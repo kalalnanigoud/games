@@ -201,7 +201,9 @@ export function createView(canvas) {
   const ambient = [];
 
   function resize(cssW, cssH, pixelRatio) {
-    pr = pixelRatio; dpr = Math.min(2, pixelRatio || 1);
+    // Lower effects also limits raster work: CSS size, camera and input coordinates
+    // stay unchanged, while high-density screens paint fewer backing pixels.
+    pr = pixelRatio; dpr = Math.min(lowFx ? 1 : 2, pixelRatio || 1);
     vw = cssW; vh = cssH;
     canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssH * dpr);
     canvas.style.width = cssW + 'px'; canvas.style.height = cssH + 'px';

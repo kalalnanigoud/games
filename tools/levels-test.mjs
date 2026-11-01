@@ -37,7 +37,8 @@ function play(g, players, levelFor, opts) {
 let checked = 0;
 for (const g of GAMES) {
   const opt = (g.options || []).find((o) => o.id === 'level');
-  if (!opt || g.id === 'chess' || (ONLY.length && !ONLY.includes(g.id))) continue;
+  // Live games exercise difficulty through their own fixed-step simulation tests.
+  if (!opt || g.live || g.id === 'chess' || (ONLY.length && !ONLY.includes(g.id))) continue;
   checked++;
   assert.deepEqual(opt.choices.map(([id]) => id), ['easy', 'normal', 'hard'], `${g.id}: levels are easy, normal, hard`);
   assert.equal(opt.default, 'normal', `${g.id}: Normal is the default`);

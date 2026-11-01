@@ -660,11 +660,12 @@ export function localRoom(gameId, resume = null) {
 // Quick Play: a one-device game started straight away, no lobby. Board games fill the table with
 // computer players. With `resumeSave` the island picks "Continue as ..." on its own once its start
 // screen offers it (island-client.js has no start option, so this presses the button it draws).
-export function quickPlay(gameId, { resumeSave = false } = {}) {
+export function quickPlay(gameId, { resumeSave = false, mode = null } = {}) {
   const q = QUICK_GAMES.find((x) => x.id === gameId);
   if (!q) return;
   localRoom(gameId);
   if (S.role !== 'local') return;
+  if (mode !== null) S.opts = validOpts(getGame(gameId), { ...S.opts, mode });
   S.players = S.players.slice(0, 1); // just you; the computers fill the rest
   while (seated().length < q.seats && seated().length < seatLimit()) addBot();
   startGame();

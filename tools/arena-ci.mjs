@@ -48,6 +48,16 @@ try {
   browser = await chromium.launch({ args: ['--disable-background-timer-throttling', '--disable-renderer-backgrounding'] });
   for (const [label, viewport, touch] of [['desktop', { width: 1280, height: 760 }, false], ['phone', { width: 390, height: 844 }, true]]) {
     const page = await open(touch ? { viewport, hasTouch: true, isMobile: true } : { viewport });
+    await page.selectOption('[data-filter="minutes"]', '5');
+    assert.match(await page.locator('.game-card:has([data-quick="island"]) .game-meta').innerText(), /Arena Rush.*5 min/);
+    await page.click('[data-quick="island"]');
+    await page.waitForSelector('.isl-arena:not([hidden])');
+    assert.equal(await page.evaluate(async () => (await import('/js/state.js')).S.role), 'local');
+    assert.equal(await page.evaluate(async () => (await import('/js/state.js')).S.opts.mode), 'arena');
+    assert.equal(await page.locator('.isl-pick').count(), 0, 'direct launch skips the adventure picker');
+    console.log(`PASS ${label}: five-minute library result launches solo Arena Rush directly`);
+    await page.evaluate(async () => (await import('/js/net.js')).leave());
+    await page.click('#clearFilters');
     await page.fill('#nameIn', 'Ari');
     await page.click('[data-host="island"]');
     await waitFor(page, async () => (await import('/js/state.js')).S.status === 'online');
@@ -57,8 +67,14 @@ try {
     assert.equal(await sel.inputValue(), 'adventure', 'adventure is the default');
     assert.deepEqual(await sel.locator('option').allInnerTexts(), ['Adventure (save when you like)', 'Arena Rush (5 min, no saving)']);
     await sel.selectOption('arena');
+    await page.selectOption('select[data-opt="arenaKit"]', 'guardian');
     await page.click('#startBtn');
     await page.waitForSelector('.isl-arena:not([hidden])');
+    assert.deepEqual(await page.evaluate(async () => {
+      const { debug } = await import('/games/island.js');
+      const p = [...debug.world.players.values()][0];
+      return { charm: p.ex.equip.charm, species: p.ex.team[0].sp };
+    }), { charm: 'tidecharm', species: 'dewpaw' });
     console.log(`PASS ${label}: Arena Rush starts straight into the arena, with no explorer to pick or load`);
 
     // Timer and score card, in the island's look.
