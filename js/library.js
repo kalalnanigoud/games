@@ -11,8 +11,21 @@ export const GAME_INFO = {
   ember: { category: 'Strategy', minutes: 30, duration: '20–30', difficulty: 'Medium', coop: true },
   keeper: { category: 'Adventure', minutes: 45, duration: '25–45', difficulty: 'Medium', coop: true },
   signal: { category: 'Adventure', minutes: 45, duration: '25–45', difficulty: 'Deep', coop: true },
-  island: { category: 'Adventure', minutes: 90, duration: '30–180', difficulty: 'Medium', coop: true },
+  island: { category: 'Adventure', minutes: 90, duration: '30–180', difficulty: 'Medium', coop: true, quick: { minutes: 5, option: 'mode', value: 'arena', label: 'Arena Rush' } }, // a lobby option makes it a 5 min run
 };
+// Quick Play: games that are good on your own. The island is a solo adventure; the board games have
+// computer players, and `seats` is the table size Quick Play fills (you plus computers).
+export const QUICK_GAMES = [
+  { id: 'island', seats: 1 }, { id: 'gems', seats: 3 }, { id: 'mosaic', seats: 3 },
+  { id: 'bluff', seats: 3 }, { id: 'hexisle', seats: 3 }, { id: 'chess', seats: 2 },
+];
+export const QUICK_DEFAULT = 'island';
+export const quickChoice = () => {
+  let id = null;
+  try { id = localStorage.getItem('gn-quick'); } catch {}
+  return QUICK_GAMES.some((q) => q.id === id) ? id : QUICK_DEFAULT;
+};
+export const setQuickChoice = (id) => { try { localStorage.setItem('gn-quick', id); } catch {} };
 const readList = (key) => {
   try { const list = JSON.parse(localStorage.getItem(key)); return Array.isArray(list) ? [...new Set(list.filter((id) => Object.hasOwn(GAME_INFO, id)))] : []; }
   catch { return []; }
@@ -34,7 +47,7 @@ export function filterGames(games, filters, saved = favorites(), recent = recent
     return info && (!query || `${g.name} ${g.description} ${info.category}`.toLowerCase().includes(query))
       && (!filters.category || info.category === filters.category || (filters.category === 'Cooperative' && info.coop))
       && (!filters.players || (g.minPlayers <= +filters.players && g.maxPlayers >= +filters.players))
-      && (!filters.minutes || info.minutes <= +filters.minutes)
+      && (!filters.minutes || info.minutes <= +filters.minutes || info.quick?.minutes <= +filters.minutes)
       && (!filters.difficulty || info.difficulty === filters.difficulty)
       && (filters.collection !== 'favorites' || saved.includes(g.id))
       && (filters.collection !== 'recent' || recent.includes(g.id));

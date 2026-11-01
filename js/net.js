@@ -8,7 +8,7 @@ import { toast, randomCode, uid, sha256hex } from './util.js';
 import { createVoice } from './voice.js';
 import { createTour, currentMatch, recordResult } from './tour.js';
 import { diff, apply } from './patch.js';
-import { rememberPlayed } from './library.js';
+import { rememberPlayed, QUICK_GAMES } from './library.js';
 import { MAX_ROOM, MAX_WATCHERS, BOT_NAMES, S, VERSION, getGame, gameReady, loadGame, defaultTimer, defaultOpts, validOpts, validTourDraft, seated, tableLimit, tourGame, isWatching, adoptToken, myId, playerName, isBot, newerVersion, saveSession, queueSessionSave, flushSessionSave, clearSession } from './state.js';
 import { render, renderTopbar, paintNet } from './ui.js';
 
@@ -655,6 +655,32 @@ export function localRoom(gameId, resume = null) {
   render();
   scheduleBots();
   whenLoaded();
+}
+
+// Quick Play: a one-device game started straight away, no lobby. Board games fill the table with
+// computer players. With `resumeSave` the island picks "Continue as ..." on its own once its start
+// screen offers it (island-client.js has no start option, so this presses the button it draws).
+export function quickPlay(gameId, { resumeSave = false } = {}) {
+  const q = QUICK_GAMES.find((x) => x.id === gameId);
+  if (!q) return;
+  localRoom(gameId);
+  if (S.role !== 'local') return;
+  S.players = S.players.slice(0, 1); // just you; the computers fill the rest
+  while (seated().length < q.seats && seated().length < seatLimit()) addBot();
+  startGame();
+  if (resumeSave) pressWhenShown('.isl-continue[data-pick="cloud"]');
+}
+function pressWhenShown(selector, ms = 20000) {
+  if (typeof document === 'undefined') return;
+  const stop = () => { obs.disconnect(); clearTimeout(timer); };
+  const look = () => {
+    if (S.role !== 'local' || S.gameId !== 'island') return stop(); // they left before it appeared
+    const b = document.querySelector(selector);
+    if (b) { stop(); b.click(); }
+  };
+  const obs = new MutationObserver(look), timer = setTimeout(stop, ms);
+  obs.observe(document.body, { childList: true, subtree: true });
+  look();
 }
 
 /* ---------------- client ---------------- */

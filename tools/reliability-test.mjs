@@ -12,7 +12,7 @@ assert.ok(CATALOG.every((g) => GAME_INFO[g.id]), 'every game has browse metadata
 assert.ok(filterGames(CATALOG,{category:'Party'}).every((g) => GAME_INFO[g.id].category==='Party'));
 assert.ok(filterGames(CATALOG,{players:8}).every((g) => g.maxPlayers>=8));
 assert.equal(filterGames(CATALOG,{query:'no such game'}).length,0);
-assert.ok(filterGames(CATALOG,{minutes:15}).every((g) => GAME_INFO[g.id].minutes<=15));
+assert.ok(filterGames(CATALOG,{minutes:15}).every((g) => (GAME_INFO[g.id].quick?.minutes ?? GAME_INFO[g.id].minutes)<=15));
 toggleFavorite('gems'); assert.deepEqual(favorites(),['gems']);
 assert.deepEqual(filterGames(CATALOG,{collection:'favorites'}).map((g)=>g.id),['gems']);
 toggleFavorite('gems'); assert.deepEqual(favorites(),[]);

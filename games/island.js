@@ -75,6 +75,7 @@ export default {
       'Elements matter: Leaf beats Tide and Stone, Tide beats Ember, Ember beats Leaf, Spark beats Tide, Stone beats Spark and Ember.',
       'A friend’s open bridge or gate opens for everyone on the island, so a new explorer can join the adventure anywhere.',
       'If the host closes their page, the island closes too: save before long breaks. Friends who drop out keep their explorer while the island stays open.',
+      'Controls: keys can be remapped, a controller works, and the first-time practice can be replayed: open the bag (B) → Guide.',
     ],
   },
 
