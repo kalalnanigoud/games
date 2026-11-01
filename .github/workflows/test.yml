@@ -39,28 +39,28 @@ jobs:
       - name: Browser checks
         run: node tools/browser-ci.mjs
       - name: Multiplayer and WebKit touch checks
-        if: !cancelled()
+        if: success() || failure()
         run: node tools/multiplayer-ci.mjs
       - name: Creature Island with four live players
-        if: !cancelled()
+        if: success() || failure()
         run: node tools/island-ci.mjs
       - name: Pocket Rally
-        if: !cancelled()
+        if: success() || failure()
         run: node tools/rally-ci.mjs
       - name: Arena Rush
-        if: !cancelled()
+        if: success() || failure()
         run: node tools/arena-ci.mjs
       - name: Onboarding, controls and practice
-        if: !cancelled()
+        if: success() || failure()
         run: node tools/onboarding-ci.mjs
       - name: Lower effects toggle
-        if: !cancelled()
+        if: success() || failure()
         run: node tools/fx-toggle-shot.mjs
       - name: Startup, storage fallback, and CDN resilience
-        if: !cancelled()
+        if: success() || failure()
         run: node tools/startup-ci.mjs
       - name: Creature Island fault injection (Chromium and WebKit)
-        if: !cancelled()
+        if: success() || failure()
         run: node tools/island-faults.mjs
       - name: Upload browser traces and screenshots
         if: always()
