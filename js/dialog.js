@@ -10,6 +10,7 @@ export function openModal(el, selector, opener = document.activeElement) {
   current = { el, opener, id: opener?.id, help: opener?.dataset?.help, background };
   background.forEach(([node]) => { node.inert = true; });
   document.body.appendChild(el);
+  document.dispatchEvent(new Event('gn-input-suspend'));
   el.addEventListener('keydown', (event) => {
     if (event.key !== 'Tab') return;
     const items = focusable(el), first = items[0], last = items.at(-1);

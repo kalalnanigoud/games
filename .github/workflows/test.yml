@@ -39,14 +39,28 @@ jobs:
       - name: Browser checks
         run: node tools/browser-ci.mjs
       - name: Multiplayer and WebKit touch checks
+        if: !cancelled()
         run: node tools/multiplayer-ci.mjs
       - name: Creature Island with four live players
+        if: !cancelled()
         run: node tools/island-ci.mjs
       - name: Pocket Rally
+        if: !cancelled()
         run: node tools/rally-ci.mjs
       - name: Arena Rush
+        if: !cancelled()
         run: node tools/arena-ci.mjs
+      - name: Onboarding, controls and practice
+        if: !cancelled()
+        run: node tools/onboarding-ci.mjs
+      - name: Lower effects toggle
+        if: !cancelled()
+        run: node tools/fx-toggle-shot.mjs
+      - name: Startup, storage fallback, and CDN resilience
+        if: !cancelled()
+        run: node tools/startup-ci.mjs
       - name: Creature Island fault injection (Chromium and WebKit)
+        if: !cancelled()
         run: node tools/island-faults.mjs
       - name: Upload browser traces and screenshots
         if: always()
@@ -87,3 +101,24 @@ jobs:
       - name: Show the summary
         if: always()
         run: cat test-results/perf-island.md >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [rules, browser, performance]
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+      - id: deployment
+        uses: actions/deploy-pages@v4

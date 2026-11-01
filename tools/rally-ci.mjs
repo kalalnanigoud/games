@@ -25,6 +25,26 @@ try {
       else { await page.keyboard.down('ArrowRight'); await wait(350); await page.keyboard.up('ArrowRight'); }
       const state = await page.evaluate(async () => { const r = (await import('/games/rally.js')).debug.race; return { angle: r.cars[0].angle, paused: r.paused, countdown: r.countdown, time: r.time }; });
       assert.ok(state.angle > before, `steering changes heading (${JSON.stringify({ before, ...state })})`);
+      // A menu suspends a solo race and discards previously held steering.
+      await page.keyboard.down('ArrowRight');
+      await page.click('#ghMenuBtn');
+      const menuTime = await page.evaluate(async () => (await import('/games/rally.js')).debug.race.time);
+      await wait(220);
+      assert.equal(await page.evaluate(async () => (await import('/games/rally.js')).debug.race.time), menuTime, 'menu stops simulation');
+      assert.equal(await page.locator('.gh-menu[role="dialog"][aria-modal="true"]').count(), 1);
+      for (let i = 0; i < 10; i++) {
+        await page.keyboard.press(i % 2 ? 'Shift+Tab' : 'Tab');
+        assert.ok(await page.evaluate(() => !!document.activeElement.closest('.gh-menu')), 'focus remains in menu');
+      }
+      await page.evaluate(async () => (await import('/js/ui.js')).render());
+      assert.equal(await page.locator('#app').getAttribute('inert'), '', 'background remains inert after redraw');
+      await page.keyboard.press('Escape');
+      assert.equal(await page.locator('.gh-sheet').count(), 0);
+      assert.equal(await page.evaluate(() => document.activeElement.id), 'ghMenuBtn', 'focus returns to opener');
+      const heading = await page.evaluate(async () => (await import('/games/rally.js')).debug.race.cars[0].angle);
+      await wait(180);
+      assert.equal(await page.evaluate(async () => (await import('/games/rally.js')).debug.race.cars[0].angle), heading, 'held steering was cleared');
+      await page.keyboard.up('ArrowRight');
       await page.click('[data-pause]');
       const t = await page.evaluate(async () => (await import('/games/rally.js')).debug.race.time);
       await wait(200);

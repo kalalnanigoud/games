@@ -3,13 +3,16 @@
 
 import { S, loadTabSession } from './state.js';
 import { resume } from './net.js';
-import { render } from './ui.js';
+import { render, onlineAction } from './ui.js';
 import './report.js'; // anonymous crash reports, when switched on in config.js
 import './sample.js'; // first-time board-game sample
 
 {
   // A refresh of this tab drops you straight back into your room.
   const tabSession = loadTabSession();
-  if (tabSession && (tabSession.role === 'local' || (S.name && typeof Peer !== 'undefined'))) resume(tabSession);
-  else render();
+  if (tabSession?.role === 'local') resume(tabSession);
+  else {
+    render();
+    if (tabSession && S.name) onlineAction(() => resume(tabSession));
+  }
 }

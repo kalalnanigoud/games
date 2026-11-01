@@ -101,3 +101,40 @@ console.log('Chess scripted games passed. Bot games ended by:', JSON.stringify(e
   assert.ok(typeof chess.view(s, 'A').hostNow === 'number' && chess.view(clocked('none'), 'A').hostNow === undefined);
 }
 console.log('Chess clock checks passed.');
+
+// A timeout asks whether mate is possible, including help from the flagging side's pieces.
+// First demonstrate an actual legal mate by a lone bishop using the opponent's pawn as a blocker.
+{
+  const initial = fromFEN('8/7p/8/8/8/B7/p1K5/k7 b - - 0 1');
+  const h6 = legal(initial).find(m => san(initial, m) === 'h6'); assert.ok(h6);
+  const next = play(initial, h6), mate = legal(next).find(m => san(next, m) === 'Bb2#'); assert.ok(mate);
+  const end = play(next, mate); assert.ok(rules.inCheck(end)); assert.equal(legal(end).length, 0);
+}
+for (const [fenText, draw, why] of [
+  ['8/7p/8/8/8/B7/p1K5/k7 b - - 0 1', false, 'bishop can mate using opponent pawns'],
+  ['4k3/8/8/8/8/8/8/4KB2 b - - 0 1', true, 'lone bishop against bare king'],
+  ['4k3/p7/8/8/8/8/8/4K1N1 b - - 0 1', false, 'knight can mate using an opponent pawn'],
+  ['4k3/8/8/8/8/8/8/4K1N1 b - - 0 1', true, 'lone knight against bare king'],
+  ['4k2q/8/8/8/8/8/8/4K1N1 b - - 0 1', true, 'an enemy queen cannot help a lone knight mate'],
+  ['4k3/8/8/8/8/8/8/4KNN1 b - - 0 1', false, 'two knights can mate although they cannot force it'],
+  ['2b1k3/8/8/8/8/8/8/4KB2 b - - 0 1', true, 'only bishops on the same square color'],
+  ['2b1k3/8/8/8/8/8/8/2B1K3 b - - 0 1', false, 'opposite bishops can help create mate'],
+  ['4k3/8/8/8/8/8/8/2B1KB2 b - - 0 1', false, 'opposite bishops can mate a bare king'],
+  ['4k3/8/8/8/8/8/6B1/4KB2 b - - 0 1', true, 'multiple promoted bishops on one square color'],
+  ['4k2r/8/8/8/8/8/8/4KB2 b - - 0 1', true, 'an enemy rook cannot help a lone bishop mate'],
+]) {
+  // Test the same material rule for either prospective winner, via both timeout entry paths.
+  for (const mirror of [false, true]) {
+    const position = fromFEN(fenText);
+    if (mirror) { position.board = [...position.board].map(p => p === '.' ? p : p === p.toLowerCase() ? p.toUpperCase() : p.toLowerCase()).join(''); position.turn = 'w'; }
+    for (const lateMove of [false, true]) {
+      const s = game(); Object.assign(s, position); s.clock.left = { w: 1, b: 1 }; s.clock.since = Date.now() - 100;
+      const loser = s.players.find(p => p.color === s.turn), winner = s.players.find(p => p !== loser);
+      const m = legal(position)[0]; assert.ok(m, 'fixture has a legal move');
+      chess.act(s, loser.id, lateMove ? { type: 'move', from: m.from, to: m.to, promo: m.promo } : { type: 'flag' });
+      assert.equal(s.result === '½-½', draw, why); assert.deepEqual(s.winners, draw ? [] : [winner.id], why);
+    }
+  }
+}
+console.log('Chess timeout material regressions passed (bishop blockers, knights, both colors and timeout paths).');
+

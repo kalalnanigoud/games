@@ -29,11 +29,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 
   <link rel="stylesheet" href="css/style.css" />
-  <!-- Multiplayer library, with a second CDN in case the first one is down. -->
-  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-  <script>
-    if (typeof Peer === 'undefined') document.write('<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"><\/script>');
-  </script>
+  <!-- Optional multiplayer loads on request; solo play never waits for a CDN. -->
 </head>
 <body>
   <header id="topbar">

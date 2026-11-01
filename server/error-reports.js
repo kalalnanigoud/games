@@ -40,6 +40,22 @@ function sameKey(a, b) {
   return diff === 0;
 }
 
+// Keep the deployable Worker self-contained, and stop oversized streams early.
+async function boundedText(request, limit) {
+  if (Number(request.headers.get('content-length')) > limit) { await request.body?.cancel(); return null; }
+  if (!request.body) return '';
+  const reader = request.body.getReader(), decoder = new TextDecoder();
+  let size = 0, text = '';
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return text + decoder.decode();
+      if ((size += value.byteLength) > limit) { await reader.cancel(); return null; }
+      text += decoder.decode(value, { stream: true });
+    }
+  } finally { reader.releaseLock(); }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -47,8 +63,8 @@ export default {
     if (!env.DB) return new Response('no database attached (binding DB)', { status: 503, headers: cors });
 
     if (request.method === 'POST' && url.pathname === '/report') {
-      const body = await request.text();
-      if (body.length > 8000) return new Response('too large', { status: 413, headers: cors });
+      const body = await boundedText(request, 8000);
+      if (body === null) return new Response('too large', { status: 413, headers: cors });
       let r;
       try { r = JSON.parse(body); } catch { return new Response('bad report', { status: 400, headers: cors }); }
       if (!r || typeof r !== 'object' || Array.isArray(r)) return new Response('bad report', { status: 400, headers: cors });

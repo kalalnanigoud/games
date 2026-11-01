@@ -4,6 +4,7 @@
 // voice chat membership, tournaments, connection pings, and handing the room to a backup host.
 
 import CONFIG from './config.js';
+import { tabStorage } from './storage.js';
 import { toast, randomCode, uid, sha256hex } from './util.js';
 import { createVoice } from './voice.js';
 import { createTour, currentMatch, recordResult } from './tour.js';
@@ -41,7 +42,7 @@ export function resume(session) {
   adoptToken(session.token);
   if (session.secret) {
     S.secret = session.secret;
-    sessionStorage.setItem('gn-secret', S.secret);
+    tabStorage.setItem('gn-secret', S.secret);
   }
   if (session.role === 'client') joinRoom(session.code);
   else if (session.role === 'host') hostRoom(session.gameId, session);
@@ -935,6 +936,6 @@ export function toggleWatch(on) {
 
 export function requireMultiplayer() {
   if (typeof Peer !== 'undefined') return true;
-  toast('Online play is unavailable. Check your connection and reload, or choose One device.', 'info');
+  toast('Online play is unavailable. Try Host or Join again, or choose solo play.', 'info');
   return false;
 }

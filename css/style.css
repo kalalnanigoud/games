@@ -444,9 +444,10 @@ body.in-game #topbar { display: none; }
 .gh-tourchip { color: var(--gold); border-color: rgba(255, 207, 92, .35); background: rgba(255, 207, 92, .08); max-width: 240px; }
 .gh-tourchip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The menu: a dropdown under the bar on wide screens, a bottom sheet on phones (below). */
-.gh-sheet { position: absolute; right: 0; top: calc(100% + 6px); z-index: 40; }
-.gh-scrim { display: none; }
+.gh-sheet { position: fixed; inset: 0; z-index: 160; }
+.gh-scrim { position: absolute; inset: 0; }
 .gh-menu {
+  position: absolute; top: var(--gh-top, 64px); right: var(--gh-right, 12px);
   width: min(320px, calc(100vw - 24px)); max-height: calc(100vh - 120px); max-height: calc(100dvh - 120px); overflow-y: auto; overscroll-behavior: contain;
   padding: 8px; display: flex; flex-direction: column; gap: 4px; border-radius: 18px;
   background: #18234b; border: 1px solid var(--line-2); box-shadow: var(--shadow-lg);
@@ -537,7 +538,7 @@ body.in-game #topbar { display: none; }
   .gh-scrim { display: block; position: absolute; inset: 0; background: rgba(4, 7, 20, .66); }
   .gh-sheet.anim .gh-scrim { animation: fadein .2s ease; }
   .gh-menu {
-    position: absolute; left: 0; right: 0; bottom: 0; width: auto; border-radius: 24px 24px 0 0; border-bottom: 0; gap: 2px;
+    position: absolute; top: auto; left: 0; right: 0; bottom: 0; width: auto; border-radius: 24px 24px 0 0; border-bottom: 0; gap: 2px;
     max-height: calc(100vh - 40px); max-height: calc(100dvh - 40px - env(safe-area-inset-top));
     padding: 14px 12px max(14px, calc(8px + env(safe-area-inset-bottom)));
   }

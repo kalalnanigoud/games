@@ -23,7 +23,7 @@ const context = { CATALOG: GAMES, loaders, VERSION, FILES, CONFIG, uid, randomCo
 vm.createContext(context);
 // The real room state and networking modules, with the screens replaced by no-ops.
 const read = (file) => fs.readFileSync(new URL('../js/' + file, import.meta.url), 'utf8').replace(/\r\n/g, '\n').replace(/^import .*;\n/gm, '').replace(/^export \{[^}]*\};\n/gm, '').replace(/^export /gm, '');
-vm.runInContext(read('state.js') + '\n' + read('net.js') + `
+vm.runInContext(read('storage.js') + '\n' + read('state.js') + '\n' + read('net.js') + `
 function render() {}
 function renderTopbar() {}
 function paintNet() {}

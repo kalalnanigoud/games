@@ -1,6 +1,8 @@
 // Screens: home, lobby, game, how-to-play guides and the top bar.
 
 import { esc, toast, uid } from './util.js';
+import { deviceStorage, tabStorage } from './storage.js';
+import { loadMultiplayer } from './multiplayer.js';
 import { snapshot, flip, playFx, changed, confetti, wake, settleLoops, morph } from './fx.js';
 import { sound, isMuted, setMuted } from './sound.js';
 import { icon } from './icons.js';
@@ -29,7 +31,7 @@ const loader = (text, g) => `<div class="loader">${g?.cover ? `<div class="loade
 // Each game supplies howTo = { goal, turn: [[icon, title, text]], tips: [text] }.
 // The guide lives outside #app so game redraws never close it.
 
-export const seenHelp = (id) => localStorage.getItem('gn-help-' + id) === '1';
+export const seenHelp = (id) => deviceStorage.getItem('gn-help-' + id) === '1';
 export const helpBtn = (id, cls = '') =>
   getGame(id).howTo ? `<button class="help-btn ${cls} ${seenHelp(id) ? '' : 'new'}" data-help="${id}" title="How to play" aria-label="How to play">${icon('help')}</button>` : '';
 
@@ -37,7 +39,7 @@ export function showHelp(id, opener = document.activeElement) {
   const g = getGame(id);
   const h = g.howTo;
   if (!h) return;
-  localStorage.setItem('gn-help-' + id, '1');
+  deviceStorage.setItem('gn-help-' + id, '1');
   document.querySelectorAll('.help-btn.new').forEach((b) => b.dataset.help === id && b.classList.remove('new'));
   closeHelp();
   const el = document.createElement('div');
@@ -79,7 +81,7 @@ document.addEventListener('click', (e) => {
 
 let lastScreenKey = '';
 export function render() {
-  if (S.screen !== 'game') menuOpen = false;
+  if (S.screen !== 'game') closeMenu();
   if (S.screen !== 'lobby') closePicker();
   renderTopbar();
   renderUpdateBar();
@@ -235,6 +237,19 @@ async function showContinue(btn, go) {
   } catch { /* offline or not signed in: no Continue */ }
 }
 
+let onlineRequest = 0;
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#quickBtn, #continueBtn, #resumeBtn, #joinBtn, #hostTourBtn, [data-local], [data-host], [data-quick]')) onlineRequest++;
+}, true);
+export async function onlineAction(action) {
+  const request = ++onlineRequest;
+  if (typeof globalThis.Peer !== 'function') toast('Loading online play… Solo play is ready now.', 'info');
+  const ready = await loadMultiplayer();
+  if (request !== onlineRequest || S.role) return;
+  if (ready) action();
+  else toast('Could not load online play. Try Host or Join again, or choose solo play.', 'info');
+}
+
 export function renderHome() {
   S.lobbyMode = 'game';
   const session = loadSession();
@@ -279,8 +294,8 @@ export function renderHome() {
   const nameIn = app.querySelector('#nameIn');
   const storeName = () => {
     S.name = nameIn.value.trim().slice(0, 20);
-    localStorage.setItem('gn-name', S.name);
-    sessionStorage.setItem('gn-name', S.name);
+    deviceStorage.setItem('gn-name', S.name);
+    tabStorage.setItem('gn-name', S.name);
   };
   const needName = () => {
     storeName();
@@ -293,7 +308,7 @@ export function renderHome() {
     if (!needName()) return;
     const code = codeIn.value.trim().toUpperCase();
     if (code.length < 4) return toast('Enter the room code from your friend.');
-    joinRoom(code);
+    onlineAction(() => joinRoom(code));
   };
   app.querySelector('#joinBtn').onclick = doJoin;
   const quickSel = app.querySelector('#quickGame');
@@ -301,7 +316,7 @@ export function renderHome() {
   quickSel.onchange = () => setQuickChoice(quickSel.value);
   app.querySelector('#quickBtn').onclick = () => { S.name = nameIn.value.trim().slice(0, 20); quickPlay(quickSel.value); };
   showContinue(app.querySelector('#continueBtn'), () => { S.name = nameIn.value.trim().slice(0, 20); quickPlay('island', { resumeSave: true }); });
-  app.querySelector('#hostTourBtn').onclick = () => { if (!needName()) return; hostRoom(GAMES[0].id); S.lobbyMode = 'tour'; broadcast(); };
+  app.querySelector('#hostTourBtn').onclick = () => { if (!needName()) return; onlineAction(() => { hostRoom(GAMES[0].id); S.lobbyMode = 'tour'; broadcast(); }); };
   // Never return a value from a key handler: returning false cancels the key (no typing on iPhone).
   codeIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') doJoin(); });
   // Keep the code tidy as people type: uppercase letters only.
@@ -340,7 +355,7 @@ export function renderHome() {
       if (favorites().includes(id)) sound('chime');
       (results.querySelector(`[data-favorite="${id}"]`) || app.querySelector('[data-filter="collection"]')).focus({ preventScroll: true });
     }
-    if (b.dataset.host && needName()) hostRoom(b.dataset.host);
+    if (b.dataset.host && needName()) onlineAction(() => hostRoom(b.dataset.host));
     if (b.dataset.local) { S.name = nameIn.value.trim(); localRoom(b.dataset.local); }
     if (b.dataset.quick) { S.name = nameIn.value.trim().slice(0, 20); quickPlay(b.dataset.quick, { mode: b.dataset.mode }); }
   });
@@ -348,7 +363,7 @@ export function renderHome() {
   if (session) {
     app.querySelector('#resumeBtn').onclick = () => {
       if (!needName()) return;
-      resume(session);
+      if (session.role === 'local') resume(session); else onlineAction(() => resume(session));
     };
     app.querySelector('#forgetBtn').onclick = () => { clearSession(); render(); };
   }
@@ -696,7 +711,7 @@ function menuBody() {
     `<hr><button id="leaveBtn" class="gh-leave">${icon('logout')}${S.role === 'local' ? 'Leave this game' : 'Leave the room'}</button>`,
   ].join('');
 }
-const menuMarkup = (anim) => `<div class="gh-sheet ${anim ? 'anim' : ''}"><div class="gh-scrim"></div><div class="gh-menu" role="menu" aria-label="Game menu">${menuBody()}</div></div>`;
+const menuMarkup = () => `<div class="gh-scrim"></div><div class="gh-menu" role="dialog" aria-modal="true" aria-label="Game menu">${menuBody()}</div>`;
 function refreshMenu() {
   const m = document.querySelector('.gh-menu');
   if (!m) return;
@@ -712,14 +727,21 @@ function openMenu() {
   if (!head || menuOpen) return;
   menuOpen = true;
   document.getElementById('ghMenuBtn')?.setAttribute('aria-expanded', 'true');
-  head.insertAdjacentHTML('beforeend', menuMarkup(true));
-  head.querySelector('.gh-menu button, .gh-menu select')?.focus({ preventScroll: true });
+  const el = document.createElement('div');
+  el.className = 'gh-sheet anim';
+  el.innerHTML = menuMarkup();
+  const rect = document.getElementById('ghMenuBtn').getBoundingClientRect();
+  el.style.setProperty('--gh-top', (rect.bottom + 6) + 'px');
+  el.style.setProperty('--gh-right', Math.max(12, innerWidth - rect.right) + 'px');
+  el.onclick = head.onclick;
+  el.onchange = head.onchange;
+  openModal(el, '.gh-menu button, .gh-menu select');
 }
 function closeMenu() {
   if (!menuOpen) return;
   const hadFocus = !!document.activeElement?.closest('.gh-menu');
   menuOpen = false;
-  document.querySelector('.gh-sheet')?.remove();
+  closeModal(document.querySelector('.gh-sheet'));
   document.getElementById('ghMenuBtn')?.setAttribute('aria-expanded', 'false');
   if (hadFocus) document.getElementById('ghMenuBtn')?.focus({ preventScroll: true });
 }
@@ -788,8 +810,8 @@ export function renderGame() {
       ${!isHost && S.view.over && !S.tour && !isWatching(myId()) ? `<button class="small" id="askRematch">${icon('rematch')}Ask for a rematch</button>` : ''}
       <span class="gh-voice" id="ghVoice">${voiceHTML()}</span>
       ${helpBtn(g.id)}
-      <button class="icon-btn" id="ghMenuBtn" aria-label="Game menu" title="Game menu" aria-haspopup="menu" aria-expanded="${menuOpen}">${icon('more')}</button>
-      ${menuOpen ? menuMarkup(false) : ''}`;
+      <button class="icon-btn" id="ghMenuBtn" aria-label="Game menu" title="Game menu" aria-haspopup="dialog" aria-expanded="${menuOpen}">${icon('more')}</button>
+`;
   // While the same game is on screen, its area (#gamebox) stays put and the bar is updated in place,
   // so a game that redraws only what changed (morph) isn't rebuilt from scratch by the platform.
   const keep = app.querySelector('#gamebox')?.dataset.game === g.id && app.querySelector('.game-head');
@@ -838,7 +860,7 @@ export function renderGame() {
   // CSS animations start a frame after insertion; then pause new loops if the player is idle.
   requestAnimationFrame(settleLoops);
   const headEl = app.querySelector('.game-head');
-  if (menuFocus) headEl.querySelector(`.gh-menu #${CSS.escape(menuFocus)}`)?.focus({ preventScroll: true });
+  if (menuFocus) document.querySelector(`.gh-menu #${CSS.escape(menuFocus)}`)?.focus({ preventScroll: true });
   // The bar is kept between updates, so its handlers are properties (set, not stacked, each render).
   headEl.onchange = (e) => {
     if (e.target.id === 'viewAs') { S.viewAs = e.target.value; closeMenu(); saveSession(); refreshLocalView(); render(); }

@@ -29,7 +29,8 @@ const context = {
 };
 vm.createContext(context);
 const source=fs.readFileSync(new URL('../js/state.js',import.meta.url),'utf8').replace(/\r\n/g,'\n').replace(/^import .*;\n/gm,'').replace(/^export \{.*\};\n/gm,'').replace(/^export /gm,'');
-vm.runInContext(source+'\nglobalThis.test={S,saveSession,queueSessionSave,flushSessionSave,clearSession};',context);
+const safeStorage=fs.readFileSync(new URL('../js/storage.js',import.meta.url),'utf8').replace(/^export /gm,'');
+vm.runInContext(safeStorage+'\n'+source+'\nglobalThis.test={S,saveSession,queueSessionSave,flushSessionSave,clearSession};',context);
 const t=context.test;
 t.S.role='local'; t.S.game={strokes:Array.from({length:500},(_,i)=>({color:'red',points:Array(40).fill(i)}))};
 context.localStorage.writes=0;

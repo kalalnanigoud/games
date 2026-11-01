@@ -21,7 +21,7 @@ function mount(box, ctx, level) {
   const clear = () => { keys.clear(); touches.clear(); };
   const pause = () => { if (!race.result) race.paused = !race.paused; clear(); };
   const key = e => {
-    if (!root.isConnected || e.target?.matches('input,textarea,select') || document.querySelector('.modal-bg')) { if (e.type === 'keyup') keys.delete(e.code); return; }
+    if (!root.isConnected || e.target?.matches('input,textarea,select') || document.querySelector('.modal-bg, .gh-sheet')) { if (e.type === 'keyup') keys.delete(e.code); return; }
     if (!['KeyA','KeyD','ArrowLeft','ArrowRight','ArrowDown','KeyS','Space','KeyP'].includes(e.code)) return;
     if (['Space'].includes(e.code) && e.target?.closest('button')) return;
     e.preventDefault();
@@ -30,6 +30,8 @@ function mount(box, ctx, level) {
   };
   const blur = () => { clear(); if (!race.result) race.paused = true; };
   const visibility = () => { if (document.hidden) blur(); };
+  const suspend = () => clear();
+  document.addEventListener('gn-input-suspend', suspend);
   root.querySelectorAll('[data-drive]').forEach(b => {
     b.onpointerdown = e => { if (!canDrive) return; e.preventDefault(); b.setPointerCapture(e.pointerId); touches.set(e.pointerId, b.dataset.drive); };
     b.onpointerup = b.onpointercancel = b.onlostpointercapture = e => touches.delete(e.pointerId);
@@ -45,7 +47,7 @@ function mount(box, ctx, level) {
   function loop(now) {
     if (!root.isConnected) return stop();
     const dt = Math.min(0.05, (now - (last || now)) / 1000); last = now;
-    const overlay = !!document.querySelector('.modal-bg');
+    const overlay = !!document.querySelector('.modal-bg, .gh-sheet');
     if (overlay) clear();
     if (canDrive && !overlay) race.step(dt, { steer: Number(keys.has('KeyD') || keys.has('ArrowRight') || active('right')) - Number(keys.has('KeyA') || keys.has('ArrowLeft') || active('left')), brake: keys.has('ArrowDown') || keys.has('KeyS') || active('brake'), boost: keys.has('Space') || active('boost') });
     draw(g, race);
@@ -57,7 +59,7 @@ function mount(box, ctx, level) {
     root.querySelector('[data-pause]').textContent = race.paused ? 'Resume' : 'Pause';
     frame = requestAnimationFrame(loop);
   }
-  stop = () => { cancelAnimationFrame(frame); clear(); removeEventListener('keydown', key); removeEventListener('keyup', key); removeEventListener('blur', blur); document.removeEventListener('visibilitychange', visibility); mounted = null; };
+  stop = () => { cancelAnimationFrame(frame); clear(); document.removeEventListener('gn-input-suspend', suspend); removeEventListener('keydown', key); removeEventListener('keyup', key); removeEventListener('blur', blur); document.removeEventListener('visibilitychange', visibility); mounted = null; };
   if (ctx.live && canDrive) frame = requestAnimationFrame(loop); else draw(g, race);
 }
 

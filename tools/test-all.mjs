@@ -20,6 +20,7 @@ const suites = [
   { name: 'rally-ci', what: 'Pocket Rally: solo driving, touch controls, pause and retry in both engines', file: 'tools/rally-ci.mjs' },
   { name: 'arena-ci', what: 'Arena Rush: lobby option, timer, score, no saving', file: 'tools/arena-ci.mjs' },
   { name: 'onboarding-ci', what: 'practice, samples, controls, touch layouts', file: 'tools/onboarding-ci.mjs' },
+  { name: 'startup-ci', what: 'denied storage reads/writes/getters, solo boot without PeerJS, delayed online cancellation, CDN fallback/failure/retry, touch teardown', file: 'tools/startup-ci.mjs' },
   { name: 'fx-toggle', what: 'Lower effects button in the Guide tab, phone and desktop', file: 'tools/fx-toggle-shot.mjs' },
   { name: 'island-faults', what: `slow/failed/cancelled saves, dropped network, Worker and audio failures, ${web}`, file: 'tools/island-faults.mjs' },
   ...(args.includes('--perf') ? [{ name: 'perf-island', what: 'frame time, heap and wire bytes under 4x CPU throttling', file: 'tools/perf-island.mjs' }] : []),

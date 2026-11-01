@@ -32,6 +32,26 @@ const SIGN_INS_PER_MINUTE = 12; // sign-ins and new accounts per address per min
 const SESSION_MS = 365 * 24 * 3600 * 1000;
 const DEFAULT_ORIGINS = 'https://kalalnanigoud.github.io';
 
+// Each Worker stays self-contained for the dashboard/deploy script. Enforce byte
+// limits while streaming, before buffering an arbitrarily large request.
+async function boundedText(request, limit) {
+  if (Number(request.headers.get('content-length')) > limit) {
+    await request.body?.cancel();
+    return null;
+  }
+  if (!request.body) return '';
+  const reader = request.body.getReader(), decoder = new TextDecoder();
+  let size = 0, text = '';
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return text + decoder.decode();
+      if ((size += value.byteLength) > limit) { await reader.cancel(); return null; }
+      text += decoder.decode(value, { stream: true });
+    }
+  } finally { reader.releaseLock(); }
+}
+
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS explorers (id TEXT PRIMARY KEY, rev INTEGER NOT NULL, data TEXT NOT NULL, saved_at INTEGER NOT NULL, created_at INTEGER NOT NULL, prev_data TEXT, prev_rev INTEGER)`,
   `CREATE TABLE IF NOT EXISTS accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, display TEXT NOT NULL, salt TEXT NOT NULL, pin_hash TEXT NOT NULL, fails INTEGER NOT NULL DEFAULT 0, locked_until INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, rec_hash TEXT)`,
@@ -127,14 +147,17 @@ export default {
     if (!env.DB) return fail(503, 'setup', 'The save service has no database attached yet (binding DB).');
     const DB = env.DB;
     const readBody = async (max = 4096) => {
-      const text = await request.text();
-      if (text.length > max) return null;
+      const text = await boundedText(request, max);
+      if (text === null) return null;
       try { const v = JSON.parse(text); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; }
     };
-    const newSession = async (accountId) => {
+    // Salt is already a random credential generation: recovery rotates it.
+    // The conditional INSERT closes the gap between checking a PIN and minting
+    // its session without adding a schema migration or invalidating old sessions.
+    const newSession = async (accountId, salt) => {
       const token = 's1.' + randomHex(32);
-      await DB.prepare('INSERT INTO sessions (token_hash, account_id, expires_at) VALUES (?, ?, ?)').bind(await sha256hex(token), accountId, now + SESSION_MS).run();
-      return token;
+      const r = await DB.prepare('INSERT INTO sessions (token_hash, account_id, expires_at) SELECT ?, id, ? FROM accounts WHERE id = ? AND salt = ?').bind(await sha256hex(token), now + SESSION_MS, accountId, salt).run();
+      return r.meta?.changes ? token : null;
     };
     // Each try (a PIN or a recovery code) is counted before it is checked, in one statement that also starts
     // a pause on every fifth miss: tries sent all at once can't slip past the limit.
@@ -158,7 +181,7 @@ export default {
       if (session) {
         const tokenHash = await sha256hex(session);
         const row = await withTables(env, () => DB.prepare('SELECT s.account_id AS id, a.display AS name FROM sessions s JOIN accounts a ON a.id = s.account_id WHERE s.token_hash = ? AND s.expires_at > ?').bind(tokenHash, now).first());
-        return row ? { id: 'a:' + row.id, account: row.id, name: row.name } : null;
+        return row ? { id: 'a:' + row.id, account: row.id, name: row.name, tokenHash } : null;
       }
       const legacy = /^Bearer ([a-f0-9]{64})$/.exec(auth)?.[1];
       return legacy ? { id: await sha256hex(legacy), legacy: true } : null;
@@ -177,7 +200,7 @@ export default {
         const row = await withTables(env, async () => DB.prepare('INSERT INTO accounts (name, display, salt, pin_hash, created_at, rec_hash) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO NOTHING RETURNING id')
           .bind(name.toLowerCase(), name, salt, await pinHash(env, salt, b.pin), now, await codeHash(env, salt, cleanCode(code))).first());
         if (!row) return fail(409, 'taken', 'That name is taken. Choose another, or sign in if it’s yours.');
-        return json(200, { token: await newSession(row.id), name, code, recovery: true });
+        return json(200, { token: await newSession(row.id, salt), name, code, recovery: true });
       }
 
       if (path === '/login' && method === 'POST') {
@@ -192,10 +215,12 @@ export default {
         const miss = await countTry(acct);
         if (miss.resp) return miss.resp;
         if (!same(await pinHash(env, acct.salt, b.pin), acct.pin_hash)) return miss.wrong('That name and PIN don’t match.');
-        await DB.prepare('UPDATE accounts SET fails = 0, locked_until = 0 WHERE id = ?').bind(acct.id).run();
+        await DB.prepare('UPDATE accounts SET fails = 0, locked_until = 0 WHERE id = ? AND salt = ?').bind(acct.id, acct.salt).run();
         await DB.prepare('DELETE FROM sessions WHERE account_id = ? AND expires_at <= ?').bind(acct.id, now).run();
         const rec = await withTables(env, () => DB.prepare('SELECT rec_hash IS NOT NULL AS has FROM accounts WHERE id = ?').bind(acct.id).first());
-        return json(200, { token: await newSession(acct.id), name: acct.display, recovery: !!rec?.has });
+        const token = await newSession(acct.id, acct.salt);
+        if (!token) return wrong();
+        return json(200, { token, name: acct.display, recovery: !!rec?.has });
       }
 
       if (path === '/recover' && method === 'POST') {
@@ -214,12 +239,17 @@ export default {
         const mine = await codeHash(env, acct.salt, code);
         if (!acct.rec_hash || !same(mine, acct.rec_hash)) return miss.wrong('That name and recovery code don’t match.');
         const fresh = newCode(), salt = randomHex(16);
-        // The old code only works once: the update names it, so two tries at once can't both win.
-        const r = await DB.prepare('UPDATE accounts SET salt = ?, pin_hash = ?, rec_hash = ?, fails = 0, locked_until = 0 WHERE id = ? AND rec_hash = ?')
-          .bind(salt, await pinHash(env, salt, b.newPin), await codeHash(env, salt, cleanCode(fresh)), acct.id, acct.rec_hash).run();
+        // Rotate credentials, revoke sessions and issue the replacement atomically.
+        // Later statements only act if this request installed its unique salt.
+        const token = 's1.' + randomHex(32);
+        const [r] = await DB.batch([
+          DB.prepare('UPDATE accounts SET salt = ?, pin_hash = ?, rec_hash = ?, fails = 0, locked_until = 0 WHERE id = ? AND salt = ? AND rec_hash = ?')
+            .bind(salt, await pinHash(env, salt, b.newPin), await codeHash(env, salt, cleanCode(fresh)), acct.id, acct.salt, acct.rec_hash),
+          DB.prepare('DELETE FROM sessions WHERE account_id = ? AND EXISTS (SELECT 1 FROM accounts WHERE id = ? AND salt = ?)').bind(acct.id, acct.id, salt),
+          DB.prepare('INSERT INTO sessions (token_hash, account_id, expires_at) SELECT ?, id, ? FROM accounts WHERE id = ? AND salt = ?').bind(await sha256hex(token), now + SESSION_MS, acct.id, salt),
+        ]);
         if (!r.meta?.changes) return wrong();
-        await DB.prepare('DELETE FROM sessions WHERE account_id = ?').bind(acct.id).run();
-        return json(200, { token: await newSession(acct.id), name: acct.display, code: fresh, recovery: true });
+        return json(200, { token, name: acct.display, code: fresh, recovery: true });
       }
 
       if (path === '/session' && method === 'DELETE') {
@@ -238,7 +268,9 @@ export default {
         const acct = await DB.prepare('SELECT salt FROM accounts WHERE id = ?').bind(who.account).first();
         if (!acct) return fail(401, 'signin', 'Sign in first.');
         const code = newCode();
-        await withTables(env, async () => DB.prepare('UPDATE accounts SET rec_hash = ? WHERE id = ?').bind(await codeHash(env, acct.salt, cleanCode(code)), who.account).run());
+        const r = await withTables(env, async () => DB.prepare('UPDATE accounts SET rec_hash = ? WHERE id = ? AND salt = ? AND EXISTS (SELECT 1 FROM sessions WHERE token_hash = ? AND account_id = ? AND expires_at > ?)')
+          .bind(await codeHash(env, acct.salt, cleanCode(code)), who.account, acct.salt, who.tokenHash, who.account, now).run());
+        if (!r.meta?.changes) return fail(401, 'signin', 'Your account changed during this request. Sign in again.');
         return json(200, { code, recovery: true });
       }
 
@@ -280,14 +312,14 @@ export default {
       }
 
       if (method === 'PUT') {
-        const body = await request.text();
-        if (body.length > MAX_SAVE + 1024) return fail(413, 'too-large', 'This save is too large to store.');
+        const body = await boundedText(request, MAX_SAVE + 1024);
+        if (body === null) return fail(413, 'too-large', 'This save is too large to store.');
         let msg;
         try { msg = JSON.parse(body); } catch { return fail(400, 'bad-request', 'The save could not be read.'); }
         const data = msg?.data;
         if (!data || typeof data !== 'object' || Array.isArray(data) || data.kind !== 'island-explorer') return fail(400, 'bad-request', 'That is not an explorer save.');
         const text = JSON.stringify(data);
-        if (text.length > MAX_SAVE) return fail(413, 'too-large', 'This save is too large to store.');
+        if (new TextEncoder().encode(text).byteLength > MAX_SAVE) return fail(413, 'too-large', 'This save is too large to store.');
         const rev = Number.isSafeInteger(msg.rev) && msg.rev >= 0 ? msg.rev : -1;
         if (rev < 0) return fail(400, 'bad-request', 'The save has no revision.');
         const force = msg.force === true;

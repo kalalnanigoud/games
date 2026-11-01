@@ -3,7 +3,7 @@
 // (Save adventure, Load adventure, the last cloud save, a failed save's reason and Retry), and the rules
 // about when saving is safe. The game gives it a few hooks (see createSaveCentre) and paints its HTML.
 // Cloudflare is the only place an adventure is saved; nothing here ever saves by itself.
-import { cloudAvailable, loadExplorer, saveExplorer, account, signIn, signUp, signOut, recover, getRecoveryCode, claimLegacy, replaceWithLegacy, discardLegacy, CloudError } from './island-cloud.js';
+import { cloudAvailable, loadExplorer, saveExplorer, account, accountContext, accountMatches, requireAccount, explorerContext, signIn, signUp, signOut, recover, getRecoveryCode, claimLegacy, replaceWithLegacy, discardLegacy, CloudError } from './island-cloud.js';
 import { esc, toast } from '../js/util.js';
 
 export const fmtTime = (ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -18,7 +18,7 @@ export function createSaveCentre(o) {
   const s = {
     acct: { mode: 'signin', name: '', error: '', busy: false }, acctOpen: false, code: null,
     legacy: null, legacyLater: false,
-    rev: 0, name: '', fromCloud: false, replaceOk: false, conflict: null, save: null, cloudSavedAt: 0,
+    rev: 0, name: '', fromCloud: false, replaceOk: false, conflict: null, save: null, cloudSavedAt: 0, context: accountContext(),
   };
   const IC = o.icons;
   const refresh = () => { o.repaintOverlay(); o.paint(); };
@@ -115,13 +115,15 @@ export function createSaveCentre(o) {
   }
   // What the account holds now, so saving over a different explorer asks first.
   async function resync() {
-    try { const found = await loadExplorer(); s.rev = found?.rev || 0; s.name = found?.data?.name || ''; s.cloudSavedAt = found?.savedAt || 0; } catch { s.rev = 0; }
+    const context = accountContext(), found = await loadExplorer(context);
+    requireAccount(context);
+    s.context = context; s.rev = found?.rev || 0; s.name = found?.data?.name || ''; s.cloudSavedAt = found?.savedAt || 0;
     s.fromCloud = false; s.replaceOk = false; s.conflict = null;
   }
   async function afterSignIn() {
     await tryClaim();
-    if (!o.ready()) return o.pickerCheck();
     await resync();
+    if (!o.ready()) return o.pickerCheck();
     s.acctOpen = false; o.repaintOverlay(); o.paint();
   }
   async function legacyChoice(what) {
@@ -149,7 +151,8 @@ export function createSaveCentre(o) {
       <div class="isl-col"><button data-legacy="use" ${L.busy ? 'disabled' : ''}>${L.busy ? 'One moment…' : 'Use this browser’s older explorer instead'}</button><button data-legacy="keep" ${L.busy ? 'disabled' : ''}>Keep it for later</button><button class="bad" data-legacy="discard" ${L.busy ? 'disabled' : ''}>Discard the browser’s save</button></div></div>`;
   }
   async function signOutNow() {
-    await signOut();
+    // Local sign-out is immediate; a late revoke response must not clear a newer sign-in.
+    signOut();
     Object.assign(s, { rev: 0, name: '', fromCloud: false, replaceOk: false, conflict: null, legacy: null, legacyLater: false, cloudSavedAt: 0, save: null, code: null });
     o.signedOut();
     toast('Signed out.', 'info');
@@ -158,26 +161,41 @@ export function createSaveCentre(o) {
 
   /* ---------------- saving and loading ---------------- */
   // The explorer the account holds is now the one in the game (after a load or "Continue").
-  function adopt(found) { s.rev = found.rev; s.name = found.data?.name || ''; s.fromCloud = true; s.replaceOk = false; s.conflict = null; s.cloudSavedAt = found.savedAt || s.cloudSavedAt; }
+  function adopt(found) {
+    const context = explorerContext(found) || s.context;
+    if (!accountMatches(context)) return false;
+    s.context = context; s.rev = found.rev; s.name = found.data?.name || ''; s.fromCloud = true; s.replaceOk = false; s.conflict = null; s.cloudSavedAt = found.savedAt || s.cloudSavedAt;
+    return true;
+  }
   // Resolves to { ok, upToDate }. A failure keeps the session running and the last good save untouched.
   async function saveCloud(force = false, { leaving = false } = {}) {
-    if (s.save?.state === 'saving') return { ok: false };
+    if (s.save?.state === 'saving' || s.save?.state === 'loading') return { ok: false };
     // A new explorer replaces the cloud save only when the player says so.
-    if (!force && s.rev && !s.fromCloud && !s.replaceOk) { s.save = { state: 'replace' }; o.paint(); return { ok: false }; }
-    s.save = { state: 'saving' }; o.paint(); o.repaintOverlay();
+    if (accountMatches(s.context) && !force && s.rev && !s.fromCloud && !s.replaceOk) { s.save = { state: 'replace' }; o.paint(); return { ok: false }; }
+    const operation = s.save = { state: 'saving' }; o.paint(); o.repaintOverlay();
     try {
+      if (!accountMatches(s.context)) {
+        await resync();
+        s.save = { state: 'account' }; refresh();
+        return { ok: false };
+      }
+      const context = s.context;
       const { rec, snap } = await o.snapshot();
+      requireAccount(context);
       // rev is the revision this explorer came from or last saved; a newer one stored from elsewhere is a
       // conflict, which only an explicit Replace (force) overwrites.
-      const out = await saveExplorer(rec, s.rev, force);
-      s.rev = out.rev; s.fromCloud = true; s.name = rec.name; s.conflict = null; s.cloudSavedAt = out.savedAt || Date.now();
+      const out = await saveExplorer(rec, s.rev, force, context);
+      requireAccount(context);
       const upToDate = await o.confirmSaved(snap, leaving);
+      requireAccount(context);
+      s.rev = out.rev; s.fromCloud = true; s.name = rec.name; s.conflict = null; s.cloudSavedAt = out.savedAt || Date.now();
       s.save = null;
       toast('Adventure saved.', 'info');
       o.chime();
       refresh();
       return { ok: true, upToDate };
     } catch (e) {
+      if (s.save !== operation) return { ok: false };
       if (e.code === 'conflict') {
         // Keep the newer save's details apart: this explorer's own revision doesn't change, so saving again
         // without choosing Replace conflicts again rather than quietly overwriting.
@@ -192,36 +210,40 @@ export function createSaveCentre(o) {
   async function loadAdventure() {
     if (s.save?.state === 'saving' || s.save?.state === 'loading') return;
     if (!confirm('Load your saved adventure? It replaces your explorer here, and any progress that isn’t saved is lost.')) return;
-    s.save = { state: 'loading' }; o.paint();
+    const operation = s.save = { state: 'loading' }; o.paint();
     try {
-      const found = await loadExplorer();
+      const context = accountContext(), found = await loadExplorer(context);
+      requireAccount(context);
+      if (s.save !== operation) return;
       if (!found) throw new CloudError('none', 'There’s no saved adventure in your account yet.');
       s.save = null;
       o.loadRecord(found.data, found.savedAt, found);
-    } catch (e) { s.save = { state: 'error', retry: 'load', msg: e.message || 'Loading failed.' }; }
+    } catch (e) { if (s.save === operation) s.save = { state: 'error', retry: 'load', msg: e.message || 'Loading failed.' }; }
     o.paint();
   }
 
   function saveHTML() {
-    const me = account(), cloud = cloudAvailable(), v = s.save;
+    const me = account(), cloud = cloudAvailable(), changed = !accountMatches(s.context), v = changed && s.save?.state !== 'saving' ? null : s.save;
     if (!cloud) return `<p class="isl-save-state warn">Saving isn’t set up on this site, so nothing is kept when you leave.</p>
       <p class="small muted">Your adventure lasts only until you close or leave this game.</p>`;
     if (!me) return `<p class="isl-save-state warn">Nothing is kept without an account: when you leave, this adventure is gone.</p>
       ${accountRow()}
       <p class="small muted">Sign in, or create an account (a name and a 4-digit PIN), to save your adventure to the cloud and continue it on any device. Nothing is saved until you choose to.</p>`;
     const unsaved = o.isUnsaved();
-    const status = v?.state === 'saving' ? `<p class="isl-save-state">${IC.cloud}<span>Saving…</span></p>`
+    const status = changed && !v ? '<p class="isl-save-state warn">The explorer account changed. Review it before saving this explorer to that account.</p>'
+      : v?.state === 'saving' ? `<p class="isl-save-state">${IC.cloud}<span>Saving…</span></p>`
       : v?.state === 'loading' ? `<p class="isl-save-state">${IC.cloud}<span>Loading your adventure…</span></p>`
       : v?.state === 'error' ? `<p class="isl-save-state bad">${esc(v.msg)}</p><p class="small muted">${v.retry === 'load' ? 'Your explorer here is unchanged.' : 'Your game is still running, and your last saved adventure is unchanged.'}</p><div class="isl-row"><button class="primary" data-save="retry">Retry</button><button data-save="cancel">Dismiss</button></div>`
       : v?.state === 'conflict' ? `<p class="isl-save-state bad">${esc(v.msg)}</p><div class="isl-row"><button class="primary" data-save="force">Replace it with this explorer</button><button data-save="cancel">Cancel</button></div>`
       : v?.state === 'replace' ? `<p class="isl-save-state">Saving will replace <b>${esc(s.name || 'your saved explorer')}</b> in the cloud with ${esc(o.explorerName())}.</p><div class="isl-row"><button class="primary" data-save="replace">Replace and save</button><button data-save="cancel">Cancel</button></div>`
+      : v?.state === 'account' ? `<p class="isl-save-state warn">The account changed to <b>${esc(me.name)}</b>. Save this explorer to that account${s.rev ? `, replacing <b>${esc(s.name || 'its saved explorer')}</b>` : ''}?</p><div class="isl-row"><button class="primary" data-save="replace">Save to this account</button><button data-save="cancel">Cancel</button></div>`
       : unsaved ? `<p class="isl-save-state warn">${o.unsavedText()}</p>`
       : `<p class="isl-save-state good">${IC.check}<span>Everything is saved${o.lastSave() ? ` (${fmtTime(o.lastSave())})` : ''}.</span></p>`;
     return `${status}
-      <p class="small muted">${s.cloudSavedAt ? `Last cloud save: ${fmtTime(s.cloudSavedAt)} (${ago(s.cloudSavedAt)}).` : 'No cloud save yet.'}</p>
+      <p class="small muted">${changed ? 'Choose Save adventure to review the current account.' : s.cloudSavedAt ? `Last cloud save: ${fmtTime(s.cloudSavedAt)} (${ago(s.cloudSavedAt)}).` : 'No cloud save yet.'}</p>
       ${accountRow()}
       ${legacyHTML()}
-      ${!v || v.state === 'done' ? `<div class="isl-row"><button class="primary" data-save="cloud">${IC.cloud}Save adventure</button><button data-save="load" ${s.rev || s.cloudSavedAt ? '' : 'disabled'}>Load adventure</button></div>` : ''}
+      ${!v || v.state === 'done' ? `<div class="isl-row"><button class="primary" data-save="cloud">${IC.cloud}Save adventure</button><button data-save="load" ${changed || s.rev || s.cloudSavedAt ? '' : 'disabled'}>Load adventure</button></div>` : ''}
       <p class="small muted">Saves keep your explorer: level, creatures, items and story. Nothing is saved until you choose to. Your adventure is saved to your explorer account (a name and a 4-digit PIN), so you can continue on any device.</p>
       <p class="small muted">Load adventure replaces the explorer you’re playing with your last cloud save.</p>
       <p class="small muted">Friends save their own explorers from their own menus.</p>`;

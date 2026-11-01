@@ -1,7 +1,7 @@
 // A player's screen for Creature Island: their own explorer moves the moment they press (and is quietly
 // corrected by the host), everyone else glides between the host's updates, and the HUD, menus,
 // conversations and save choices sit around the world without covering it.
-import { TILE, TICK, SPECIES, ITEMS, GEAR, SHOP, SEATS, QUESTS, QUEST_ORDER, STARTERS, ABILITIES, NPCS, ELEMENTS, BOSSES, CATCH_HP, TEAM_MAX } from './island-data.js';
+import { TILE, TICK, SPECIES, ITEMS, GEAR, SHOP, SEATS, QUESTS, QUEST_ORDER, STARTERS, ABILITIES, NPCS, ELEMENTS, BOSSES, CATCH_HP, TEAM_MAX, RANCH_MAX } from './island-data.js';
 import { stepBody, newBody, BITS, objective, interactables } from './island-sim.js';
 import { island, zoneAt, areaName, TRACKS, G, W } from './island-map.js';
 import { createView, minimap, setEffects, effectsMode, effectsAreLow } from './island-view.js';
@@ -507,11 +507,11 @@ export function createClient(opts) {
         ${sells.length ? `<h4>Sell</h4><ul class="isl-list">${sells.map((k) => `<li><img alt="" src="${art.icon(k, 36)}"><span><b>${esc(ITEMS[k].name)} ×${me.inv[k]}</b><small>${ITEMS[k].sell} shells each</small></span><button class="small" data-sell="${k}">Sell one</button></li>`).join('')}</ul>` : ''}`;
     } else if (st.ui === 'ranch') {
       const mon = (m, where) => `<li><img alt="" src="${art.icon('sp:' + m.sp, 36)}"><span><b>${esc(SPECIES[m.sp].name)}</b><small>Lv ${m.lv} · ${ELEMENTS[SPECIES[m.sp].el].name}</small></span>${where === 'team'
-        ? `<button class="small" data-ranch="deposit" data-uid="${m.uid}" ${me.team.length <= 1 ? 'disabled' : ''}>Leave here</button>`
+        ? `<button class="small" data-ranch="deposit" data-uid="${m.uid}" ${me.team.length <= 1 || me.ranch.length >= RANCH_MAX ? 'disabled' : ''}>${me.ranch.length >= RANCH_MAX ? 'Ranch full' : 'Leave here'}</button>`
         : `<button class="small primary" data-ranch="withdraw" data-uid="${m.uid}" ${me.team.length >= TEAM_MAX ? 'disabled' : ''}>Take along</button><button class="small ghost" data-release="${m.uid}" title="Let it go back to the wild">Release</button>`}</li>`;
       box.innerHTML = `<div class="isl-ui-head"><b>Creature Ranch</b><span class="isl-shells">${me.team.length}/${TEAM_MAX} with you</span><button class="icon-btn isl-x" data-ui="close" aria-label="Close">${IC.close}</button></div>
         <h4>With you</h4><ul class="isl-list">${me.team.map((m) => mon(m, 'team')).join('')}</ul>
-        <h4>Resting at the ranch</h4>${me.ranch.length ? `<ul class="isl-list">${me.ranch.map((m) => mon(m, 'ranch')).join('')}</ul>` : '<p class="small muted">Creatures you befriend when your team is full come here.</p>'}`;
+        <h4>Resting at the ranch (${me.ranch.length}/${RANCH_MAX})</h4>${me.ranch.length ? `<ul class="isl-list">${me.ranch.map((m) => mon(m, 'ranch')).join('')}</ul>` : '<p class="small muted">Creatures you befriend when your team is full come here.</p>'}`;
     }
   }
 

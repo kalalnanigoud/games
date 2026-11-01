@@ -151,10 +151,22 @@ function perft(pos, depth) {
   return n;
 }
 const posKey = (pos) => `${pos.board} ${pos.turn} ${pos.castling} ${pos.ep}`;
-function insufficient(b) {
-  const rest = b.replace(/[.kK]/g, '');
-  return rest === '' || (rest.length === 1 && /[nbNB]/.test(rest));
+// Material that cannot possibly mate, including pieces the opponent could use as blockers.
+// This is a material test, not a general solver for locked/fortress positions.
+function insufficientFor(b, color) {
+  const own = [], enemy = [], bishops = [];
+  for (let sq = 0; sq < b.length; sq++) {
+    const piece = b[sq], kind = piece.toLowerCase();
+    if (piece === '.' || kind === 'k') continue;
+    (colorOf(piece) === color ? own : enemy).push(kind);
+    if (kind === 'b') bishops.push(((sq >> 3) + (sq & 7)) % 2);
+  }
+  if (!own.length) return true;
+  if (own.some((p) => 'pqr'.includes(p))) return false;
+  if (own.includes('n')) return own.length === 1 && enemy.every((p) => p === 'q');
+  return bishops.every((squareColor) => squareColor === bishops[0]) && !/[pPnN]/.test(b);
 }
+function insufficient(b) { return insufficientFor(b, 'w') && insufficientFor(b, 'b'); }
 const material = (b, c) => { let s = 0; for (const p of b) if (p !== '.') s += (colorOf(p) === c ? 1 : -1) * VAL[p.toLowerCase()]; return s; };
 
 // Rules helpers, exported for the test suite.
@@ -187,8 +199,7 @@ function makeClock(choice) {
 function timeUp(s, loser) {
   const winner = s.players.find((p) => p !== loser);
   s.clock.left[loser.color] = 0; s.clock.since = 0;
-  const army = s.board.split('').filter((p) => colorOf(p) === winner.color && p.toLowerCase() !== 'k');
-  if (!army.length || (army.length === 1 && /[nb]/i.test(army[0]))) return finish(s, null, `${loser.name} ran out of time, but ${winner.name} cannot checkmate. Draw.`);
+  if (insufficientFor(s.board, winner.color)) return finish(s, null, `${loser.name} ran out of time, but ${winner.name} cannot checkmate. Draw.`);
   return finish(s, winner, `${loser.name} ran out of time. ${winner.name} wins.`);
 }
 

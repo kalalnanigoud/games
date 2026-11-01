@@ -2,14 +2,16 @@
 // Usage: import { sound } from '../js/sound.js'; sound('gem');
 // Names: click, gem, coin, card, flip, place, build, dice, turn, bad, win, steal, shuffle, chime
 
+import { deviceStorage } from './storage.js';
+
 let ac = null;
 const browser = typeof window !== 'undefined';
-let muted = browser && localStorage.getItem('gn-muted') === '1';
+let muted = browser && deviceStorage.getItem('gn-muted') === '1';
 
 export const isMuted = () => muted;
 export function setMuted(m) {
   muted = m;
-  if (browser) localStorage.setItem('gn-muted', m ? '1' : '0');
+  if (browser) deviceStorage.setItem('gn-muted', m ? '1' : '0');
 }
 
 function audio() {

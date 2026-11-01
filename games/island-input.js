@@ -69,15 +69,23 @@ function readPad() {
 // so it doesn't also reach the world.
 export function createInput(hooks = {}) {
   const inp = { keys: new Set(), bits: 0, joy: null, touchSeen: false, padHeld: new Set(), padAt: {} };
-  const clear = () => { inp.keys.clear(); if (inp.joy) inp.joy.on = false; };
+  const resets = new Set(), cleanups = new Set();
+  const clear = () => inp.clear();
   listeners.add(clear);
   const onPadOn = () => { try { toast('Controller connected.', 'info'); } catch {} };
   addEventListener('gamepadconnected', onPadOn);
-  inp.clear = () => { inp.keys.clear(); inp.bits = 0; if (inp.joy) inp.joy.dx = inp.joy.dy = 0; };
+  inp.clear = () => { inp.keys.clear(); inp.bits = 0; if (inp.joy) { inp.joy.on = false; inp.joy.dx = inp.joy.dy = 0; } for (const reset of resets) reset(); };
+  inp.onClear = (fn) => resets.add(fn);
+  inp.onDestroy = (fn) => cleanups.add(fn);
+  const visibility = () => { if (document.hidden) clear(); };
+  addEventListener('blur', clear);
+  document.addEventListener('visibilitychange', visibility);
+  document.addEventListener('gn-input-suspend', clear);
   inp.release = (code) => { const a = actionOf(code); if (MOVES.has(a)) { inp.keys.delete(a); return true; } return false; };
-  inp.destroy = () => { listeners.delete(clear); removeEventListener('gamepadconnected', onPadOn); };
+  inp.destroy = () => { clear(); for (const cleanup of cleanups) cleanup(); resets.clear(); cleanups.clear(); listeners.delete(clear); removeEventListener('gamepadconnected', onPadOn); removeEventListener('blur', clear); document.removeEventListener('visibilitychange', visibility); document.removeEventListener('gn-input-suspend', clear); };
   // Where the explorer is headed, and what was pressed since the last look: [dx, dy, bits] (-100 to 100).
   inp.sample = () => {
+    if (document.hidden || document.querySelector('.modal-bg, .gh-sheet')) { clear(); return [0, 0, 0]; }
     let dx = 0, dy = 0;
     const pad = readPad(), now = performance.now();
     if (inp.joy?.on) { dx = inp.joy.dx; dy = inp.joy.dy; }
@@ -118,6 +126,7 @@ export const touchHTML = (IC) => `<div class="isl-stickzone"><div class="isl-sti
 export function bindTouch(inp, scope) {
   const q = (s) => scope.querySelector(s);
   const zone = q('.isl-stickzone'), stick = q('.isl-stick'), knob = stick.querySelector('i');
+  inp.onClear(() => { knob.style.transform = ''; stick.classList.remove('on'); });
   zone.addEventListener('pointerdown', (e) => {
     inp.touchSeen = true;
     const r = zone.getBoundingClientRect();
@@ -147,7 +156,8 @@ export function bindTouch(inp, scope) {
       if (repeat) { clearInterval(b._rep); b._rep = setInterval(() => (inp.bits |= bit), repeat); }
       if (navigator.userActivation?.hasBeenActive) try { navigator.vibrate?.(8); } catch {}
     });
-    const up = () => { b.classList.remove('down'); clearInterval(b._rep); };
+    const up = () => { b.classList.remove('down'); clearInterval(b._rep); b._rep = null; };
+    inp.onClear(up);
     b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('pointerleave', up);
   };
   press('.isl-attack', BITS.attack, 360);

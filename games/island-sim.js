@@ -91,8 +91,12 @@ export function validateExplorer(rec, name) {
   };
   const seen = new Set();
   const uniq = (m) => m && !seen.has(m.uid) && seen.add(m.uid);
-  ex.team = (Array.isArray(rec.team) ? rec.team : []).map(mon).filter(uniq).slice(0, TEAM_MAX);
-  ex.ranch = (Array.isArray(rec.ranch) ? rec.ranch : []).map(mon).filter(uniq).slice(0, RANCH_MAX);
+  ex.team = (Array.isArray(rec.team) ? rec.team : []).map(mon).filter(uniq);
+  ex.ranch = (Array.isArray(rec.ranch) ? rec.ranch : []).map(mon).filter(uniq);
+  // Older versions allowed depositing into a full ranch. Keep those creatures: a legitimate
+  // explorer can own up to 60 at the ranch plus 3 teammates, even when some moved into overflow.
+  // Unexpected larger collections are refused, never silently trimmed or written back.
+  if (ex.team.length > TEAM_MAX || ex.team.length + ex.ranch.length > RANCH_MAX + TEAM_MAX) throw new Error('This save contains too many creatures. Your original save has not been changed.');
   ex.active = num(rec.active, 0, Math.max(0, ex.team.length - 1), 0);
   const sp = (list) => [...new Set((Array.isArray(list) ? list : []).filter((s) => SPECIES[s]))];
   ex.dex = { seen: sp(rec.dex?.seen), caught: sp(rec.dex?.caught) };
@@ -413,6 +417,7 @@ export class World {
       return;
     }
     e.hp = Math.max(0, e.hp - dmg);
+    if (e.companion) { const owner = this.players.get(e.owner); if (owner) this.bump(owner); }
     this.event(e, ['hit', Math.round(e.x), Math.round(e.y - (e.type === 'b' ? 50 : 18)), dmg, mult > 1 ? 1 : mult < 1 ? -1 : 0, e.companion ? 'a' : 'e']);
     if (src.pid) { (e.hitBy ||= []).includes(src.pid) || e.hitBy.push(src.pid); }
     if (e.type === 'c' && !e.companion) {
@@ -703,7 +708,10 @@ export class World {
       if (!island().props.some((q) => q.use === 'ranch' && Math.hypot(q.x - p.body.x, q.y - p.body.y) < 140)) throw new Error('Visit the creature ranch in the village.');
       const ti = ex.team.findIndex((m) => m.uid === d.team), ri = ex.ranch.findIndex((m) => m.uid === d.ranch);
       if (d.op === 'swap' && ti >= 0 && ri >= 0) [ex.team[ti], ex.ranch[ri]] = [ex.ranch[ri], ex.team[ti]];
-      else if (d.op === 'deposit' && ti >= 0 && ex.team.length > 1) ex.ranch.push(...ex.team.splice(ti, 1));
+      else if (d.op === 'deposit' && ti >= 0 && ex.team.length > 1) {
+        if (ex.ranch.length >= RANCH_MAX) throw new Error('The ranch is full. Take a creature along or release one first.');
+        ex.ranch.push(...ex.team.splice(ti, 1));
+      }
       else if (d.op === 'withdraw' && ri >= 0 && ex.team.length < TEAM_MAX) ex.team.push(...ex.ranch.splice(ri, 1));
       else throw new Error(d.op === 'deposit' ? 'Keep at least one creature with you.' : 'That swap isn’t possible.');
       ex.active = clamp(ex.active, 0, ex.team.length - 1);
@@ -759,7 +767,9 @@ export class World {
     if (i < 0) return;
     ex.active = i;
     const m = ex.team[i];
-    const c = { id: this.id(), type: 'c', companion: true, owner: p.id, uid: m.uid, sp: m.sp, lv: m.lv, hp: m.hp, max: creatureMax(m.sp, m.lv), el: SPECIES[m.sp].el, r: SPECIES[m.sp].r, x: p.body.x - 24, y: p.body.y + 8, dir: 0, anim: 'idle', state: 'follow', atkCd: 0, t: 0, kx: 0, ky: 0 };
+    // The team record owns HP. Combat, healing abilities, berries, level-ups and parking
+    // all read/write that same value through the live companion, so switching cannot heal it.
+    const c = { id: this.id(), type: 'c', companion: true, owner: p.id, uid: m.uid, sp: m.sp, lv: m.lv, get hp() { return m.hp; }, set hp(value) { m.hp = value; }, max: creatureMax(m.sp, m.lv), el: SPECIES[m.sp].el, r: SPECIES[m.sp].r, x: p.body.x - 24, y: p.body.y + 8, dir: 0, anim: 'idle', state: 'follow', atkCd: 0, t: 0, kx: 0, ky: 0 };
     if (!fits(c.x, c.y, 8, this.open)) { c.x = p.body.x; c.y = p.body.y; }
     this.ents.set(c.id, c);
     p.comp = c.id;
@@ -772,9 +782,7 @@ export class World {
   }
   snapshot(p) {
     const ex = p.ex;
-    // Companion health lives on the creature while it's out.
-    const c = this.ents.get(p.comp);
-    const team = ex.team.map((m) => ({ ...m, hp: c && c.uid === m.uid ? Math.round(c.hp) : m.hp }));
+    const team = ex.team.map((m) => ({ ...m, hp: Math.round(m.hp) }));
     const b = p.body;
 
     return {
@@ -1255,7 +1263,8 @@ export class World {
   raidStep(ready) {
     const inV = ready.filter((p) => inVillage(p.body.x, p.body.y));
     if (!this.raid) {
-      const due = inV.filter((p) => p.ex.quests.defend === 1);
+      // A loaded/returning explorer may already be defending, but encounters are not saved.
+      const due = inV.filter((p) => p.ex.quests.defend === 1 || p.ex.quests.defend === 2);
       if (!due.length) return;
       this.raid = { wave: 0, left: [], gap: 3, quiet: 0 };
       for (const p of ready) if (p.ex.quests.defend === 1) { p.ex.quests.defend = 2; this.bump(p); }
@@ -1308,8 +1317,8 @@ export class World {
         e.hp = Math.round(e.max * 0.2);
       }
       if (q.lost === 2 && !this.ents.get(p.escort)) this.spawnEscort(p);
-      // Following the glowing tracks to their end startles a Lunahop.
-      if (q.tracks === 1 && dist(p.body, { x: LUNA_AT[0] * T, y: LUNA_AT[1] * T }) < 110 && ![...this.ents.values()].some((e) => e.quest === 'luna')) {
+      // Recreate a missing encounter after loading, a knockout, or another player's catch.
+      if ((q.tracks === 1 || q.tracks === 2) && dist(p.body, { x: LUNA_AT[0] * T, y: LUNA_AT[1] * T }) < 110 && ![...this.ents.values()].some((e) => e.quest === 'luna')) {
         q.tracks = 2;
         const e = this.creature('lunahop', 9, LUNA_AT[0] * T - 40, LUNA_AT[1] * T - 30, { quest: 'luna', home: [LUNA_AT[0] * T, LUNA_AT[1] * T - 30] });
         this.event(e, ['spawn', Math.round(e.x), Math.round(e.y), 3]);

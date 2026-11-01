@@ -2,6 +2,7 @@
 
 import { CATALOG, loaders, VERSION, FILES } from '../games/catalog.js';
 import { uid, reconnectSecret, sha256hex } from './util.js';
+import { deviceStorage, tabStorage } from './storage.js';
 
 export { VERSION, FILES };
 export const MAX_ROOM = 8; // seats at the table
@@ -30,10 +31,10 @@ export function loadGame(id) {
 
 export const S = {
   screen: 'home', // home | lobby | game
-  name: sessionStorage.getItem('gn-name') || localStorage.getItem('gn-name') || '',
+  name: tabStorage.getItem('gn-name') || deviceStorage.getItem('gn-name') || '',
   // Per-tab identity, so two tabs on one computer count as two players.
-  token: sessionStorage.getItem('gn-token') || uid(),
-  secret: sessionStorage.getItem('gn-secret') || reconnectSecret(),
+  token: tabStorage.getItem('gn-token') || uid(),
+  secret: tabStorage.getItem('gn-secret') || reconnectSecret(),
   credentials: [], // host-only [public player ID, SHA-256 of their private reconnect secret] pairs
   role: null, // host | client | local
   code: null,
@@ -84,13 +85,13 @@ export const seated = () => S.players.filter((p) => !p.watch);
 // How many one game seats. A game played by moving characters around (soloOnDevice) has one player per device.
 export const tableLimit = (g) => (S.role === 'local' && g?.soloOnDevice ? 1 : Math.min(MAX_ROOM, g?.maxPlayers ?? MAX_ROOM));
 export const isWatching = (id) => !!S.players.find((p) => p.id === id)?.watch;
-sessionStorage.setItem('gn-token', S.token);
-sessionStorage.setItem('gn-secret', S.secret);
+tabStorage.setItem('gn-token', S.token);
+tabStorage.setItem('gn-secret', S.secret);
 
 export function adoptToken(token) {
   if (!token) return;
   S.token = token;
-  sessionStorage.setItem('gn-token', token);
+  tabStorage.setItem('gn-token', token);
 }
 
 export const myId = () => (S.role === 'local' ? S.viewAs : S.token);
@@ -126,7 +127,7 @@ export function saveSession() {
   }
   data.version = 3;
   const json = JSON.stringify(data);
-  for (const storage of [sessionStorage, localStorage]) {
+  for (const storage of [tabStorage, deviceStorage]) {
     try { storage.setItem('gn-session', json); }
     catch (error) {
       // A full store must not prevent the move from being broadcast.
@@ -150,6 +151,6 @@ export const parse = (s) => {
     return v;
   } catch { return null; }
 };
-export const loadTabSession = () => parse(sessionStorage.getItem('gn-session'));
-export const loadSession = () => loadTabSession() || parse(localStorage.getItem('gn-session'));
-export const clearSession = () => { clearTimeout(saveTimer); saveTimer = null; sessionStorage.removeItem('gn-session'); localStorage.removeItem('gn-session'); };
+export const loadTabSession = () => parse(tabStorage.getItem('gn-session'));
+export const loadSession = () => loadTabSession() || parse(deviceStorage.getItem('gn-session'));
+export const clearSession = () => { clearTimeout(saveTimer); saveTimer = null; tabStorage.removeItem('gn-session'); deviceStorage.removeItem('gn-session'); };
