@@ -123,6 +123,7 @@ export class World {
     this.raid = null;
     this.bossDue = {};
     this.worldVer = 1;
+    this.arena = null; // Arena Rush (island-arena.js) attaches itself here
     this.lastW = new Map();
     island();
   }
@@ -197,6 +198,7 @@ export class World {
     this.t += TICK; this.tick++;
     for (const p of this.players.values()) if (p.ready) this.stepPlayer(p);
     for (const e of [...this.ents.values()]) this.stepEnt(e);
+    this.arena?.step();
     if (this.tick % 20 === 0) this.everySecond();
     const sendNow = this.tick % 2 === 0;
     for (const p of this.players.values()) if (p.ready && (sendNow || p.local)) this.sendFrame(p);
@@ -257,6 +259,7 @@ export class World {
     this.personal(p, ['warp', Math.round(x), Math.round(y)]);
   }
   respawn(p) {
+    if (this.arena) return this.arena.respawn(p);
     p.downT = 0; p.body.down = 0; p.hp = this.maxHp(p); p.iT = 2; this.chan(p, null);
     const v = villageSpot(p.seat);
     this.warp(p, v.x, v.y);
@@ -268,6 +271,7 @@ export class World {
   // Unsaved: progress since the last confirmed save, or standing somewhere else than where it was saved
   // (a reload would put the explorer back there). Walking a couple of steps doesn't count.
   unsaved(p) {
+    if (this.arena) return false;
     if (p.prog > p.savedProg || !p.savedLoc) return true;
     const b = this.placeOf(p);
     return areaOf(b.x) !== areaOf(p.savedLoc.x) || Math.hypot(b.x - p.savedLoc.x, b.y - p.savedLoc.y) > MOVED;
@@ -567,6 +571,7 @@ export class World {
   // ---- requests from the menus ----
   command(p, d) {
     const ex = p.ex, c = d.c;
+    if (this.arena?.command(p, d)) return;
     if (c === 'new' || c === 'load') {
       if (p.ready) throw new Error('Your explorer is already on the island.');
       const tag = typeof d.tag === 'string' ? d.tag.slice(0, 40) : '';
@@ -790,6 +795,7 @@ export class World {
     return e;
   }
   everySecond() {
+    if (this.arena) return this.arena.second();
     const ready = this.readyPlayers();
     for (const p of ready) { const u = this.unsaved(p); if (u !== p.wasUnsaved) { p.wasUnsaved = u; this.bump(p); this.worldVer++; } }
     this.refreshGates();
@@ -1335,6 +1341,7 @@ export class World {
     const boss = [...this.ents.values()].find((e) => e.type === 'b' && areaOf(e.x) === areaOf(p.body.x) && dist(e, p.body) < 1400);
     return {
       open: { ...this.open },
+      arena: this.arena ? this.arena.view() : null,
       roster: [...this.players.values()].map((o) => ({ id: o.id, name: o.name, seat: o.seat, ready: o.ready, connected: o.connected, lv: o.ex?.lv || 0, look: o.ex?.look || null, zone: o.zone, down: o.downT > 0, unsaved: o.ready && this.unsaved(o) })),
       boss: boss ? { kind: boss.kind } : null,
       raid: this.raid ? { wave: this.raid.wave, left: this.raid.left.length } : null,

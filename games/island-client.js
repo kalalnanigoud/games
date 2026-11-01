@@ -695,6 +695,7 @@ export function createClient(opts) {
 
   /* ---------------- start: continue, new or from a file ---------------- */
   async function checkCloud() {
+    if (opts.arena) return; // Arena Rush has no saved explorer
     if (!cloudAvailable() || !account()) { st.picker.state = 'choose'; st.picker.cloud = null; return paintOverlay(); }
     st.picker.state = 'checking'; st.picker.error = ''; paintOverlay();
     try {
@@ -859,6 +860,7 @@ export function createClient(opts) {
       <div class="isl-overlay" hidden></div>
     </div>`;
     root = box.querySelector('.isl-root');
+    opts.arena?.mount(root, st, cmd); // Arena Rush: timer, score and end card (island-arena.js)
     view = createView(root.querySelector('.isl-canvas'));
     layout();
     resizeObs = new ResizeObserver(() => layout());

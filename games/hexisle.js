@@ -29,6 +29,7 @@ const DEV = {
 };
 const BANK_START = 19;
 const WIN_VP = 10;
+const GOALS = ['10', '8', '6'];
 const pipsOf = (n) => (n ? 6 - Math.abs(7 - n) : 0);
 const rep = (x, n) => Array.from({ length: n }, () => x);
 const zeroRes = () => ({ lumber: 0, brick: 0, wool: 0, grain: 0, ore: 0 });
@@ -222,7 +223,7 @@ function checkWin(s) {
   if (s.over || s.phase === 'setup') return;
   const pid = curId(s);
   const vp = vpOf(s, pid);
-  if (vp >= WIN_VP) {
+  if (vp >= (s.goal || WIN_VP)) {
     s.over = true;
     s.phase = 'over';
     s.winners = [pid];
@@ -618,6 +619,7 @@ function setup(players, opts) {
     trade: null, tradeSeq: 0, longest: null, army: null, roadLen: {}, devSeq: 0, lastDev: null,
     log: [], fx: [], fxSeq: 0, over: false, winners: [],
     level: levelOf(opts), // computer difficulty, public: every view carries it to the bots
+    goal: GOALS.includes(String(opts?.goal)) ? +opts.goal : WIN_VP, // victory points that win: 10, or fewer for a shorter game
   };
   log(s, `Welcome to the Isle of Hexes! ${nameOf(s, order[0])} places the first settlement.`);
   return s;
@@ -869,7 +871,7 @@ function botReply(s, pid) {
   const res = s.ps[pid].res;
   if (!hasRes(res, tr.want)) return { type: 'reply', yes: false };
   const prop = curId(s);
-  if (vpOf(s, prop, false) >= WIN_VP - 2) return { type: 'reply', yes: false };
+  if (vpOf(s, prop, false) >= (s.goal || WIN_VP) - 2) return { type: 'reply', yes: false };
   const w = needWeights(s, pid);
   const after = { ...res };
   RES.forEach((r) => (after[r] += tr.give[r] - tr.want[r]));
@@ -2097,7 +2099,7 @@ function statusOf(v, me) {
       if (!mine) return [`${cn}'s turn`, v.trade ? 'A trade offer is on the table.' : ''];
       if (ui.mode) return [`Build a ${ui.mode}`, 'Tap a glowing spot, or Cancel.'];
       if (v.trade) return ['Your offer is on the table', 'Trade with a player who accepted, or cancel.'];
-      return ['Build, trade or end turn', `You have ${vpOf(v, me)} VP — first to ${WIN_VP} on their turn wins.`];
+      return ['Build, trade or end turn', `You have ${vpOf(v, me)} VP — first to ${v.goal || WIN_VP} on their turn wins.`];
   }
   return ['', ''];
 }
@@ -2406,7 +2408,7 @@ export default {
   minPlayers: 2,
   maxPlayers: 4,
   cover: COVER,
-  options: [levelOption()],
+  options: [{ id: 'goal', label: '🏆 Points to win', default: '10', choices: [['10', '10 points'], ['8', '8 points (shorter)'], ['6', '6 points (quick)']] }, levelOption()],
   setup,
   act(s, pid, a) { actInner(s, pid, a); checkWin(s); },
   turnOf,
@@ -2416,7 +2418,7 @@ export default {
   defaultTimer: 30,
   onTimeout,
   howTo: {
-    goal: 'Be the first to reach <b>10 victory points</b> on your own turn. Settlements are worth 1, cities 2, plus bonus cards and awards.',
+    goal: 'Be the first to reach <b>10 victory points</b> (the host can pick 8 or 6 for a shorter game) on your own turn. Settlements are worth 1, cities 2, plus bonus cards and awards.',
     turn: [
       ['🏠', 'Start: place 2 settlements', 'Everyone places a settlement and a road, twice (the order snakes back). Your second settlement gives you its neighbouring resources.'],
       ['🎲', 'Roll the dice', 'Every tile showing that number produces: each settlement on its corner gets 1 card, each city 2. Red 6s and 8s roll most often.'],

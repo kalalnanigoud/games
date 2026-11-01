@@ -320,6 +320,7 @@ export function zoneAt(px, py) {
 // open: { bridge: true, ... }, the gates that are open on this island right now.
 export function solidTile(x, y, open) {
   if (x < 0 || y < 0 || x >= W || y >= H) return true;
+  if (open?.arena && Math.hypot(x + 0.5 - open.arena[0], y + 0.5 - open.arena[1]) > open.arena[2]) return true; // Arena Rush's wall (island-arena.js)
   const m = island(), i = y * W + x;
   for (const id in GATES) {
     const [gx, gy, gw, gh] = GATES[id].rect;
