@@ -7,10 +7,10 @@ import { icon } from './icons.js';
 import { portrait } from './avatar.js';
 import { openModal, closeModal } from './dialog.js';
 import { report } from './report.js';
-import { GAME_INFO, favorites, toggleFavorite, filterGames } from './library.js';
+import { GAME_INFO, favorites, toggleFavorite, filterGames, QUICK_GAMES, quickChoice, setQuickChoice } from './library.js';
 import { standings, tourLine } from './tour.js';
 import { MAX_ROOM, S, GAMES, FILES, getGame, gameReady, loadGame, defaultTimer, defaultOpts, seated, tableLimit, tourGame, isWatching, myId, playerName, isBot, saveSession, loadSession, clearSession } from './state.js';
-import { clockSkew, voice, resume, leave, hostRoom, refreshLocalView, broadcast, addBot, fitTable, startGame, requestRematch, standingIn, startTour, playTour, closeTour, endGame, localRoom, joinRoom, send, joinVoice, leaveVoice, toggleWatch, liveSend, askExit } from './net.js';
+import { clockSkew, voice, resume, leave, hostRoom, refreshLocalView, broadcast, addBot, fitTable, startGame, requestRematch, standingIn, startTour, playTour, closeTour, endGame, localRoom, quickPlay, joinRoom, send, joinVoice, leaveVoice, toggleWatch, liveSend, askExit } from './net.js';
 
 export const app = document.getElementById('app');
 export const topinfo = document.getElementById('topinfo');
@@ -191,7 +191,7 @@ const libraryFilters = { query: '', category: '', players: '', minutes: '', diff
 const FILTERS = [
   ['category', 'Type', [['', 'All types'], ...['Party', 'Strategy', 'Adventure', 'Cooperative'].map((x) => [x, x])]],
   ['players', 'Players', [['', 'Any group'], ...Array.from({ length: 8 }, (_, i) => [i + 1, `${i + 1} player${i ? 's' : ''}`])]],
-  ['minutes', 'Estimated time', [['', 'Any length'], [15, 'Up to 15 min'], [30, 'Up to 30 min'], [60, 'Up to 60 min']]],
+  ['minutes', 'Estimated time', [['', 'Any length'], [5, 'Up to 5 min'], [15, 'Up to 15 min'], [30, 'Up to 30 min'], [60, 'Up to 60 min']]],
   ['difficulty', 'Difficulty', [['', 'Any level'], ...['Easy', 'Medium', 'Deep'].map((x) => [x, x])]],
   ['collection', 'Collection', [['', 'All games'], ['favorites', 'Favorites'], ['recent', 'Recently played']]],
 ];
@@ -213,6 +213,27 @@ function gameCard(g, saved) {
     </div></article>`;
 }
 
+// "Continue" appears for a signed-in explorer who has a cloud save. The check is asynchronous and
+// remembered (a re-render of the home page redraws it at once), and never blocks or breaks the page.
+let savedExplorer = null; // { name, forAccount } of the last cloud save found
+async function showContinue(btn, go) {
+  const paint = () => {
+    btn.hidden = false;
+    btn.innerHTML = `${icon('play')}<span>Continue <b>${esc(savedExplorer.name || 'your explorer')}</b></span><small>Creature Island</small>`;
+    btn.onclick = go;
+  };
+  try {
+    const cloud = await import('../games/island-cloud.js');
+    const me = cloud.account();
+    if (!cloud.cloudAvailable() || !me) { savedExplorer = null; return; }
+    if (savedExplorer?.forAccount === me.name) paint();
+    const found = await cloud.loadExplorer();
+    if (!found) { savedExplorer = null; btn.hidden = true; return; }
+    savedExplorer = { name: found.data?.name || '', forAccount: me.name };
+    if (btn.isConnected) paint();
+  } catch { /* offline or not signed in: no Continue */ }
+}
+
 export function renderHome() {
   S.lobbyMode = 'game';
   const session = loadSession();
@@ -227,6 +248,12 @@ export function renderHome() {
       <div class="panel hero-card">
         <div class="field"><label for="nameIn">Your name</label>
           <input id="nameIn" maxlength="20" placeholder="What should friends call you?" value="${esc(S.name)}" autocomplete="nickname" /></div>
+        <div class="field quick"><label for="quickGame">Play on your own</label>
+          <div class="quick-row">
+            <button class="primary" id="quickBtn">${icon('play')}Quick Play</button>
+            <label class="pill-select"><span class="sr">Game for Quick Play</span><select id="quickGame" aria-label="Game for Quick Play">${QUICK_GAMES.map((q) => `<option value="${q.id}">${esc(getGame(q.id)?.name || q.id)}</option>`).join('')}</select>${icon('chevron')}</label>
+          </div>
+          <button class="quick-continue" id="continueBtn" hidden></button></div>
         <div class="field"><label for="codeIn">Join a friend's table</label>
           <div class="join-row">
             <input id="codeIn" class="code" maxlength="6" placeholder="CODE" value="${esc(roomParam)}" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="go" aria-label="Room code" />
@@ -268,6 +295,11 @@ export function renderHome() {
     joinRoom(code);
   };
   app.querySelector('#joinBtn').onclick = doJoin;
+  const quickSel = app.querySelector('#quickGame');
+  quickSel.value = quickChoice();
+  quickSel.onchange = () => setQuickChoice(quickSel.value);
+  app.querySelector('#quickBtn').onclick = () => { S.name = nameIn.value.trim().slice(0, 20); quickPlay(quickSel.value); };
+  showContinue(app.querySelector('#continueBtn'), () => { S.name = nameIn.value.trim().slice(0, 20); quickPlay('island', { resumeSave: true }); });
   app.querySelector('#hostTourBtn').onclick = () => { if (!needName()) return; hostRoom(GAMES[0].id); S.lobbyMode = 'tour'; broadcast(); };
   // Never return a value from a key handler: returning false cancels the key (no typing on iPhone).
   codeIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') doJoin(); });

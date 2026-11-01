@@ -36,6 +36,9 @@ for (const [label, viewport] of [['phone', { width: 375, height: 812 }], ['deskt
   if (cards !== CATALOG.length) fail(`${label}: home page shows ${cards} games, expected ${CATALOG.length}`);
   const wide = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   if (wide > 1) fail(`${label}: home page scrolls sideways by ${wide}px`);
+  // Quick Play sits on the hero card with the game picker beside it, fully inside the viewport, and no Continue without an account.
+  const quick = await page.evaluate(() => { const r = (s) => document.querySelector(s).getBoundingClientRect(); const b = r('#quickBtn'), s = r('#quickGame'); return { h: b.height, bRight: b.right, sLeft: s.left, sRight: s.right, w: innerWidth, cont: !document.querySelector('#continueBtn').offsetParent }; });
+  if (quick.h < 40 || quick.sRight > quick.w || quick.sLeft < quick.bRight - 1 || !quick.cont) fail(`${label}: Quick Play row is misplaced ${JSON.stringify(quick)}`);
   await page.screenshot({ path: fileURLToPath(new URL(`../test-results/library-${label}.png`, import.meta.url)), fullPage: true });
 
   // One-device game with a computer player: the game's code loads on demand and the board renders.
