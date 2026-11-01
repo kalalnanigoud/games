@@ -280,11 +280,26 @@ export class World {
   }
   // A player saved and is leaving: their explorer leaves the island now, before anything else changes.
   park(p) {
-    p.ready = false; p.input.length = 0; this.chan(p, null);
+    p.ready = false; p.parked = true; p.input.length = 0; this.chan(p, null);
     if (p.comp) this.ents.delete(p.comp);
     p.comp = null;
     for (const e of this.ents.values()) if (e.only === p.id) this.ents.delete(e.id);
     this.worldVer++;
+    this.personal(p, ['parked']);
+  }
+  // Safety net: a screen still on the island after a park asks to be put back where it stood.
+  unpark(p) {
+    if (!p.parked || p.ready || !p.ex) return;
+    if (p.tag && this.readyPlayers().some((o) => o.tag === p.tag)) throw new Error('This explorer is already on the island, perhaps in another tab.');
+    p.parked = false; p.ready = true; p.iT = 2; p.input.length = 0;
+    this.summon(p);
+    if (p.ex.quests.lost === 2) this.spawnEscort(p);
+    this.refreshGates();
+    this.worldVer++;
+    this.bump(p);
+    p.full = true;
+    this.personal(p, ['ready']);
+    this.personal(p, ['warp', Math.round(p.body.x), Math.round(p.body.y)]);
   }
 
   // ---- fighting ----
@@ -567,6 +582,7 @@ export class World {
   // ---- requests from the menus ----
   command(p, d) {
     const ex = p.ex, c = d.c;
+    if (c === 'unpark') return this.unpark(p);
     if (c === 'new' || c === 'load') {
       if (p.ready) throw new Error('Your explorer is already on the island.');
       const tag = typeof d.tag === 'string' ? d.tag.slice(0, 40) : '';
@@ -704,7 +720,7 @@ export class World {
 
   spawn(p) {
     const ex = p.ex;
-    p.ready = true;
+    p.ready = true; p.parked = false;
     const at2 = ex.loc || villageSpot(p.seat);
     p.savedLoc = p.prog === 0 ? { x: at2.x, y: at2.y } : null;
     p.body = newBody(at2.x, at2.y);
@@ -1276,7 +1292,7 @@ export class World {
   // Most events ride along with the next frame; replies to a request (a save, a conversation) go at once.
   personal(p, ev) {
     p.events.push(ev);
-    if (!p.ready || ['dlg', 'snap', 'saved', 'ready', 'ui', 'warp', 'toast', 'boss', 'ending'].includes(ev[0])) this.send(p.id, { k: 'ev', ev: p.events.splice(0) });
+    if (!p.ready || ['dlg', 'snap', 'saved', 'ready', 'parked', 'ui', 'warp', 'toast', 'boss', 'ending'].includes(ev[0])) this.send(p.id, { k: 'ev', ev: p.events.splice(0) });
   }
   sendFrame(p) {
     const b = p.body, area = areaOf(b.x);

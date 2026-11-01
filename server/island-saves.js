@@ -188,6 +188,18 @@ export default {
         const old = await sha256hex(key);
         const r = await withTables(env, () => DB.prepare('UPDATE explorers SET id = ? WHERE id = ? AND NOT EXISTS (SELECT 1 FROM explorers WHERE id = ?)').bind(who.id, old, who.id).run());
         if (r.meta?.changes) return json(200, { moved: true });
+        if (b.replace === true) {
+          // The browser's older explorer becomes the account's; the account's current save is kept as prev_*.
+          // One batch (atomic on D1): the swap, then the browser's row goes, only if the swap happened.
+          const [swap] = await DB.batch([
+            DB.prepare('UPDATE explorers SET prev_data = data, prev_rev = rev, data = (SELECT data FROM explorers WHERE id = ?1), rev = rev + 1, saved_at = ?2 WHERE id = ?3 AND EXISTS (SELECT 1 FROM explorers WHERE id = ?1)').bind(old, now, who.id),
+            DB.prepare('DELETE FROM explorers WHERE id = ?1 AND (SELECT data FROM explorers WHERE id = ?2) = data').bind(old, who.id),
+          ]);
+          if (swap.meta?.changes) {
+            const row = await DB.prepare('SELECT rev FROM explorers WHERE id = ?').bind(who.id).first();
+            return json(200, { replaced: true, rev: Number(row?.rev), savedAt: now });
+          }
+        }
         const has = await DB.prepare('SELECT 1 AS x FROM explorers WHERE id = ?').bind(who.id).first();
         return has ? fail(409, 'has-save', 'This account already has a saved explorer.') : fail(404, 'none', 'Nothing was saved in this browser.');
       }

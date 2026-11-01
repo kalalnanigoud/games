@@ -35,7 +35,7 @@ export class CloudError extends Error {
   constructor(code, message, extra = {}) { super(message); this.code = code; Object.assign(this, extra); }
 }
 
-async function call(method, path, body, { signedIn = true } = {}) {
+async function call(method, path, body, { signedIn = true, bearer = '' } = {}) {
   if (!cloudAvailable()) throw new CloudError('setup', 'Cloud saves aren’t set up on this site yet. Save to a file instead.');
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     throw new CloudError('offline', 'You’re offline. Your game is still running: try again once you’re connected, or save to a file.');
@@ -48,7 +48,7 @@ async function call(method, path, body, { signedIn = true } = {}) {
   try {
     res = await fetch(CONFIG.islandSaves.replace(/\/+$/, '') + path, {
       method,
-      headers: { ...(me ? { authorization: 'Bearer ' + me.token } : {}), ...(body ? { 'content-type': 'application/json' } : {}) },
+      headers: { ...(bearer ? { authorization: 'Bearer ' + bearer } : me ? { authorization: 'Bearer ' + me.token } : {}), ...(body ? { 'content-type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
       signal: ctl.signal,
       cache: 'no-store',
@@ -78,21 +78,36 @@ export async function signOut() {
   keep(null);
   if (me) try { await fetch(CONFIG.islandSaves.replace(/\/+$/, '') + '/session', { method: 'DELETE', headers: { authorization: 'Bearer ' + me.token } }); } catch {}
 }
+const legacyKey = () => { let key = null; try { key = localStorage.getItem(LEGACY_KEY); } catch {} return /^[a-f0-9]{64}$/.test(key || '') ? key : null; };
+const dropKey = () => { try { localStorage.removeItem(LEGACY_KEY); } catch {} };
+export const hasLegacy = () => !!legacyKey();
 // A save made in this browser before accounts: move it into the signed-in account (if that has none yet).
-// Resolves to true when one was moved.
+// Resolves to true when one was moved. When the account already has a save, the browser's key is kept and
+// it resolves to { conflict: { theirs, old } } (each { rev, savedAt, data } or null) for the player to choose.
 export async function claimLegacy() {
-  let key = null;
-  try { key = localStorage.getItem(LEGACY_KEY); } catch {}
-  if (!/^[a-f0-9]{64}$/.test(key || '') || !account()) return false;
+  const key = legacyKey();
+  if (!key || !account()) return false;
   try {
     const out = await call('POST', '/claim', { key });
-    try { localStorage.removeItem(LEGACY_KEY); } catch {}
+    dropKey();
     return !!out.moved;
   } catch (e) {
-    if (e.code === 'none' || e.code === 'has-save') { try { localStorage.removeItem(LEGACY_KEY); } catch {} }
-    return false;
+    if (e.code === 'none') dropKey();
+    if (e.code !== 'has-save') return false;
+    const [theirs, old] = await Promise.all([loadExplorer().catch(() => null), call('GET', '/explorer', null, { signedIn: false, bearer: key }).catch(() => null)]);
+    return { conflict: { theirs, old } };
   }
 }
+// "Use this browser's older explorer instead": the Worker swaps them and keeps the account's save as the earlier one.
+export async function replaceWithLegacy() {
+  const key = legacyKey();
+  if (!key) throw new CloudError('none', 'Nothing was saved in this browser.');
+  const out = await call('POST', '/claim', { key, replace: true });
+  dropKey();
+  return out;
+}
+// "Discard the browser's save": the only path that forgets the key.
+export const discardLegacy = dropKey;
 
 // { rev, savedAt, data } for the signed-in account's explorer, or null when it has never been saved.
 export async function loadExplorer() {

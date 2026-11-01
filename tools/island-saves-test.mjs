@@ -126,11 +126,48 @@ const legacy2 = newKey();
 await call('PUT', '/explorer', { key: legacy2, body: { rev: 0, data: explorer('Another', 2) } });
 assert.equal((await call('POST', '/claim', { key: bea.token, body: { key: legacy2 } })).status, 409, 'an account’s own save is never replaced by a claim');
 assert.equal((await call('POST', '/claim', { key: legacy2, body: { key: legacy2 } })).status, 401, 'claiming needs an account');
+let legacy4;
+{
+  // Replace: the browser's older explorer becomes the account's, the account's current save is kept as the earlier one.
+  const dana = await (await call('POST', '/account', { body: { name: 'Dana', pin: '1357' } })).json();
+  await call('PUT', '/explorer', { key: dana.token, body: { rev: 0, data: explorer('Dana now', 6) } });
+  const legacy5 = newKey();
+  await call('PUT', '/explorer', { key: legacy5, body: { rev: 0, data: explorer('Dana older', 2) } });
+  clock += 2500;
+  r = await call('POST', '/claim', { key: dana.token, body: { key: legacy5, replace: true } });
+  const rep = await r.json();
+  assert.deepEqual([r.status, rep.replaced, rep.rev], [200, true, 2]);
+  const now1 = await (await call('GET', '/explorer', { key: dana.token })).json();
+  assert.equal(now1.data.name, 'Dana older', 'the browser’s save is now the account’s');
+  assert.equal((await (await call('GET', '/explorer?previous=1', { key: dana.token })).json()).data.name, 'Dana now', 'and the account’s save is kept as the earlier one');
+  assert.equal((await call('GET', '/explorer', { key: legacy5 })).status, 404, 'the browser key no longer holds a save');
+  assert.equal((await call('POST', '/claim', { key: dana.token, body: { key: legacy5, replace: true } })).status, 409, 'replacing with nothing left changes nothing');
+  assert.equal((await (await call('GET', '/explorer', { key: dana.token })).json()).data.name, 'Dana older');
+  assert.equal((await call('POST', '/claim', { key: legacy5, body: { key: legacy5, replace: true } })).status, 401, 'replace needs an account');
+  // Replace on an account with no save just moves.
+  const cy = await (await call('POST', '/account', { body: { name: 'Cyra', pin: '2468' } })).json();
+  const legacy3 = newKey();
+  await call('PUT', '/explorer', { key: legacy3, body: { rev: 0, data: explorer('Third', 3) } });
+  assert.deepEqual(await (await call('POST', '/claim', { key: cy.token, body: { key: legacy3, replace: true } })).json(), { moved: true });
+  // Keeping it for later: a plain claim that conflicts leaves the browser's save where it is.
+  legacy4 = newKey();
+  await call('PUT', '/explorer', { key: legacy4, body: { rev: 0, data: explorer('Fourth', 4) } });
+  assert.equal((await call('POST', '/claim', { key: cy.token, body: { key: legacy4 } })).status, 409);
+  assert.equal((await (await call('GET', '/explorer', { key: legacy4 })).json()).data.name, 'Fourth', 'the browser’s save is untouched by a conflict');
+  assert.equal((await (await call('GET', '/explorer', { key: cy.token })).json()).data.name, 'Third');
+  // The swap is one batch: if it fails, neither save changes.
+  broken = true;
+  clock += 2500;
+  assert.equal((await call('POST', '/claim', { key: cy.token, body: { key: legacy4, replace: true } })).status, 503);
+  broken = false;
+  assert.equal((await (await call('GET', '/explorer', { key: cy.token })).json()).data.name, 'Third', 'a failed replace changes nothing');
+  assert.equal((await (await call('GET', '/explorer', { key: legacy4 })).json()).data.name, 'Fourth');
+}
 
 // What's stored: no PINs, no tokens, no keys.
 const dump = JSON.stringify([...sqlite.prepare('SELECT * FROM accounts').all(), ...sqlite.prepare('SELECT * FROM sessions').all(), ...sqlite.prepare('SELECT id FROM explorers').all()]);
 for (const secret of ['4826', '7310', nani.token, laptop.token, bea.token, legacyKey, legacy2, env.PIN_PEPPER]) assert.ok(!dump.includes(secret), 'nothing secret is stored');
-assert.ok(dump.includes(sha(legacy2)), 'browser keys only as their SHA-256');
+assert.ok(dump.includes(sha(legacy4)), 'browser keys only as their SHA-256');
 
 broken = true;
 clock += 2500;
@@ -183,18 +220,42 @@ await new Promise((res) => setTimeout(res, 2100));
 await assert.rejects(cloud.saveExplorer(explorer('Bo', 3), 0), (e) => e.code === 'conflict' && e.rev === 1);
 assert.equal((await cloud.saveExplorer(explorer('Bo', 3), 1)).rev, 2);
 assert.match(cloud.explorerTag(), /^[a-f0-9]{32}$/);
+{
+  // A browser save and an account that already has one: the key stays, and the player chooses.
+  const k2 = newKey();
+  store.set('island-explorer-key', k2);
+  await worker.fetch(new Request('https://saves.test/explorer', { method: 'PUT', headers: { authorization: 'Bearer ' + k2, 'content-type': 'application/json' }, body: JSON.stringify({ rev: 0, data: explorer('Browser one', 1) }) }), clientEnv);
+  const c = await cloud.claimLegacy();
+  assert.equal(c.conflict?.theirs?.data.name, 'Bo', 'the conflict shows the account’s save');
+  assert.equal(c.conflict?.old?.data.name, 'Browser one', 'and the browser’s');
+  assert.equal(store.get('island-explorer-key'), k2, 'and the browser’s key is kept');
+  assert.equal(cloud.hasLegacy(), true);
+  assert.ok((await cloud.claimLegacy()).conflict, 'still a conflict next time (keep it for later)');
+  const rep = await cloud.replaceWithLegacy();
+  assert.equal(rep.replaced, true);
+  assert.equal(store.has('island-explorer-key'), false, 'replacing uses the key up');
+  assert.equal((await cloud.loadExplorer()).data.name, 'Browser one');
+  // Discard is the only way to drop the key without moving it.
+  const k3 = newKey();
+  store.set('island-explorer-key', k3);
+  await worker.fetch(new Request('https://saves.test/explorer', { method: 'PUT', headers: { authorization: 'Bearer ' + k3, 'content-type': 'application/json' }, body: JSON.stringify({ rev: 0, data: explorer('Browser two', 1) }) }), clientEnv);
+  assert.ok((await cloud.claimLegacy()).conflict && store.get('island-explorer-key') === k3);
+  cloud.discardLegacy();
+  assert.equal(cloud.hasLegacy(), false);
+  assert.equal(await cloud.claimLegacy(), false, 'nothing left to claim');
+}
 await cloud.signOut();
 assert.equal(cloud.account(), null, 'signed out');
 await assert.rejects(cloud.loadExplorer(), (e) => e.code === 'signin');
 await cloud.signIn('bobo', '5555');
-assert.equal((await cloud.loadExplorer()).rev, 2, 'signing in again brings the explorer back');
+assert.equal((await cloud.loadExplorer()).rev, 3, 'signing in again brings the explorer back');
 await assert.rejects(cloud.signIn('Bobo', '0000'), (e) => e.code === 'wrong' && e.left === 4);
 mode = 'down';
 await assert.rejects(cloud.saveExplorer(explorer('Bo', 4), 2), (e) => e.code === 'network' && /save to a file/.test(e.message));
 mode = 'cloudflare-page';
 await assert.rejects(cloud.loadExplorer(), (e) => e.code === 'unavailable' && /daily limit/.test(e.message));
 mode = 'worker';
-assert.equal((await cloud.loadExplorer()).rev, 2, 'failed attempts changed nothing');
+assert.equal((await cloud.loadExplorer()).rev, 3, 'failed attempts changed nothing');
 
 /* ---------------- 3. the deploy script ---------------- */
 

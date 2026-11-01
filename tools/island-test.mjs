@@ -222,5 +222,26 @@ assert.ok(VILLAGE[2] > 0 && npcPos('elder').x > 0);
   const shells = d.ex.shells;
   steps(40);
   assert.equal(d.ex.shells, shells, 'and earns nothing more');
+  assert.ok(events('D').some((e) => e[0] === 'parked'), 'the screen is told it was parked');
+  // Safety net: a screen still on the island after a park asks for its explorer back.
+  w.message('A', { k: 'cmd', c: 'unpark' });
+  assert.ok(P('A').ready, 'unpark does nothing for someone who was never parked');
+  w.message('D', { k: 'cmd', c: 'unpark' });
+  assert.ok(d.ready, 'unpark puts the explorer back');
+  assert.ok(!d.ex.team.some((m) => m.hp > 0) || w.ents.get(d.comp)?.companion, 'with their companion');
+  assert.equal(d.ex.shells, shells, 'with everything they had');
+  assert.ok(events('D').filter((e) => e[0] === 'ready').length > 0 && events('D').some((e) => e[0] === 'warp'), 'and tells the screen');
+  steps(5);
+  w.message('D', { k: 'cmd', c: 'unpark' });
+  assert.ok(d.ready, 'a second unpark changes nothing');
+  // A parked explorer can't come back while the same explorer is on the island elsewhere.
+  d.tag = 'tag-A';
+  w.park(d);
+  assert.ok(!d.ready);
+  w.message('D', { k: 'cmd', c: 'unpark' });
+  assert.ok(!d.ready, 'unpark refuses when the same explorer is already on the island');
+  d.tag = 'tag-D';
+  w.message('D', { k: 'cmd', c: 'unpark' });
+  assert.ok(d.ready);
 }
 console.log('Creature Island checks passed: four explorers at once, first companion, befriending, exact movement prediction, saves (one consistent capture, unsaved tracking including moving away, save-and-leave only when the save has everything, forged saves cleaned), gates in story order, all three bosses, the village raid, reconnecting.');
