@@ -33,6 +33,7 @@ const call = (method, p, { key, body, origin, ip = freshIp(), raw, e = env } = {
   headers: { ...(key ? { authorization: 'Bearer ' + key } : {}), ...(origin ? { origin } : {}), ...(ip ? { 'cf-connecting-ip': ip } : {}), ...(body || raw ? { 'content-type': 'application/json' } : {}) },
   body: raw ?? (body ? JSON.stringify(body) : undefined),
 }), e);
+const CODE_RE = /^[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}$/; // 31 characters, no O/0/I/1/L
 const explorer = (name, level = 1) => ({ kind: 'island-explorer', v: 1, name, level, team: [{ sp: 'mossip', lv: level }] });
 
 let r = await call('GET', '/');
@@ -126,11 +127,134 @@ const legacy2 = newKey();
 await call('PUT', '/explorer', { key: legacy2, body: { rev: 0, data: explorer('Another', 2) } });
 assert.equal((await call('POST', '/claim', { key: bea.token, body: { key: legacy2 } })).status, 409, 'an account’s own save is never replaced by a claim');
 assert.equal((await call('POST', '/claim', { key: legacy2, body: { key: legacy2 } })).status, 401, 'claiming needs an account');
+let legacy4;
+{
+  // Replace: the browser's older explorer becomes the account's, the account's current save is kept as the earlier one.
+  const dana = await (await call('POST', '/account', { body: { name: 'Dana', pin: '1357' } })).json();
+  await call('PUT', '/explorer', { key: dana.token, body: { rev: 0, data: explorer('Dana now', 6) } });
+  const legacy5 = newKey();
+  await call('PUT', '/explorer', { key: legacy5, body: { rev: 0, data: explorer('Dana older', 2) } });
+  clock += 2500;
+  r = await call('POST', '/claim', { key: dana.token, body: { key: legacy5, replace: true } });
+  const rep = await r.json();
+  assert.deepEqual([r.status, rep.replaced, rep.rev], [200, true, 2]);
+  const now1 = await (await call('GET', '/explorer', { key: dana.token })).json();
+  assert.equal(now1.data.name, 'Dana older', 'the browser’s save is now the account’s');
+  assert.equal((await (await call('GET', '/explorer?previous=1', { key: dana.token })).json()).data.name, 'Dana now', 'and the account’s save is kept as the earlier one');
+  assert.equal((await call('GET', '/explorer', { key: legacy5 })).status, 404, 'the browser key no longer holds a save');
+  assert.equal((await call('POST', '/claim', { key: dana.token, body: { key: legacy5, replace: true } })).status, 409, 'replacing with nothing left changes nothing');
+  assert.equal((await (await call('GET', '/explorer', { key: dana.token })).json()).data.name, 'Dana older');
+  assert.equal((await call('POST', '/claim', { key: legacy5, body: { key: legacy5, replace: true } })).status, 401, 'replace needs an account');
+  // Replace on an account with no save just moves.
+  const cy = await (await call('POST', '/account', { body: { name: 'Cyra', pin: '2468' } })).json();
+  const legacy3 = newKey();
+  await call('PUT', '/explorer', { key: legacy3, body: { rev: 0, data: explorer('Third', 3) } });
+  assert.deepEqual(await (await call('POST', '/claim', { key: cy.token, body: { key: legacy3, replace: true } })).json(), { moved: true });
+  // Keeping it for later: a plain claim that conflicts leaves the browser's save where it is.
+  legacy4 = newKey();
+  await call('PUT', '/explorer', { key: legacy4, body: { rev: 0, data: explorer('Fourth', 4) } });
+  assert.equal((await call('POST', '/claim', { key: cy.token, body: { key: legacy4 } })).status, 409);
+  assert.equal((await (await call('GET', '/explorer', { key: legacy4 })).json()).data.name, 'Fourth', 'the browser’s save is untouched by a conflict');
+  assert.equal((await (await call('GET', '/explorer', { key: cy.token })).json()).data.name, 'Third');
+  // The swap is one batch: if it fails, neither save changes.
+  broken = true;
+  clock += 2500;
+  assert.equal((await call('POST', '/claim', { key: cy.token, body: { key: legacy4, replace: true } })).status, 503);
+  broken = false;
+  assert.equal((await (await call('GET', '/explorer', { key: cy.token })).json()).data.name, 'Third', 'a failed replace changes nothing');
+  assert.equal((await (await call('GET', '/explorer', { key: legacy4 })).json()).data.name, 'Fourth');
+}
 
-// What's stored: no PINs, no tokens, no keys.
+// Recovery codes: one-time, counted like PINs, ending old sessions.
+const recoverCodes = [];
+{
+  assert.match(nani.code, CODE_RE);
+  assert.equal(nani.recovery, true);
+  assert.notEqual(nani.code, (await (await call('POST', '/account', { body: { name: 'Codey', pin: '1212' } })).json()).code, 'every account has its own code');
+  const eli = await (await call('POST', '/account', { body: { name: 'Eli', pin: '1122' } })).json();
+  recoverCodes.push(eli.code);
+  assert.match(eli.code, CODE_RE);
+  await call('PUT', '/explorer', { key: eli.token, body: { rev: 0, data: explorer('Eli', 2) } });
+  const rec = (name, code, newPin = '3344') => call('POST', '/recover', { body: { name, code, newPin } });
+  assert.equal((await call('POST', '/recover', { raw: 'null' })).status, 400, 'a null body is refused');
+  assert.equal((await rec('Eli', eli.code, '12')).status, 400, 'the new PIN must be 4 digits');
+  r = await rec('Eli', 'AAAA-AAAA-AAAA');
+  assert.deepEqual([r.status, (await r.json()).left], [401, 4], 'a wrong code is counted and says how many tries are left');
+  assert.equal((await rec('Eli', 'not a code')).status, 401, 'a malformed code looks like a wrong one');
+  assert.equal((await rec('Nobody Here', eli.code)).status, 401, 'an unknown name looks the same');
+  clock += 2500;
+  r = await rec('eli', eli.code.toLowerCase().replace(/-/g, ''), '3344');
+  assert.equal(r.status, 200, 'the code works in lower case and without dashes');
+  const back = await r.json();
+  recoverCodes.push(back.code);
+  assert.match(back.code, CODE_RE);
+  assert.notEqual(back.code, eli.code, 'recovering issues a new code');
+  assert.equal((await call('GET', '/explorer', { key: eli.token })).status, 401, 'the old sessions are ended');
+  assert.equal((await (await call('GET', '/explorer', { key: back.token })).json()).data.name, 'Eli', 'the new session has the explorer');
+  assert.equal((await call('POST', '/login', { body: { name: 'Eli', pin: '1122' } })).status, 401, 'the old PIN is gone');
+  assert.equal((await call('POST', '/login', { body: { name: 'Eli', pin: '3344' } })).status, 200, 'the new PIN works');
+  assert.equal((await rec('Eli', eli.code)).status, 401, 'the old code works once only');
+  // The same pause as PINs: wrong PINs and wrong codes share one count.
+  for (let i = 0; i < 3; i++) await rec('Eli', 'BBBB-BBBB-BBBB');
+  await call('POST', '/login', { body: { name: 'Eli', pin: '0001' } });
+  r = await rec('Eli', 'CCCC-CCCC-CCCC');
+  assert.equal(r.status, 423, 'the fifth wrong try (PIN or code) pauses the name');
+  assert.equal((await rec('Eli', back.code)).status, 423, 'even the right code waits out the pause');
+  assert.equal((await call('POST', '/login', { body: { name: 'Eli', pin: '3344' } })).status, 423, 'and so does the right PIN');
+  clock += 15 * 60000 + 1000;
+  const burst2 = await Promise.all(Array.from({ length: 60 }, (_, i) => rec('Eli', `DDDD-DDDD-${String(2000 + i).replace(/[01]/g, '2')}`.slice(0, 14)).then((x) => x.status)));
+  assert.ok(!burst2.includes(200) && burst2.filter((s) => s === 423).length >= 50, 'guesses sent all at once can’t slip past the limit');
+  clock += 3600 * 1000 + 1000; // the burst's misses reached ten: an hour
+  r = await rec('Eli', back.code, '5566');
+  assert.equal(r.status, 200, 'after the pause the right code works');
+  const third = await r.json();
+  recoverCodes.push(third.code);
+  // "Get a recovery code" for a signed-in account: needs a session, replaces the old code.
+  assert.equal((await call('POST', '/recovery')).status, 401, 'needs an account');
+  assert.equal((await call('POST', '/recovery', { key: newKey() })).status, 401, 'a made-up session is refused');
+  r = await call('POST', '/recovery', { key: third.token });
+  const fresh = await r.json();
+  recoverCodes.push(fresh.code);
+  assert.match(fresh.code, CODE_RE);
+  assert.equal((await rec('Eli', third.code)).status, 401, 'the code it replaced stops working');
+  assert.equal((await rec('Eli', fresh.code, '7788')).status, 200);
+  assert.equal((await call('POST', '/login', { body: { name: 'Eli', pin: '7788' } })).status, 200);
+}
+{
+  // A database made before recovery codes: its accounts table has no rec_hash. It keeps working, and the
+  // column is added the first time something needs it.
+  const old = new DatabaseSync(':memory:');
+  const oldEnv = { DB: fakeD1(old), PIN_PEPPER: env.PIN_PEPPER };
+  const oc = (method, p, o = {}) => call(method, p, { ...o, e: oldEnv });
+  const mem = await (await oc('POST', '/account', { body: { name: 'Old Timer', pin: '4321' } })).json();
+  old.exec('ALTER TABLE accounts DROP COLUMN rec_hash');
+  const cols = () => old.prepare("SELECT name FROM pragma_table_info('accounts')").all().map((c) => c.name);
+  assert.ok(!cols().includes('rec_hash'));
+  clock += 2500;
+  assert.equal((await oc('PUT', '/explorer', { key: mem.token, body: { rev: 0, data: explorer('Timer', 3) } })).status, 200, 'saving works on the old table');
+  assert.ok(!cols().includes('rec_hash'), 'and does not touch the new column');
+  r = await oc('POST', '/recover', { body: { name: 'Old Timer', code: 'ABCD-EFGH-JKMN', newPin: '1111' } });
+  assert.equal(r.status, 401, 'an old account has no code to recover with');
+  assert.ok(cols().includes('rec_hash'), 'the column was added when needed');
+  assert.equal((await (await oc('POST', '/login', { body: { name: 'Old Timer', pin: '4321' } })).json()).recovery, false, 'sign-in says there is no code yet');
+  const got = await (await oc('POST', '/recovery', { key: mem.token })).json();
+  assert.match(got.code, CODE_RE);
+  r = await oc('POST', '/recover', { body: { name: 'Old Timer', code: got.code, newPin: '2222' } });
+  assert.equal(r.status, 200);
+  assert.equal((await (await oc('POST', '/login', { body: { name: 'Old Timer', pin: '2222' } })).json()).recovery, true);
+  // Two instances adding the column at once is fine.
+  const old2 = new DatabaseSync(':memory:');
+  const env2 = { DB: fakeD1(old2), PIN_PEPPER: env.PIN_PEPPER };
+  await call('POST', '/account', { body: { name: 'Racer', pin: '4321' }, e: env2 });
+  old2.exec('ALTER TABLE accounts DROP COLUMN rec_hash');
+  const both = await Promise.all([1, 2, 3].map(() => call('POST', '/recover', { body: { name: 'Racer', code: 'ABCD-EFGH-JKMN', newPin: '1111' }, e: env2 }).then((x) => x.status)));
+  assert.deepEqual(both, [401, 401, 401], 'racing migrations don’t break anything');
+}
+
+// What's stored: no PINs, no tokens, no keys, no recovery codes.
 const dump = JSON.stringify([...sqlite.prepare('SELECT * FROM accounts').all(), ...sqlite.prepare('SELECT * FROM sessions').all(), ...sqlite.prepare('SELECT id FROM explorers').all()]);
-for (const secret of ['4826', '7310', nani.token, laptop.token, bea.token, legacyKey, legacy2, env.PIN_PEPPER]) assert.ok(!dump.includes(secret), 'nothing secret is stored');
-assert.ok(dump.includes(sha(legacy2)), 'browser keys only as their SHA-256');
+for (const secret of ['4826', '7310', nani.token, laptop.token, bea.token, legacyKey, legacy2, env.PIN_PEPPER, nani.code, ...recoverCodes, ...recoverCodes.map((c) => c.replace(/-/g, ''))]) assert.ok(!dump.includes(secret), 'nothing secret is stored');
+assert.ok(dump.includes(sha(legacy4)), 'browser keys only as their SHA-256');
 
 broken = true;
 clock += 2500;
@@ -172,9 +296,12 @@ const oldKey = newKey();
 store.set('island-explorer-key', oldKey);
 await worker.fetch(new Request('https://saves.test/explorer', { method: 'PUT', headers: { authorization: 'Bearer ' + oldKey, 'content-type': 'application/json' }, body: JSON.stringify({ rev: 0, data: explorer('Bo', 2) }) }), clientEnv);
 await assert.rejects(cloud.signIn('Bobo', '5555'), (e) => e.code === 'wrong', 'no such account yet');
-assert.deepEqual(await cloud.signUp('Bobo', '5555'), { name: 'Bobo' });
+const signedUp = await cloud.signUp('Bobo', '5555');
+assert.equal(signedUp.name, 'Bobo');
+assert.match(signedUp.code, CODE_RE, 'a new account gets a recovery code to show once');
 assert.equal(cloud.account().name, 'Bobo');
-assert.ok(!JSON.stringify([...store]).includes('5555'), 'the PIN is never kept on the device');
+assert.equal(cloud.account().recovery, true);
+assert.ok(!JSON.stringify([...store]).includes('5555') && !JSON.stringify([...store]).includes(signedUp.code), 'the PIN and the recovery code are never kept on the device');
 assert.equal(await cloud.claimLegacy(), true, 'the browser’s old save moves into the account');
 assert.equal(store.has('island-explorer-key'), false, 'and the old key is forgotten');
 let found = await cloud.loadExplorer();
@@ -183,18 +310,62 @@ await new Promise((res) => setTimeout(res, 2100));
 await assert.rejects(cloud.saveExplorer(explorer('Bo', 3), 0), (e) => e.code === 'conflict' && e.rev === 1);
 assert.equal((await cloud.saveExplorer(explorer('Bo', 3), 1)).rev, 2);
 assert.match(cloud.explorerTag(), /^[a-f0-9]{32}$/);
+{
+  // A browser save and an account that already has one: the key stays, and the player chooses.
+  const k2 = newKey();
+  store.set('island-explorer-key', k2);
+  await worker.fetch(new Request('https://saves.test/explorer', { method: 'PUT', headers: { authorization: 'Bearer ' + k2, 'content-type': 'application/json' }, body: JSON.stringify({ rev: 0, data: explorer('Browser one', 1) }) }), clientEnv);
+  const c = await cloud.claimLegacy();
+  assert.equal(c.conflict?.theirs?.data.name, 'Bo', 'the conflict shows the account’s save');
+  assert.equal(c.conflict?.old?.data.name, 'Browser one', 'and the browser’s');
+  assert.equal(store.get('island-explorer-key'), k2, 'and the browser’s key is kept');
+  assert.equal(cloud.hasLegacy(), true);
+  assert.ok((await cloud.claimLegacy()).conflict, 'still a conflict next time (keep it for later)');
+  const rep = await cloud.replaceWithLegacy();
+  assert.equal(rep.replaced, true);
+  assert.equal(store.has('island-explorer-key'), false, 'replacing uses the key up');
+  assert.equal((await cloud.loadExplorer()).data.name, 'Browser one');
+  // Discard is the only way to drop the key without moving it.
+  const k3 = newKey();
+  store.set('island-explorer-key', k3);
+  await worker.fetch(new Request('https://saves.test/explorer', { method: 'PUT', headers: { authorization: 'Bearer ' + k3, 'content-type': 'application/json' }, body: JSON.stringify({ rev: 0, data: explorer('Browser two', 1) }) }), clientEnv);
+  assert.ok((await cloud.claimLegacy()).conflict && store.get('island-explorer-key') === k3);
+  cloud.discardLegacy();
+  assert.equal(cloud.hasLegacy(), false);
+  assert.equal(await cloud.claimLegacy(), false, 'nothing left to claim');
+}
 await cloud.signOut();
 assert.equal(cloud.account(), null, 'signed out');
 await assert.rejects(cloud.loadExplorer(), (e) => e.code === 'signin');
 await cloud.signIn('bobo', '5555');
-assert.equal((await cloud.loadExplorer()).rev, 2, 'signing in again brings the explorer back');
+assert.equal((await cloud.loadExplorer()).rev, 3, 'signing in again brings the explorer back');
 await assert.rejects(cloud.signIn('Bobo', '0000'), (e) => e.code === 'wrong' && e.left === 4);
+{
+  // Forgot the PIN: the recovery code sets a new one, signs in, and gives a fresh code.
+  await cloud.signOut();
+  const rc = await cloud.recover('BOBO', signedUp.code, '6666');
+  assert.deepEqual([rc.name, cloud.account().name, cloud.account().recovery], ['Bobo', 'Bobo', true]);
+  assert.match(rc.code, CODE_RE);
+  assert.notEqual(rc.code, signedUp.code);
+  assert.equal((await cloud.loadExplorer()).rev, 3, 'recovering brings the explorer back');
+  await assert.rejects(cloud.signIn('Bobo', '5555'), (e) => e.code === 'wrong', 'the old PIN is gone');
+  await assert.rejects(cloud.recover('Bobo', signedUp.code, '7777'), (e) => e.code === 'wrong', 'a code works once');
+  await assert.rejects(cloud.recover('Bobo', 'AAAA-AAAA-AAAA', '7777'), (e) => e.code === 'wrong' && e.left >= 1, 'a wrong code says how many tries are left');
+  await cloud.signIn('Bobo', '6666');
+  const fresh = await cloud.getRecoveryCode();
+  assert.match(fresh, CODE_RE);
+  await cloud.signOut();
+  await assert.rejects(cloud.recover('Bobo', rc.code, '8888'), (e) => e.code === 'wrong', '"Get a recovery code" replaces the old code');
+  assert.equal((await cloud.recover('Bobo', fresh, '8888')).name, 'Bobo');
+  await assert.rejects(cloud.getRecoveryCode().then(() => cloud.signOut()).then(() => cloud.getRecoveryCode()), (e) => e.code === 'signin', 'a new code needs a session');
+  await cloud.signIn('Bobo', '8888');
+}
 mode = 'down';
-await assert.rejects(cloud.saveExplorer(explorer('Bo', 4), 2), (e) => e.code === 'network' && /save to a file/.test(e.message));
+await assert.rejects(cloud.saveExplorer(explorer('Bo', 4), 2), (e) => e.code === 'network' && /Check your connection/.test(e.message) && !/file/i.test(e.message), 'a failed save explains itself and offers no file');
 mode = 'cloudflare-page';
 await assert.rejects(cloud.loadExplorer(), (e) => e.code === 'unavailable' && /daily limit/.test(e.message));
 mode = 'worker';
-assert.equal((await cloud.loadExplorer()).rev, 2, 'failed attempts changed nothing');
+assert.equal((await cloud.loadExplorer()).rev, 3, 'failed attempts changed nothing');
 
 /* ---------------- 3. the deploy script ---------------- */
 

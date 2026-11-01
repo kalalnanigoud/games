@@ -16,9 +16,9 @@ function audio() {
   if (!ac) {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return null;
-    ac = new AC();
+    try { ac = new AC(); } catch { return null; }
   }
-  if (ac.state === 'suspended') ac.resume();
+  if (ac.state === 'suspended') Promise.resolve(ac.resume()).catch(() => {});
   return ac;
 }
 // Browsers only allow audio after a user gesture.
@@ -87,6 +87,6 @@ export function sound(name) {
     if (!audio()) return;
     SOUNDS[name]?.();
     clearTimeout(sleepTimer);
-    sleepTimer = setTimeout(() => { if (ac && ac.state === 'running') ac.suspend(); }, 6000);
+    sleepTimer = setTimeout(() => { if (ac && ac.state === 'running') Promise.resolve(ac.suspend()).catch(() => {}); }, 6000);
   } catch {}
 }

@@ -7,10 +7,17 @@ export function fakeD1(db, broken = () => false) {
   const turn = () => new Promise((resolve) => setImmediate(resolve));
   const fail = () => { if (broken()) throw new Error('D1_ERROR: daily limit exceeded'); };
   return {
+    // All statements or none, like D1's batch.
+    async batch(stmts) {
+      await turn(); fail();
+      db.exec('BEGIN');
+      try { const out = stmts.map((s) => s.sync()); db.exec('COMMIT'); return out; } catch (e) { db.exec('ROLLBACK'); throw e; }
+    },
     prepare(sql) {
       let params = [];
       const st = {
         bind(...a) { params = a; return st; },
+        sync() { const r = db.prepare(sql).run(...params); return { success: true, meta: { changes: Number(r.changes) } }; },
         async first() { await turn(); fail(); return db.prepare(sql).get(...params) ?? null; },
         async run() { await turn(); fail(); const r = db.prepare(sql).run(...params); return { success: true, meta: { changes: Number(r.changes) } }; },
         async all() { await turn(); fail(); return { success: true, results: db.prepare(sql).all(...params) }; },

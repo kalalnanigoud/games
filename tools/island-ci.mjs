@@ -35,7 +35,7 @@ const CONFIG = (await fs.readFile(new URL('../js/config.js', import.meta.url), '
 const saveUrl = /islandSaves:\s*'([^']+)'/.exec(CONFIG)?.[1] || 'https://island-saves.test';
 
 const errors = [], contexts = [];
-let browser;
+let browser, saveDelay = 0, saveFail = false;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 async function waitFor(page, fn, arg, timeout = 20000) {
   const end = Date.now() + timeout;
@@ -49,6 +49,8 @@ async function open(opts = {}) {
   await context.route(/https:\/\/fonts\./, (r) => r.abort());
   await context.route(saveUrl.replace(/\/+$/, '') + '/**', async (route) => {
     const req = route.request();
+    if (saveDelay && req.method() === 'PUT') await wait(saveDelay); // [save-flows] a slow save, for the Escape test
+    if (saveFail && req.method() === 'PUT') return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'storage', message: 'The save service could not reach its storage. It may have reached its free daily limit. Your game is still running: try again later.' }) });
     const res = await worker.fetch(new Request(req.url(), { method: req.method(), headers: req.headers(), body: ['GET', 'HEAD', 'OPTIONS'].includes(req.method()) ? undefined : req.postData() }), { DB: D1, PIN_PEPPER: 'ci-pepper' });
     route.fulfill({ status: res.status, headers: Object.fromEntries(res.headers), body: Buffer.from(await res.arrayBuffer()) });
   });
@@ -70,7 +72,14 @@ const signUpOn = async (page, name, pin) => {
   await page.fill('[name="acctPin"]', pin);
   await page.fill('[name="acctPin2"]', pin);
   await page.click('[data-acct-form] button[type="submit"]');
+  // A new account shows its recovery code once; it stays until "I've saved it".
+  await page.waitForSelector('.isl-code');
+  const code = (await page.textContent('.isl-code')).trim();
+  assert.match(code, /^[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}$/, 'the recovery code looks like K7QM-2XPA-9TNE');
+  await page.click('[data-code-done]');
   await page.waitForSelector('.isl-pick .isl-acct.signed');
+  assert.equal(await page.locator('.isl-code').count(), 0, 'the code is not shown again');
+  return code;
 };
 const pick = async (page) => {
   await page.waitForSelector('.isl-pick [data-pick="new"]');
@@ -92,6 +101,11 @@ try {
   await waitFor(host, async () => (await import('/js/state.js')).S.players.length === 4);
   await host.click('#startBtn');
   await signUpOn(phone, 'Phone Explorer', '4826');
+  // Without an account: a clear note that nothing is kept, and no file option anywhere.
+  await host.waitForSelector('.isl-pick');
+  const pickText = await host.innerText('.isl-pick');
+  assert.match(pickText, /Nothing is kept without an account/);
+  assert.ok(!/file/i.test(pickText) && await host.locator('.isl-pick input[type="file"]').count() === 0, 'no file saves on the start screen');
   await Promise.all([host, phone, g2, g3].map(pick));
   const hw = () => host.evaluate(async () => { const { debug } = await import('/games/island.js'); return [...debug.world.players.values()].map((p) => ({ id: p.id, ready: p.ready, x: p.body.x, y: p.body.y, seat: p.seat })); });
   let players = await hw();
@@ -210,6 +224,7 @@ try {
   // Leaving with unsaved progress asks first; Cancel keeps you on the island.
   await g3.evaluate(async () => { (await import('/js/net.js')).leave(); });
   await g3.waitForSelector('.isl-overlay:has-text("Save before you go?")');
+  assert.ok(await g3.locator('[data-leave="signin"]').count() === 1 && !/file/i.test(await g3.innerText('.isl-overlay')), 'without an account the prompt says nothing is kept and offers sign-in, not a file');
   await g3.click('[data-leave="cancel"]');
   assert.ok((await S(g3)).started, 'Cancel keeps playing');
   await g3.evaluate(async () => { (await import('/js/net.js')).leave(); });
@@ -223,6 +238,157 @@ try {
   assert.equal((await hw()).length, 4, 'the watcher took the free seat');
   console.log('PASS a watcher takes a freed seat mid-adventure');
 
+  // [save-flows] Cancelling "Save and leave" mid-upload keeps the explorer on the island.
+  {
+    const phoneId = ids.phone;
+    const hostSees = () => host.evaluate(async (id) => { const p = (await import('/games/island.js')).debug.world.players.get(id); return p ? { ready: p.ready, parked: !!p.parked } : null; }, phoneId);
+    await host.evaluate(async (id) => { const w = (await import('/games/island.js')).debug.world; w.bump(w.players.get(id), true); }, phoneId);
+    await waitFor(phone, async () => (await import('/games/island.js')).debug.client.state.me?.unsaved === true);
+    await wait(2100);
+    saveDelay = 1500;
+    await phone.evaluate(async () => { (await import('/js/net.js')).leave(); });
+    await phone.waitForSelector('.isl-overlay:has-text("Save before you go?")');
+    await phone.click('[data-leave="save"]');
+    await phone.waitForSelector('.isl-overlay:has-text("Saving…")');
+    await phone.keyboard.press('Escape');
+    await phone.waitForSelector('.isl-overlay', { state: 'hidden' });
+    await wait(saveDelay + 2500); // the save lands, then the host would have parked a leaving explorer
+    saveDelay = 0;
+    assert.deepEqual(await hostSees(), { ready: true, parked: false }, 'Escape during the upload: the explorer is still simulated');
+    assert.ok((await S(phone)).started && await phone.locator('.isl-pick').count() === 0, 'and the screen stays in the game');
+    assert.equal(await phone.evaluate(async () => (await import('/games/island.js')).debug.client.state.leave), null);
+    // Safety net: if the host does park an explorer that is still on screen, the screen asks for it back.
+    await host.evaluate(async (id) => { const w = (await import('/games/island.js')).debug.world; w.park(w.players.get(id)); }, phoneId);
+    await waitFor(host, async (id) => (await import('/games/island.js')).debug.world.players.get(id).ready === true, phoneId, 8000);
+    console.log('PASS Escape during Save and leave keeps the explorer on the island (and a stray park is undone)');
+  }
+
+  // [save-flows] A browser's older save and an account that already has one: the key stays until the player discards it.
+  {
+    const lk = '1'.repeat(64);
+    const apiUrl = saveUrl.replace(/\/+$/, '');
+    const put = await worker.fetch(new Request(apiUrl + '/explorer', { method: 'PUT', headers: { authorization: 'Bearer ' + lk, 'content-type': 'application/json' }, body: JSON.stringify({ rev: 0, data: { kind: 'island-explorer', v: 1, name: 'Old Browser', lv: 2 } }) }), { DB: D1, PIN_PEPPER: 'ci-pepper' });
+    assert.equal(put.status, 200);
+    await fifth.evaluate((k) => localStorage.setItem('island-explorer-key', k), lk);
+    await fifth.click('.isl-bagbtn');
+    await fifth.click('.isl-tabs [data-tab="save"]');
+    await fifth.click('[data-acct="open"]');
+    await fifth.fill('[name="acctName"]', 'Phone Explorer');
+    await fifth.fill('[name="acctPin"]', '4826');
+    await fifth.click('[data-acct-form] button[type="submit"]');
+    await fifth.waitForSelector('.isl-overlay', { state: 'hidden' });
+    await fifth.click('.isl-bagbtn');
+    await fifth.waitForSelector('[data-legacy="use"]');
+    assert.equal(await fifth.evaluate(() => localStorage.getItem('island-explorer-key')), lk, 'the conflict leaves the browser’s key in place');
+    await fifth.click('[data-legacy="keep"]');
+    assert.equal(await fifth.locator('[data-legacy]').count(), 0, 'Keep it for later hides the choice');
+    assert.equal(await fifth.evaluate(() => localStorage.getItem('island-explorer-key')), lk, 'and keeps the key');
+    assert.equal((await worker.fetch(new Request(apiUrl + '/explorer', { headers: { authorization: 'Bearer ' + lk } }), { DB: D1, PIN_PEPPER: 'ci-pepper' })).status, 200, 'and the save on the server');
+    console.log('PASS a legacy conflict keeps the browser’s key until it is discarded');
+  }
+
+  // The Save centre: a failed save shows its reason and Retry, Load adventure swaps the explorer mid-session.
+  {
+    const apiUrl = saveUrl.replace(/\/+$/, '');
+    const phoneId = ids.phone;
+    const hostP = () => host.evaluate(async (id) => { const p = (await import('/games/island.js')).debug.world.players.get(id); return { ready: p.ready, parked: !!p.parked, shells: p.ex.shells, comp: p.comp }; }, phoneId);
+    const tab = async () => { await phone.evaluate(() => { const b = document.querySelector('.isl-panel [data-tab="save"]'); if (b) b.click(); else { document.querySelector('.isl-bagbtn').click(); document.querySelector('.isl-tabs [data-tab="save"]').click(); } }); await phone.waitForSelector('.isl-panel-body[data-tab="save"]'); };
+    await phone.keyboard.press('Escape');
+    await tab();
+    const text = await phone.innerText('.isl-panel');
+    assert.ok(/Last cloud save/.test(text) && await phone.locator('[data-save="cloud"]').count() === 1 && await phone.locator('[data-save="load"]').count() === 1, 'the Save tab has Save adventure, Load adventure and the last cloud save');
+    assert.ok(!/file/i.test(text), 'and no file option');
+    const rowNow = () => db.prepare('SELECT rev, data FROM explorers WHERE id = (SELECT \'a:\' || id FROM accounts WHERE name = ?)').get('phone explorer');
+    const revBefore = rowNow().rev;
+    // A failed save: the reason and Retry show; the session keeps running; the last good save stays.
+    await host.evaluate(async (id) => { const w = (await import('/games/island.js')).debug.world; const p = w.players.get(id); p.ex.shells += 3; w.bump(p, true); }, phoneId);
+    await wait(2100);
+    saveFail = true;
+    await phone.click('[data-save="cloud"]');
+    await phone.waitForSelector('.isl-panel .isl-save-state.bad');
+    assert.match(await phone.innerText('.isl-panel .isl-save-state.bad'), /free daily limit/);
+    assert.equal(await phone.locator('[data-save="retry"]').count(), 1, 'Retry is offered');
+    assert.ok(!/file/i.test(await phone.innerText('.isl-panel')), 'and no file fallback');
+    assert.equal(rowNow().rev, revBefore, 'the last good save stays');
+    const t1 = await host.evaluate(async () => (await import('/games/island.js')).debug.world.tick);
+    await wait(500);
+    assert.ok((await host.evaluate(async () => (await import('/games/island.js')).debug.world.tick)) > t1 + 5 && (await hostP()).ready, 'the session keeps running');
+    saveFail = false;
+    await wait(2100);
+    await phone.click('[data-save="retry"]');
+    await waitFor(phone, async () => { const { debug } = await import('/games/island.js'); return debug.client.state.me && !debug.client.state.me.unsaved; });
+    assert.equal(rowNow().rev, revBefore + 1, 'Retry saves');
+    console.log('PASS a failed save shows its reason and Retry; the session and the last good save are untouched');
+
+    // Load adventure: confirm first; Cancel changes nothing; OK replaces the explorer with the saved one.
+    const saved = JSON.parse(rowNow().data);
+    await host.evaluate(async (id) => { const w = (await import('/games/island.js')).debug.world; const p = w.players.get(id); p.ex.shells += 40; w.bump(p, true); }, phoneId);
+    await waitFor(phone, async () => (await import('/games/island.js')).debug.client.state.me?.unsaved === true);
+    await tab();
+    let asked = '';
+    phone.once('dialog', (d) => { asked = d.message(); d.dismiss(); });
+    await phone.click('[data-save="load"]');
+    await wait(500);
+    assert.match(asked, /replaces your explorer here.*isn’t saved is lost/, 'Load adventure asks first');
+    assert.equal((await hostP()).shells, saved.shells + 40, 'Cancel changes nothing');
+    await host.evaluate(async (id) => { window.__oldEx = (await import('/games/island.js')).debug.world.players.get(id).ex; }, phoneId);
+    phone.once('dialog', (d) => d.accept());
+    await phone.click('[data-save="load"]');
+    await waitFor(host, async ([id, shells]) => (await import('/games/island.js')).debug.world.players.get(id).ex.shells === shells, [phoneId, saved.shells], 8000);
+    const after = await hostP();
+    assert.ok(after.ready && !after.parked && await host.evaluate(async (id) => (await import('/games/island.js')).debug.world.players.get(id).ex !== window.__oldEx, phoneId), 'the explorer was removed and added again, still on the island');
+    await waitFor(phone, async () => { const { debug } = await import('/games/island.js'); return debug.client.state.me && !debug.client.state.me.unsaved && !document.querySelector('.isl-overlay:not([hidden])'); });
+    assert.equal(await phone.locator('.isl-pick').count(), 0, 'and the screen stays in the game');
+    console.log('PASS Load adventure replaces the explorer mid-session, after a confirm');
+
+    // Recovery: a person without an account sees the note; creating one shows the code once; Forgot PIN? uses it.
+    await g2.click('.isl-bagbtn');
+    await g2.click('.isl-tabs [data-tab="save"]');
+    const noAcct = await g2.innerText('.isl-panel');
+    assert.ok(/Nothing is kept without an account/.test(noAcct) && await g2.locator('[data-save="cloud"]').count() === 0 && !/file/i.test(noAcct), 'the Save tab says nothing is kept and offers no save');
+    await g2.click('[data-acct="open"]');
+    await g2.click('[data-acct="mode-create"]');
+    await g2.fill('[name="acctName"]', 'Bea Explorer');
+    await g2.fill('[name="acctPin"]', '1590');
+    await g2.fill('[name="acctPin2"]', '1590');
+    await g2.click('[data-acct-form] button[type="submit"]');
+    await g2.waitForSelector('.isl-code');
+    const code1 = (await g2.textContent('.isl-code')).trim();
+    await g2.click('[data-code="copy"]');
+    await g2.click('[data-code-done]');
+    await g2.waitForSelector('.isl-overlay', { state: 'hidden' });
+    assert.equal(await g2.locator('.isl-code').count(), 0);
+    await g2.click('.isl-bagbtn');
+    await g2.click('.isl-tabs [data-tab="save"]');
+    await g2.click('[data-acct="signout"]');
+    await g2.click('[data-acct="open"]');
+    await g2.click('[data-acct="mode-recover"]');
+    await g2.fill('[name="acctName"]', 'bea explorer');
+    await g2.fill('[name="acctCode"]', code1.toLowerCase());
+    await g2.fill('[name="acctPin"]', '7421');
+    await g2.fill('[name="acctPin2"]', '7421');
+    await g2.click('[data-acct-form] button[type="submit"]');
+    await g2.waitForSelector('.isl-code');
+    const code2 = (await g2.textContent('.isl-code')).trim();
+    assert.notEqual(code2, code1, 'a recovery gives a fresh code');
+    await g2.click('[data-code-done]');
+    const login = (pin) => worker.fetch(new Request(apiUrl + '/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'bea explorer', pin }) }), { DB: D1, PIN_PEPPER: 'ci-pepper' }).then((x) => x.status);
+    assert.deepEqual([await login('7421'), await login('1590')], [200, 401], 'the new PIN works and the old one doesn’t');
+    console.log('PASS the recovery code is shown once and Forgot PIN? sets a new PIN with it');
+
+    // An account that has no code yet (made before codes) gets "Get a recovery code".
+    await phone.evaluate(() => { const s = JSON.parse(localStorage.getItem('island-session')); s.recovery = false; localStorage.setItem('island-session', JSON.stringify(s)); });
+    await phone.keyboard.press('Escape');
+    await tab();
+    await phone.click('.isl-tabs [data-tab="team"]'); await phone.click('.isl-tabs [data-tab="save"]');
+    await phone.click('[data-acct="getcode"]');
+    await phone.waitForSelector('.isl-code');
+    await phone.click('[data-code-done]');
+    await tab();
+    assert.equal(await phone.locator('[data-acct="getcode"]').count(), 0, 'the button goes once a code was shown');
+    console.log('PASS an older account can get a recovery code from the Save tab');
+  }
+
   // Phone layout: the world fills the screen, nothing scrolls sideways.
   assert.ok(await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'no sideways scrolling on the phone');
   const sizes = await phone.evaluate(() => { const r = document.querySelector('.isl-root').getBoundingClientRect(); return { w: r.width, h: r.height, bottom: r.bottom, vw: innerWidth, vh: innerHeight }; });
@@ -233,6 +399,7 @@ try {
   await host.screenshot({ path: fileURLToPath(new URL('island-desktop.png', out)) });
   assert.deepEqual(errors, [], 'no browser errors');
   console.log('PASS phone layout fills the screen with no sideways scrolling; no browser errors');
+  await webkitSolo();
 } catch (e) {
   console.error(e);
   console.error('Browser errors:', errors.slice(0, 8));
@@ -240,4 +407,66 @@ try {
   for (const [i, c] of contexts.entries()) for (const p of c.pages()) await p.screenshot({ path: fileURLToPath(new URL(`island-failure-${i}.png`, out)) }).catch(() => {});
 } finally {
   await browser?.close(); broker.kill(); server.close();
+}
+
+// WebKit, one explorer alone on the host's device: the world's ticker must start (WebKit reports a failed
+// Worker only after the fact), and moving, talking and saving to the cloud must work. Set SKIP_WEBKIT=1 to skip.
+async function webkitSolo() {
+  if (process.env.SKIP_WEBKIT) return console.log('SKIP WebKit solo (SKIP_WEBKIT is set)');
+  const { webkit } = await import('playwright');
+  const wk = await webkit.launch().catch((e) => { throw Error('WebKit is not available (run: npx playwright install webkit, or set SKIP_WEBKIT=1): ' + e.message); });
+  const wkErrors = [];
+  try {
+    const context = await wk.newContext({ viewport: { width: 1100, height: 700 } });
+    await context.route(/https:\/\/(unpkg\.com|cdn\.jsdelivr\.net)\/.*peerjs.*\.js/, (r) => r.fulfill({ contentType: 'text/javascript', body: localPeer }));
+    await context.route(/https:\/\/fonts\./, (r) => r.abort());
+    await context.route(saveUrl.replace(/\/+$/, '') + '/**', async (route) => {
+      const req = route.request();
+      const res = await worker.fetch(new Request(req.url(), { method: req.method(), headers: req.headers(), body: ['GET', 'HEAD', 'OPTIONS'].includes(req.method()) ? undefined : req.postData() }), { DB: D1, PIN_PEPPER: 'ci-pepper' });
+      route.fulfill({ status: res.status, headers: Object.fromEntries(res.headers), body: Buffer.from(await res.arrayBuffer()) });
+    });
+    await context.addInitScript(() => localStorage.setItem('gn-help-island', '1'));
+    const page = await context.newPage();
+    page.setDefaultTimeout(20000);
+    page.on('pageerror', (e) => wkErrors.push(e.message));
+    await page.goto(base);
+    await page.fill('#nameIn', 'Solo');
+    await page.click('[data-local="island"]');
+    await page.click('#startBtn');
+    await signUpOn(page, 'Webkit Explorer', '3917');
+    await pick(page);
+    const tick = () => page.evaluate(async () => (await import('/games/island.js')).debug.world.tick);
+    const t1 = await tick();
+    await wait(1000);
+    assert.ok((await tick()) > t1 + 10, 'WebKit: the host world keeps ticking');
+    await page.waitForSelector('.isl-hud:not([hidden])');
+    console.log('PASS WebKit: the world ticks and the HUD shows');
+
+    const x = () => page.evaluate(async () => (await import('/games/island.js')).debug.client.state.body.x);
+    const x0 = await x();
+    await page.keyboard.down('KeyD'); await wait(900); await page.keyboard.up('KeyD');
+    assert.ok((await x()) - x0 > 40, 'WebKit: the explorer moves');
+    await page.evaluate(async () => { // stand beside Elder Maru
+      const { debug } = await import('/games/island.js'), { TILE: T } = await import('/games/island-data.js');
+      const p = [...debug.world.players.values()][0]; p.body.x = 68 * T; p.body.y = 65.6 * T + 20;
+    });
+    await wait(400);
+    await page.keyboard.press('KeyE');
+    await page.waitForSelector('.isl-dialog:not([hidden]) .isl-dlg-head:has-text("Maru")');
+    console.log('PASS WebKit: moving and talking to the elder work');
+
+    await page.keyboard.press('Escape');
+    const before = db.prepare('SELECT COUNT(*) AS n FROM explorers').get().n;
+    await page.click('.isl-bagbtn');
+    await page.click('.isl-tabs [data-tab="save"]');
+    await page.click('[data-save="cloud"]');
+    await waitFor(page, async () => { const { debug } = await import('/games/island.js'); return debug.client.state.me && !debug.client.state.me.unsaved; });
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM explorers').get().n, before + 1, 'WebKit: the cloud save is stored');
+    console.log('PASS WebKit: Save adventure reaches the save service');
+    assert.deepEqual(wkErrors, [], 'WebKit: no page errors');
+  } catch (e) {
+    for (const p of wk.contexts().flatMap((c) => c.pages())) await p.screenshot({ path: fileURLToPath(new URL('island-failure-webkit.png', out)) }).catch(() => {});
+    console.error('WebKit errors:', wkErrors.slice(0, 8));
+    throw e;
+  } finally { await wk.close(); }
 }

@@ -19,6 +19,11 @@
 // device a session token, stored here only as its SHA-256. Saves made before accounts (keyed by a private
 // browser key) still load, and move into an account when its owner signs in on that browser.
 // No IP addresses are stored.
+//
+// Forgotten PINs: an account gets a one-time recovery code (like K7QM-2XPA-9TNE, about 60 bits) when it is
+// made, stored only as an HMAC with the same secret. POST /recover swaps a name + code + new PIN for a new
+// PIN, a fresh code and a new session, and ends every older session. Wrong codes are counted and paused
+// exactly like wrong PINs. Accounts made before this get a code from POST /recovery while signed in.
 
 const MAX_SAVE = 64 * 1024; // a full explorer is a few kilobytes
 const MIN_GAP_MS = 2000; // one save per explorer every two seconds at most
@@ -29,9 +34,12 @@ const DEFAULT_ORIGINS = 'https://kalalnanigoud.github.io';
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS explorers (id TEXT PRIMARY KEY, rev INTEGER NOT NULL, data TEXT NOT NULL, saved_at INTEGER NOT NULL, created_at INTEGER NOT NULL, prev_data TEXT, prev_rev INTEGER)`,
-  `CREATE TABLE IF NOT EXISTS accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, display TEXT NOT NULL, salt TEXT NOT NULL, pin_hash TEXT NOT NULL, fails INTEGER NOT NULL DEFAULT 0, locked_until INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, display TEXT NOT NULL, salt TEXT NOT NULL, pin_hash TEXT NOT NULL, fails INTEGER NOT NULL DEFAULT 0, locked_until INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, rec_hash TEXT)`,
   `CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, account_id INTEGER NOT NULL, expires_at INTEGER NOT NULL)`,
 ];
+// Columns added since the first deploy: an existing table gets them the first time a query needs one.
+const MIGRATIONS = [`ALTER TABLE accounts ADD COLUMN rec_hash TEXT`];
+const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // 31 letters and digits, none that look alike (no O/0, I/1/L)
 
 const counters = { all: new Map(), signIn: new Map() }; // address -> [window start, count]; never stored
 function tooBusy(request, now, kind = 'all', limit = PER_MINUTE) {
@@ -69,12 +77,26 @@ function cleanName(raw) {
   return name.length >= 3 && name.length <= 20 && /^[\p{L}\p{N} _-]+$/u.test(name) ? name : null;
 }
 const validPin = (pin) => typeof pin === 'string' && /^\d{4}$/.test(pin);
+// 12 characters from 31, drawn without bias (60 bits), shown as XXXX-XXXX-XXXX.
+function newCode() {
+  let out = '';
+  while (out.length < 12) for (const b of crypto.getRandomValues(new Uint8Array(24))) if (b < 248 && out.length < 12) out += CODE_ALPHABET[b % 31];
+  return out.replace(/(.{4})(?=.)/g, '$1-');
+}
+const cleanCode = (raw) => { const c = String(raw ?? '').toUpperCase().replace(/[\s-]/g, ''); return c.length === 12 && [...c].every((ch) => CODE_ALPHABET.includes(ch)) ? c : null; };
+async function codeHash(env, salt, code) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(env.PIN_PEPPER), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return hex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode('recovery:' + salt + ':' + code)));
+}
 
-// Runs a query, creating the tables the first time the database is used.
+// Runs a query, creating the tables (or adding a newer column) the first time the database needs it.
 async function withTables(env, run) {
   try { return await run(); } catch (e) {
-    if (!/no such table/i.test(String(e?.message || e))) throw e;
-    for (const sql of SCHEMA) await env.DB.prepare(sql).run();
+    const msg = String(e?.message || e);
+    if (/no such table/i.test(msg)) for (const sql of SCHEMA) await env.DB.prepare(sql).run();
+    else if (/no such column/i.test(msg)) {
+      for (const sql of MIGRATIONS) try { await env.DB.prepare(sql).run(); } catch (e2) { if (!/duplicate column/i.test(String(e2?.message || e2))) throw e2; }
+    } else throw e;
     return run();
   }
 }
@@ -100,7 +122,7 @@ export default {
     const path = url.pathname, method = request.method;
     const now = Date.now();
     if (path === '/' && method === 'GET') return json(200, { ok: true, service: 'island-saves', version: 2, storage: !!env.DB, accounts: !!env.PIN_PEPPER });
-    if (!['/explorer', '/account', '/login', '/session', '/claim'].includes(path)) return fail(404, 'not-found', 'Unknown address.');
+    if (!['/explorer', '/account', '/login', '/session', '/claim', '/recover', '/recovery'].includes(path)) return fail(404, 'not-found', 'Unknown address.');
     if (tooBusy(request, now)) return fail(429, 'busy', 'Too many requests from this network. Wait a minute and try again.');
     if (!env.DB) return fail(503, 'setup', 'The save service has no database attached yet (binding DB).');
     const DB = env.DB;
@@ -113,6 +135,21 @@ export default {
       const token = 's1.' + randomHex(32);
       await DB.prepare('INSERT INTO sessions (token_hash, account_id, expires_at) VALUES (?, ?, ?)').bind(await sha256hex(token), accountId, now + SESSION_MS).run();
       return token;
+    };
+    // Each try (a PIN or a recovery code) is counted before it is checked, in one statement that also starts
+    // a pause on every fifth miss: tries sent all at once can't slip past the limit.
+    // Resolves to { resp } (paused already) or { wrong(message) } to answer a miss.
+    const countTry = async (acct) => {
+      const tryRow = await DB.prepare(`UPDATE accounts SET fails = fails + 1,
+          locked_until = CASE WHEN (fails + 1) % 5 = 0 THEN ? + CASE WHEN fails + 1 >= 15 THEN 86400000 WHEN fails + 1 >= 10 THEN 3600000 ELSE 900000 END ELSE locked_until END
+          WHERE id = ? AND locked_until <= ? RETURNING fails, locked_until`).bind(now, acct.id, now).first();
+      const pause = (until) => fail(423, 'locked', `Too many wrong tries for this name. Try again ${until - now > 3600000 ? 'tomorrow' : `in ${Math.ceil((until - now) / 60000)} minutes`}.`, { retryAt: until });
+      if (!tryRow) {
+        // Paused, perhaps by a try that arrived a moment ago: read when the pause ends.
+        const l = await DB.prepare('SELECT locked_until FROM accounts WHERE id = ?').bind(acct.id).first();
+        return { resp: pause(Math.max(Number(l?.locked_until) || 0, now + 60000)) };
+      }
+      return { wrong: (message) => (Number(tryRow.locked_until) > now ? pause(Number(tryRow.locked_until)) : fail(401, 'wrong', message, { left: 5 - (Number(tryRow.fails) % 5) })) };
     };
     // Who is asking: a signed-in account (session token) or, for saves made before accounts, a browser key.
     const whoIs = async () => {
@@ -135,11 +172,12 @@ export default {
         const name = cleanName(b?.name);
         if (!name) return fail(400, 'name', 'Choose a name of 3 to 20 letters or numbers (spaces, - and _ are fine).');
         if (!validPin(b?.pin)) return fail(400, 'pin', 'The PIN must be exactly 4 digits.');
-        const salt = randomHex(16);
-        const row = await withTables(env, async () => DB.prepare('INSERT INTO accounts (name, display, salt, pin_hash, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (name) DO NOTHING RETURNING id')
-          .bind(name.toLowerCase(), name, salt, await pinHash(env, salt, b.pin), now).first());
+        const salt = randomHex(16), code = newCode();
+        // The code goes in with the account (the column is added first if this database predates it).
+        const row = await withTables(env, async () => DB.prepare('INSERT INTO accounts (name, display, salt, pin_hash, created_at, rec_hash) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (name) DO NOTHING RETURNING id')
+          .bind(name.toLowerCase(), name, salt, await pinHash(env, salt, b.pin), now, await codeHash(env, salt, cleanCode(code))).first());
         if (!row) return fail(409, 'taken', 'That name is taken. Choose another, or sign in if it’s yours.');
-        return json(200, { token: await newSession(row.id), name });
+        return json(200, { token: await newSession(row.id), name, code, recovery: true });
       }
 
       if (path === '/login' && method === 'POST') {
@@ -151,23 +189,37 @@ export default {
         if (!name || !validPin(b?.pin)) return wrong();
         const acct = await withTables(env, () => DB.prepare('SELECT id, display, salt, pin_hash, locked_until FROM accounts WHERE name = ?').bind(name.toLowerCase()).first());
         if (!acct) return wrong();
-        // Each try is counted before the PIN is checked, in one statement that also starts a pause on every
-        // fifth miss: tries sent all at once can't slip past the limit.
-        const tryRow = await DB.prepare(`UPDATE accounts SET fails = fails + 1,
-            locked_until = CASE WHEN (fails + 1) % 5 = 0 THEN ? + CASE WHEN fails + 1 >= 15 THEN 86400000 WHEN fails + 1 >= 10 THEN 3600000 ELSE 900000 END ELSE locked_until END
-            WHERE id = ? AND locked_until <= ? RETURNING fails, locked_until`).bind(now, acct.id, now).first();
-        const pause = (until) => fail(423, 'locked', `Too many wrong PINs for this name. Try again ${until - now > 3600000 ? 'tomorrow' : `in ${Math.ceil((until - now) / 60000)} minutes`}.`, { retryAt: until });
-        if (!tryRow) {
-          // Paused, perhaps by a try that arrived a moment ago: read when the pause ends.
-          const l = await DB.prepare('SELECT locked_until FROM accounts WHERE id = ?').bind(acct.id).first();
-          return pause(Math.max(Number(l?.locked_until) || 0, now + 60000));
-        }
-        if (!same(await pinHash(env, acct.salt, b.pin), acct.pin_hash)) {
-          return Number(tryRow.locked_until) > now ? pause(Number(tryRow.locked_until)) : fail(401, 'wrong', 'That name and PIN don’t match.', { left: 5 - (Number(tryRow.fails) % 5) });
-        }
+        const miss = await countTry(acct);
+        if (miss.resp) return miss.resp;
+        if (!same(await pinHash(env, acct.salt, b.pin), acct.pin_hash)) return miss.wrong('That name and PIN don’t match.');
         await DB.prepare('UPDATE accounts SET fails = 0, locked_until = 0 WHERE id = ?').bind(acct.id).run();
         await DB.prepare('DELETE FROM sessions WHERE account_id = ? AND expires_at <= ?').bind(acct.id, now).run();
-        return json(200, { token: await newSession(acct.id), name: acct.display });
+        const rec = await withTables(env, () => DB.prepare('SELECT rec_hash IS NOT NULL AS has FROM accounts WHERE id = ?').bind(acct.id).first());
+        return json(200, { token: await newSession(acct.id), name: acct.display, recovery: !!rec?.has });
+      }
+
+      if (path === '/recover' && method === 'POST') {
+        if (tooBusy(request, now, 'signIn', SIGN_INS_PER_MINUTE)) return fail(429, 'busy', 'Too many tries from this network. Wait a minute and try again.');
+        if (!env.PIN_PEPPER) return fail(503, 'setup', 'Explorer accounts aren’t switched on for this save service yet (secret PIN_PEPPER).');
+        const b = await readBody();
+        const name = cleanName(b?.name), code = cleanCode(b?.code);
+        const wrong = () => fail(401, 'wrong', 'That name and recovery code don’t match.');
+        if (!validPin(b?.newPin)) return fail(400, 'pin', 'The new PIN must be exactly 4 digits.');
+        if (!name || !code) return wrong();
+        const acct = await withTables(env, () => DB.prepare('SELECT id, display, salt, rec_hash FROM accounts WHERE name = ?').bind(name.toLowerCase()).first());
+        if (!acct) return wrong();
+        // Counted and paused like PINs; an account with no code still counts, so it can't be told apart.
+        const miss = await countTry(acct);
+        if (miss.resp) return miss.resp;
+        const mine = await codeHash(env, acct.salt, code);
+        if (!acct.rec_hash || !same(mine, acct.rec_hash)) return miss.wrong('That name and recovery code don’t match.');
+        const fresh = newCode(), salt = randomHex(16);
+        // The old code only works once: the update names it, so two tries at once can't both win.
+        const r = await DB.prepare('UPDATE accounts SET salt = ?, pin_hash = ?, rec_hash = ?, fails = 0, locked_until = 0 WHERE id = ? AND rec_hash = ?')
+          .bind(salt, await pinHash(env, salt, b.newPin), await codeHash(env, salt, cleanCode(fresh)), acct.id, acct.rec_hash).run();
+        if (!r.meta?.changes) return wrong();
+        await DB.prepare('DELETE FROM sessions WHERE account_id = ?').bind(acct.id).run();
+        return json(200, { token: await newSession(acct.id), name: acct.display, code: fresh, recovery: true });
       }
 
       if (path === '/session' && method === 'DELETE') {
@@ -179,6 +231,17 @@ export default {
       const who = await whoIs();
       if (!who) return fail(401, 'signin', 'Sign in to your explorer account to use cloud saves.');
 
+      if (path === '/recovery' && method === 'POST') {
+        // A signed-in account asks for a (new) recovery code; the old one stops working.
+        if (!who.account) return fail(401, 'signin', 'Sign in first.');
+        if (!env.PIN_PEPPER) return fail(503, 'setup', 'Explorer accounts aren’t switched on for this save service yet (secret PIN_PEPPER).');
+        const acct = await DB.prepare('SELECT salt FROM accounts WHERE id = ?').bind(who.account).first();
+        if (!acct) return fail(401, 'signin', 'Sign in first.');
+        const code = newCode();
+        await withTables(env, async () => DB.prepare('UPDATE accounts SET rec_hash = ? WHERE id = ?').bind(await codeHash(env, acct.salt, cleanCode(code)), who.account).run());
+        return json(200, { code, recovery: true });
+      }
+
       if (path === '/claim' && method === 'POST') {
         // Moves a save made in this browser before accounts into the signed-in account (if it has none).
         if (!who.account) return fail(401, 'signin', 'Sign in first.');
@@ -188,6 +251,18 @@ export default {
         const old = await sha256hex(key);
         const r = await withTables(env, () => DB.prepare('UPDATE explorers SET id = ? WHERE id = ? AND NOT EXISTS (SELECT 1 FROM explorers WHERE id = ?)').bind(who.id, old, who.id).run());
         if (r.meta?.changes) return json(200, { moved: true });
+        if (b.replace === true) {
+          // The browser's older explorer becomes the account's; the account's current save is kept as prev_*.
+          // One batch (atomic on D1): the swap, then the browser's row goes, only if the swap happened.
+          const [swap] = await DB.batch([
+            DB.prepare('UPDATE explorers SET prev_data = data, prev_rev = rev, data = (SELECT data FROM explorers WHERE id = ?1), rev = rev + 1, saved_at = ?2 WHERE id = ?3 AND EXISTS (SELECT 1 FROM explorers WHERE id = ?1)').bind(old, now, who.id),
+            DB.prepare('DELETE FROM explorers WHERE id = ?1 AND (SELECT data FROM explorers WHERE id = ?2) = data').bind(old, who.id),
+          ]);
+          if (swap.meta?.changes) {
+            const row = await DB.prepare('SELECT rev FROM explorers WHERE id = ?').bind(who.id).first();
+            return json(200, { replaced: true, rev: Number(row?.rev), savedAt: now });
+          }
+        }
         const has = await DB.prepare('SELECT 1 AS x FROM explorers WHERE id = ?').bind(who.id).first();
         return has ? fail(409, 'has-save', 'This account already has a saved explorer.') : fail(404, 'none', 'Nothing was saved in this browser.');
       }
@@ -235,7 +310,7 @@ export default {
       return fail(405, 'method', 'Use GET or PUT.');
     } catch (e) {
       console.error('island-saves storage error', String(e?.message || e));
-      return fail(503, 'storage', 'The save service could not reach its storage. It may have reached its free daily limit. Your game is still running: try again later, or save to a file.');
+      return fail(503, 'storage', 'The save service could not reach its storage. It may have reached its free daily limit. Your game is still running: try again later.');
     }
   },
 };

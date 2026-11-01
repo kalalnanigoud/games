@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "test": "node tools/test.mjs 10",
-    "test:browser": "node tools/browser-ci.mjs && node tools/multiplayer-ci.mjs"
+    "test:browser": "node tools/browser-ci.mjs && node tools/multiplayer-ci.mjs && node tools/island-ci.mjs",
+    "test:all": "npm test && npm run test:browser"
   },
   "devDependencies": {
     "peer": "1.0.2",
