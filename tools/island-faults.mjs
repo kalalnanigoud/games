@@ -19,14 +19,29 @@ const solo = async (page, account = true) => soloIsland(page, 'Fault Explorer ' 
 const tests = {
   async 'a slow save finishes, and the island keeps running meanwhile'(browser) {
     const page = await fresh(browser); await solo(page);
-    env.fault = 'slow'; env.delay = 2500;
+    // Hold the response explicitly, rather than racing a fixed sleep on a busy runner.
+    let release;
+    env.saveGate = new Promise(resolve => { release = resolve; });
     await openSave(page);
     const before = rows();
-    await page.click('[data-save="cloud"]');
-    await ticking(page, 'during the save');
-    assert.equal(rows(), before, 'nothing is stored before the service answers');
-    await waitFor(page, async () => { const { debug } = await import('/games/island.js'); return !debug.client.state.me?.unsaved; }, null, 15000);
+    try {
+      await page.click('[data-save="cloud"]');
+      const deadline = Date.now() + 15000;
+      while (!env.saves && Date.now() < deadline) await wait(50);
+      assert.equal(env.saves, 1, 'the manual snapshot reaches the service');
+      await ticking(page, 'during the save');
+      assert.equal(rows(), before, 'nothing is stored before the service answers');
+      // New progress during an upload must remain unsaved after the older snapshot lands.
+      await page.evaluate(async () => {
+        const { debug } = await import('/games/island.js');
+        const p = [...debug.world.players.values()][0]; p.ex.shells++; debug.world.bump(p, true);
+      });
+    } finally { release(); env.saveGate = null; }
+    await waitFor(page, async () => (await import('/games/island.js')).debug.client.state.me?.lastSave > 0, null, 15000);
     assert.equal(rows(), before + 1, 'the slow save lands');
+    const stored = env.db.prepare('SELECT data FROM explorers ORDER BY saved_at DESC LIMIT 1').get();
+    assert.deepEqual(JSON.parse(stored.data), env.savedRequests.at(-1).data, 'the exact requested snapshot was stored');
+    assert.equal(await unsaved(page), true, 'new progress is not falsely acknowledged as saved');
     assert.deepEqual(await rej(page), []);
   },
   async 'a failed save keeps the session running and offers Retry'(browser) {

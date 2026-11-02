@@ -1,5 +1,15 @@
 import assert from 'node:assert/strict';
 import { Race, TRACK } from '../games/rally-sim.js';
+for (const fps of [4, 10, 60]) {
+  const clock = new Race();
+  for (let i = 0; i < fps * 4; i++) clock.advance(1 / fps, { brake: true });
+  assert.equal(clock.countdown, 0, fps + ' fps: countdown completes in real elapsed time');
+  assert.ok(clock.time > 0.9 && clock.time <= 1.01, fps + ' fps: race clock stays near one second');
+  clock.paused = true; const before = clock.time;
+  clock.advance(0.25); assert.equal(clock.time, before, 'paused time never catches up');
+}
+const stalled = new Race(); stalled.countdown = 0; stalled.advance(30, { brake: true });
+assert.ok(stalled.time <= 0.251, 'long stalls have bounded catch-up');
 const r = new Race();
 r.step(0.05); assert.equal(r.time, 0, 'countdown blocks driving');
 r.countdown = 0;

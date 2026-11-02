@@ -46,10 +46,10 @@ function mount(box, ctx, level) {
   let previousMessage = '';
   function loop(now) {
     if (!root.isConnected) return stop();
-    const dt = Math.min(0.05, (now - (last || now)) / 1000); last = now;
+    const dt = Math.min(0.25, (now - (last || now)) / 1000); last = now;
     const overlay = !!document.querySelector('.modal-bg, .gh-sheet');
     if (overlay) clear();
-    if (canDrive && !overlay) race.step(dt, { steer: Number(keys.has('KeyD') || keys.has('ArrowRight') || active('right')) - Number(keys.has('KeyA') || keys.has('ArrowLeft') || active('left')), brake: keys.has('ArrowDown') || keys.has('KeyS') || active('brake'), boost: keys.has('Space') || active('boost') });
+    if (canDrive && !overlay) race.advance(dt, { steer: Number(keys.has('KeyD') || keys.has('ArrowRight') || active('right')) - Number(keys.has('KeyA') || keys.has('ArrowLeft') || active('left')), brake: keys.has('ArrowDown') || keys.has('KeyS') || active('brake'), boost: keys.has('Space') || active('boost') });
     draw(g, race);
     const c = race.cars[0], place = race.order().indexOf(c) + 1;
     root.querySelector('.rally-status').textContent = `Lap ${Math.min(3, c.lap + 1)}/3 · ${place}/4 · ${fmt(race.time)} · Boost ${Math.round(c.boost * 100)}%`;

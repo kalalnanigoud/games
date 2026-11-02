@@ -20,6 +20,16 @@ export class Race {
     this.time = 0; this.countdown = 3; this.result = null; this.paused = false;
     this.cars = ['You', 'Nova', 'Bolt', 'Comet'].map((name, i) => ({ name, x: TRACK[0].x + (i % 2 ? 15 : -15), y: TRACK[0].y - Math.floor(i / 2) * 30, angle: Math.PI / 2, speed: 0, boost: 1, lap: 0, checkpoint: 1, finished: null, offroad: false, index: 0 }));
   }
+  // Keep elapsed race time at slow display rates while retaining small physics steps.
+  // Bound catch-up after a long browser stall; hidden/paused races do not advance.
+  advance(dt, input = {}) {
+    let remaining = clamp(Number.isFinite(dt) ? dt : 0, 0, 0.25);
+    while (remaining > 1e-9) {
+      const step = Math.min(remaining, 0.05);
+      this.step(step, input);
+      remaining -= step;
+    }
+  }
   step(dt, input = {}) {
     if (this.paused || this.result) return;
     dt = clamp(Number.isFinite(dt) ? dt : 0, 0, 0.05);

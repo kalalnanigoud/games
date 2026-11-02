@@ -317,6 +317,9 @@ export function startPractice(root, opts) {
   });
   cv.addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse' && e.button === 0) inp.bits |= ACTION_BITS.attack; });
   addEventListener('keydown', onKey); addEventListener('keyup', onKey); addEventListener('blur', blur);
+  // Controls are usable immediately, even before a software-rendered first frame.
+  el.querySelector('.isl-touch').hidden = !touchMode();
+  el.querySelector('[data-pr="controls"]').hidden = touchMode();
   paintSay();
   raf = requestAnimationFrame(loop);
   el.tabIndex = -1;

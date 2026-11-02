@@ -39,7 +39,7 @@ export async function startEnv({ withBroker = false } = {}) {
   const D1 = fakeD1(db);
   const CONFIG = await fs.readFile(new URL('../js/config.js', import.meta.url), 'utf8');
   const saveUrl = (/islandSaves:\s*'([^']+)'/.exec(CONFIG)?.[1] || 'https://island-saves.test').replace(/\/+$/, '');
-  const env = { base, db, saveUrl, fault: 'ok', delay: 0, saves: 0, errors: [], contexts: [], browsers: [] };
+  const env = { base, db, saveUrl, fault: 'ok', delay: 0, saveGate: null, savedRequests: [], saves: 0, errors: [], contexts: [], browsers: [] };
   const isRead = (m) => m === 'GET' || m === 'HEAD' || m === 'OPTIONS';
   // A new browser context wired to the local servers; page errors are collected into env.errors.
   env.open = async (browser, opts = {}, init) => {
@@ -50,7 +50,11 @@ export async function startEnv({ withBroker = false } = {}) {
     await context.route(saveUrl + '/**', async (route) => {
       const req = route.request(), m = req.method();
       const write = m === 'PUT' && /\/explorer/.test(req.url()); // the save itself, not sign-in
-      if (write) env.saves++;
+      if (write) {
+        env.saves++;
+        env.savedRequests.push(JSON.parse(req.postData()));
+        if (env.saveGate) await env.saveGate;
+      }
       if (write && env.fault === 'drop') return route.abort('connectionreset');
       if (write && env.fault === 'slow') await wait(env.delay);
       if (write && env.fault === 'fail') return route.fulfill({ status: 500, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: '{"error":"The save service is having trouble."}' });

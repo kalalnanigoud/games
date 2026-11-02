@@ -17,9 +17,17 @@ try {
       assert.equal(await page.locator('[data-game="rally"]').count(), 0, 'online picker excludes solo race');
       await page.click('#pickerModal .picker-x');
       await page.evaluate(async () => (await import('/js/net.js')).leave());
+      await page.bringToFront();
       await page.click('[data-local="rally"]'); await page.click('#startBtn');
       await page.waitForSelector('.rally canvas');
-      await waitFor(page, async () => (await import('/games/rally.js')).debug.race.countdown === 0);
+      try { await waitFor(page, async () => (await import('/games/rally.js')).debug.race.countdown === 0); }
+      catch (error) {
+        console.error('Countdown diagnostics', await page.evaluate(async () => {
+          const r = (await import('/games/rally.js')).debug.race;
+          return { countdown: r?.countdown, paused: r?.paused, visibility: document.visibilityState, focused: document.hasFocus(), overlay: !!document.querySelector('.modal-bg, .gh-sheet') };
+        }));
+        throw error;
+      }
       const before = await page.evaluate(async () => (await import('/games/rally.js')).debug.race.cars[0].angle);
       if (phone) { const b = page.locator('[data-drive="right"]'); const box = await b.boundingBox(); await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down(); await wait(350); await page.mouse.up(); }
       else { await page.keyboard.down('ArrowRight'); await wait(350); await page.keyboard.up('ArrowRight'); }

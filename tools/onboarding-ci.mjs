@@ -176,7 +176,9 @@ async function touchFlow(browser, [w, h, name]) {
   await page.click('.isl-pick [data-pick="new"]');
   await page.waitForSelector('.isl-practice');
   const inView = async (sel, scope = '') => {
-    const r = await page.locator(scope + ' ' + sel).first().boundingBox();
+    const control = page.locator(scope + ' ' + sel).first();
+    await control.waitFor({ state: 'visible' });
+    const r = await control.boundingBox();
     assert.ok(r, `${name}: ${sel} is on screen`);
     assert.ok(r.x >= -1 && r.y >= -1 && r.x + r.width <= w + 1 && r.y + r.height <= h + 1, `${name}: ${sel} sits inside the ${w}x${h} screen (${JSON.stringify(r)})`);
     return r;
