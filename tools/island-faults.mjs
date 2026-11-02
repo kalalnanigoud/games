@@ -89,12 +89,13 @@ const tests = {
     await page.waitForSelector('[data-save="retry"]');
     assert.equal(rows(), base0);
     await ticking(page, 'offline');
-    env.fault = 'ok';
-    await page.context().setOffline(true);
+    // The device reports itself offline and requests fail. (context.setOffline kills WebKit's browser on Linux.)
+    const online = (on) => page.evaluate((on) => { Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => on }); dispatchEvent(new Event(on ? 'online' : 'offline')); }, on);
+    env.fault = 'drop'; await online(false);
     await page.click('[data-save="retry"]');
     await page.waitForSelector('[data-save="retry"]');
     assert.equal(rows(), base0, 'still nothing stored while the device is offline');
-    await page.context().setOffline(false);
+    env.fault = 'ok'; await online(true);
     await page.click('[data-save="retry"]');
     await waitFor(page, async () => { const { debug } = await import('/games/island.js'); return !debug.client.state.me?.unsaved; });
     assert.equal(rows(), base0 + 1, 'saved after the connection returns');
