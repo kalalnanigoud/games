@@ -24,49 +24,58 @@ jobs:
           CI: 'true'
 
   browser:
-    name: Rendering at phone and desktop sizes
-    runs-on: ubuntu-24.04 # pinned: ubuntu-latest moves to Ubuntu 26, which the headless browser may not support yet
-    timeout-minutes: 20
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      # Report every suite even when another parallel job fails.
+      fail-fast: false
+      matrix:
+        include:
+          - suite: browser-ci
+            name: Game rendering (phone and desktop)
+            browsers: chromium
+          - suite: multiplayer-ci
+            name: Multiplayer and touch
+            browsers: chromium webkit
+          - suite: island-ci
+            name: Island (four live players)
+            browsers: chromium webkit
+          - suite: rally-ci
+            name: Pocket Rally
+            browsers: chromium webkit
+          - suite: arena-ci
+            name: Arena Rush
+            browsers: chromium
+          - suite: onboarding-ci
+            name: Onboarding and controls
+            browsers: chromium webkit
+          - suite: fx-toggle
+            name: Lower effects toggle
+            browsers: chromium
+          - suite: startup-ci
+            name: Startup and storage resilience
+            browsers: chromium webkit
+          - suite: island-faults
+            name: Island save and failure recovery
+            browsers: chromium webkit
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-      - name: Install a headless browser
+          cache: npm
+      - name: Install browser dependencies
         run: |
           npm ci
-          npx playwright install --with-deps chromium webkit
-      - name: Browser checks
-        run: node tools/browser-ci.mjs
-      - name: Multiplayer and WebKit touch checks
-        if: success() || failure()
-        run: node tools/multiplayer-ci.mjs
-      - name: Creature Island with four live players
-        if: success() || failure()
-        run: node tools/island-ci.mjs
-      - name: Pocket Rally
-        if: success() || failure()
-        run: node tools/rally-ci.mjs
-      - name: Arena Rush
-        if: success() || failure()
-        run: node tools/arena-ci.mjs
-      - name: Onboarding, controls and practice
-        if: success() || failure()
-        run: node tools/onboarding-ci.mjs
-      - name: Lower effects toggle
-        if: success() || failure()
-        run: node tools/fx-toggle-shot.mjs
-      - name: Startup, storage fallback, and CDN resilience
-        if: success() || failure()
-        run: node tools/startup-ci.mjs
-      - name: Creature Island fault injection (Chromium and WebKit)
-        if: success() || failure()
-        run: node tools/island-faults.mjs
-      - name: Upload browser traces and screenshots
+          npx playwright install --with-deps ${{ matrix.browsers }}
+      - name: Run browser suite
+        run: node tools/test-all.mjs --only ${{ matrix.suite }}
+      - name: Upload browser logs, traces and screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: browser-results
+          name: browser-results-${{ matrix.suite }}
           path: test-results/
           retention-days: 7
 
