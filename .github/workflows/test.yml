@@ -73,7 +73,7 @@ jobs:
         run: node tools/test-all.mjs --only ${{ matrix.suite }}
       - name: Upload browser logs, traces and screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: browser-results-${{ matrix.suite }}
           path: test-results/
@@ -100,7 +100,7 @@ jobs:
           PERF_BUDGET_MS: '2500'
       - name: Upload performance results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: island-performance
           path: |
@@ -125,9 +125,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: '.'
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
