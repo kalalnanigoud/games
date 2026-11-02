@@ -32,33 +32,76 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - suite: browser-ci
+          - id: render
+            suite: browser-ci
             name: Game rendering (phone and desktop)
             browsers: chromium
-          - suite: multiplayer-ci
-            name: Multiplayer and touch
-            browsers: chromium webkit
-          - suite: island-ci
-            name: Island (four live players)
-            browsers: chromium webkit
-          - suite: rally-ci
+          - id: multiplayer-core
+            suite: multiplayer-ci
+            name: Multiplayer connections and state
+            browsers: chromium
+            part: core
+          - id: multiplayer-voice
+            suite: multiplayer-ci
+            name: Multiplayer voice and dropped calls
+            browsers: chromium
+            part: voice
+          - id: multiplayer-recovery
+            suite: multiplayer-ci
+            name: Host recovery and tournament continuity
+            browsers: chromium
+            part: recovery
+          - id: multiplayer-touch
+            suite: multiplayer-ci
+            name: WebKit touch library
+            browsers: webkit
+            part: touch
+          - id: island-chromium
+            suite: island-ci
+            name: Island four-player adventure (Chromium)
+            browsers: chromium
+            browser: chromium
+          - id: island-webkit
+            suite: island-ci
+            name: Island solo adventure (WebKit)
+            browsers: webkit
+            browser: webkit
+          - id: rally
+            suite: rally-ci
             name: Pocket Rally
             browsers: chromium webkit
-          - suite: arena-ci
+          - id: arena
+            suite: arena-ci
             name: Arena Rush
             browsers: chromium
-          - suite: onboarding-ci
-            name: Onboarding and controls
-            browsers: chromium webkit
-          - suite: fx-toggle
+          - id: onboarding-chromium
+            suite: onboarding-ci
+            name: Onboarding and controls (Chromium)
+            browsers: chromium
+            only: practice,controls,touch,sample,sketch
+          - id: onboarding-webkit
+            suite: onboarding-ci
+            name: Onboarding (WebKit)
+            browsers: webkit
+            only: webkit
+          - id: effects
+            suite: fx-toggle
             name: Lower effects toggle
             browsers: chromium
-          - suite: startup-ci
+          - id: startup
+            suite: startup-ci
             name: Startup and storage resilience
             browsers: chromium webkit
-          - suite: island-faults
-            name: Island save and failure recovery
-            browsers: chromium webkit
+          - id: faults-chromium
+            suite: island-faults
+            name: Save and failure recovery (Chromium)
+            browsers: chromium
+            browser: chromium
+          - id: faults-webkit
+            suite: island-faults
+            name: Save and failure recovery (WebKit)
+            browsers: webkit
+            browser: webkit
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -70,17 +113,26 @@ jobs:
           npm ci
           npx playwright install --with-deps ${{ matrix.browsers }}
       - name: Run browser suite
+        env:
+          CI_PART: ${{ matrix.part }}
+          TEST_BROWSER: ${{ matrix.browser }}
+          ONLY: ${{ matrix.only }}
         run: node tools/test-all.mjs --only ${{ matrix.suite }}
       - name: Upload browser logs, traces and screenshots
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: browser-results-${{ matrix.suite }}
+          name: browser-results-${{ matrix.id }}
           path: test-results/
           retention-days: 7
 
   performance:
-    name: Creature Island performance (phone budget)
+    name: Island performance (${{ matrix.size }}, ${{ matrix.effects }})
+    strategy:
+      fail-fast: false
+      matrix:
+        size: [phone, desktop]
+        effects: [normal, low]
     runs-on: ubuntu-24.04 # pinned: ubuntu-latest moves to Ubuntu 26, which the headless browser may not support yet
     timeout-minutes: 20
     steps:
@@ -93,7 +145,7 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
       - name: Frame time, memory and network under 4x CPU throttling
-        run: node tools/perf-island.mjs --effects both
+        run: node tools/perf-island.mjs --sizes ${{ matrix.size }} --effects ${{ matrix.effects }}
         env:
           # The target is 40 ms (the default). Headless Chromium has no GPU, so the measured p95 is far above
           # it today; this is a regression guard. Lower it as the island gets faster.
@@ -102,7 +154,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: island-performance
+          name: island-performance-${{ matrix.size }}-${{ matrix.effects }}
           path: |
             test-results/perf-island.json
             test-results/perf-island.md

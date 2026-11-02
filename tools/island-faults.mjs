@@ -3,6 +3,8 @@
 // (the world must still tick), and audio that is missing or refuses to start (no page errors).
 //   node tools/island-faults.mjs        (SKIP_WEBKIT=1 skips WebKit)
 import assert from 'node:assert/strict';
+import { selectCases } from './ci-select.mjs';
+const testBrowsers = selectCases('TEST_BROWSER', ['chromium', 'webkit'], process.env.TEST_BROWSER || (process.env.SKIP_WEBKIT ? 'chromium' : undefined));
 import { fileURLToPath } from 'node:url';
 import { chromium, webkit } from 'playwright';
 import { startEnv, soloIsland, openSave, tick, wait, waitFor, out } from './island-harness.mjs';
@@ -142,8 +144,8 @@ const tests = {
 
 const results = [];
 const engines = [['Chromium', () => chromium.launch({ args: ['--disable-background-timer-throttling', '--disable-renderer-backgrounding'] })]];
-if (!process.env.SKIP_WEBKIT) engines.push(['WebKit', () => webkit.launch()]);
-for (const [name, launch] of engines) {
+engines.push(['WebKit', () => webkit.launch()]);
+for (const [name, launch] of engines.filter(([name]) => testBrowsers.includes(name.toLowerCase()))) {
   let browser = await launch();
   env.browsers.push(browser);
   for (const [title, fn] of Object.entries(tests)) {

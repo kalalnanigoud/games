@@ -4,6 +4,8 @@
 // through the real save Worker (on a local database); the leave prompt guards unsaved progress.
 //   node tools/island-ci.mjs
 import assert from 'node:assert/strict';
+import { selectCases } from './ci-select.mjs';
+const testBrowsers = selectCases('TEST_BROWSER', ['chromium', 'webkit'], process.env.TEST_BROWSER || (process.env.SKIP_WEBKIT ? 'chromium' : undefined));
 import fs from 'node:fs/promises';
 import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -88,6 +90,7 @@ const pick = async (page) => {
 };
 
 try {
+  if (testBrowsers.includes('chromium')) {
   // Four players share one browser here: keep pages that aren't in front animating at full speed.
   browser = await chromium.launch({ args: ['--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'] });
   const host = await open({ viewport: { width: 1280, height: 760 } });
@@ -399,7 +402,9 @@ try {
   await host.screenshot({ path: fileURLToPath(new URL('island-desktop.png', out)) });
   assert.deepEqual(errors, [], 'no browser errors');
   console.log('PASS phone layout fills the screen with no sideways scrolling; no browser errors');
-  await webkitSolo();
+  await browser.close();
+  }
+  if (testBrowsers.includes('webkit')) await webkitSolo();
 } catch (e) {
   console.error(e);
   console.error('Browser errors:', errors.slice(0, 8));
@@ -412,7 +417,6 @@ try {
 // WebKit, one explorer alone on the host's device: the world's ticker must start (WebKit reports a failed
 // Worker only after the fact), and moving, talking and saving to the cloud must work. Set SKIP_WEBKIT=1 to skip.
 async function webkitSolo() {
-  if (process.env.SKIP_WEBKIT) return console.log('SKIP WebKit solo (SKIP_WEBKIT is set)');
   const { webkit } = await import('playwright');
   const wk = await webkit.launch().catch((e) => { throw Error('WebKit is not available (run: npx playwright install webkit, or set SKIP_WEBKIT=1): ' + e.message); });
   const wkErrors = [];

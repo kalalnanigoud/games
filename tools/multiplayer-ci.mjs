@@ -7,6 +7,10 @@ import { fileURLToPath } from 'node:url';
 import { chromium, webkit } from 'playwright';
 import { createRequire } from 'node:module';
 import { checkInteractions } from './interaction-checks.mjs';
+import { selectCases } from './ci-select.mjs';
+// CI_PART=core,voice,recovery,touch; omitted runs the original complete sequence.
+const parts = selectCases('CI_PART', ['core', 'voice', 'recovery', 'touch']);
+const run = part => parts.includes(part);
 const require = createRequire(import.meta.url);
 const { createServer } = require('../serve.js');
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -62,9 +66,10 @@ async function sameView(host,guest) {
 }
 try {
   assert.ok((await fetch(`http://127.0.0.1:${brokerPort}/`)).ok, `local signaling broker responds on its assigned port ${brokerPort}`);
+  if (parts.some(part => part !== 'touch')) {
   browser=await chromium.launch({args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});
   const host=await openContext(browser,{permissions:['microphone']});
-  await checkInteractions(host, 'Chromium');
+  if (run('core')) await checkInteractions(host, 'Chromium');
   const guest=await openContext(browser,{viewport:{width:375,height:812},permissions:['microphone']});
   await host.fill('#nameIn','Host'); await host.click('[data-host="gems"]');
   await waitFor(host, async()=>(await import('/js/state.js')).S.status==='online');
@@ -80,6 +85,7 @@ try {
   await host.click('#startBtn'); await ready(host); await ready(guest); await sameView(host,guest);
   console.log('PASS cold client join with delayed module and private view');
 
+  if (run('core')) {
   // A dropped delta must trigger full resync rather than leave a broken board.
   await host.evaluate(async()=>{
     const {conns,broadcast}=await import('/js/net.js');
@@ -106,8 +112,11 @@ try {
   assert.equal((await state(guest)).token,guestId,'refresh retains the same seat');
   console.log('PASS real moves and guest refresh/reconnect');
 
-  await host.click('#voiceBtn'); await guest.click('#voiceBtn');
-  for(const page of [host,guest])await waitFor(page, async()=>(await import('/js/net.js')).voice.links===1);
+  }
+  if (run('voice')) {
+    await host.click('#voiceBtn'); await guest.click('#voiceBtn');
+    for(const page of [host,guest])await waitFor(page, async()=>(await import('/js/net.js')).voice.links===1);
+  }
   const outsider=await openContext(browser,{permissions:['microphone']});
   await outsider.fill('#nameIn','Spectator'); await outsider.fill('#codeIn',code); await outsider.click('#joinBtn');
   await ready(outsider); await sameView(host,outsider);
@@ -116,6 +125,7 @@ try {
   await outsider.evaluate(async()=>(await import('/js/net.js')).send({type:'take',gems:['red','blue','green']}));
   await waitFor(outsider,()=>document.querySelector('#toast').textContent.includes('watching'));
   console.log('PASS late join gets a spectator view and cannot move');
+  if (run('voice')) {
   const hostPeer=await host.evaluate(async()=>(await import('/js/net.js')).peer.id);
   await outsider.evaluate(async(id)=>{
     const p=new Peer();globalThis.outsiderPeer=p;
@@ -156,6 +166,8 @@ try {
   for(const page of [host,guest,newcomer])await page.click('#voiceOff');
   console.log(`PASS voice drops a switched-off phone in ${dropSecs}s, keeps the host link steady, and links up a newcomer`);
 
+  }
+  if (run('recovery')) {
   await host.reload(); await ready(host);
   await waitFor(host, async() => {
     const { S } = await import('/js/state.js');
@@ -211,11 +223,14 @@ try {
   });
   assert.deepEqual(nextMatch.actual, nextMatch.expected);
   console.log('PASS newcomer between knockout rounds watches and the next match starts');
+  }
   assert.deepEqual(errors,[],'no uncaught browser errors');
   await guest.screenshot({path:fileURLToPath(new URL('multiplayer-phone.png',out))});
   for(const [i,c] of contexts.entries())await c.tracing.stop({path:fileURLToPath(new URL(`chromium-${i}.zip`,out))});
   await browser.close(); contexts.length=0;
 
+  }
+  if (run('touch')) {
   // WebKit touch checks supplement Chromium multiplayer; no claim of real iOS testing.
   browser=await webkit.launch();
   const phone=await openContext(browser,{viewport:{width:375,height:812},hasTouch:true});
@@ -239,6 +254,7 @@ try {
   await phone.reload(); await ready(phone);
   assert.deepEqual(errors,[]);
   console.log('PASS WebKit touch library, persisted favorites, empty state, local play and refresh');
+  }
 } catch(error) {
   console.error(error); process.exitCode=1;
   if(brokerLog)console.error('Broker diagnostics:\n'+brokerLog);

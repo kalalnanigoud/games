@@ -10,6 +10,9 @@ import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { chromium, webkit } from 'playwright';
+import { selectCases } from './ci-select.mjs';
+const selected = selectCases('ONLY', ['practice', 'controls', 'touch', 'sample', 'sketch', 'webkit']);
+const only = name => selected.includes(name);
 const require = createRequire(import.meta.url);
 const { createServer } = require('../serve.js');
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -280,8 +283,7 @@ async function sketchFlow(browser) {
 
 let chromiumBrowser, webkitBrowser;
 try {
-  chromiumBrowser = await chromium.launch();
-  const only = (n) => !process.env.ONLY || process.env.ONLY.split(',').includes(n); // ONLY=sketch,touch to run some
+  if (selected.some(name => name !== 'webkit')) chromiumBrowser = await chromium.launch();
   if (only('practice')) await practiceFlow(chromiumBrowser, 'chromium');
   if (only('controls')) await controlsFlow(chromiumBrowser);
   if (only('touch')) for (const size of [[360, 640, 'portrait'], [640, 360, 'landscape']]) await touchFlow(chromiumBrowser, size);
@@ -290,7 +292,7 @@ try {
   if (only('webkit')) {
     // Software-rendered WebKit is CPU-bound: let Chromium's finished pages go before it runs.
     for (const c of contexts.splice(0)) await c.close().catch(() => {});
-    await chromiumBrowser.close().catch(() => {});
+    await chromiumBrowser?.close().catch(() => {});
     webkitBrowser = await webkit.launch(); await practiceFlow(webkitBrowser, 'webkit'); }
   assert.deepEqual([...new Set(errors)], [], 'no page errors');
   console.log('onboarding-ci: all checks passed.');

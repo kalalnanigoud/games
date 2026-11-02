@@ -3,16 +3,18 @@
 // in the village, on the shore (lots of water) and on the stormy peak (rain). Two live explorers over real
 // WebRTC (a local broker), both walking. Writes test-results/perf-island.json and .md.
 // Fails if p95 frame time on the throttled phone is over the budget.
-//   node tools/perf-island.mjs [--effects normal|low|both] [--seconds 8] [--budget 40] [--scenes village,shore,peak]
+//   node tools/perf-island.mjs [--sizes phone|desktop|phone,desktop] [--effects normal|low|both] [--seconds 8] [--budget 40] [--scenes village,shore,peak]
 import fs from 'node:fs/promises';
+import { selectCases } from './ci-select.mjs';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { startEnv, pickNew, wait, waitFor, out } from './island-harness.mjs';
 
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 const SECONDS = Number(arg('seconds', 8)), BUDGET = Number(arg('budget', process.env.PERF_BUDGET_MS || 40)), THROTTLE = Number(arg('throttle', 4));
-const effects = arg('effects', 'normal') === 'both' ? ['normal', 'low'] : [arg('effects', 'normal')];
-const scenes = arg('scenes', 'village,shore,peak').split(',');
+const effects = selectCases('--effects', ['normal', 'low'], arg('effects', 'normal') === 'both' ? undefined : arg('effects', 'normal'));
+const scenes = selectCases('--scenes', ['village', 'shore', 'peak'], arg('scenes'));
+const selectedSizes = selectCases('--sizes', ['phone', 'desktop'], arg('sizes'));
 const sizes = { phone: { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 }, desktop: { viewport: { width: 1280, height: 760 } } };
 
 const init = () => {
@@ -32,7 +34,7 @@ const results = [];
 try {
   const browser = await chromium.launch({ args: ['--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows', '--enable-precise-memory-info'] });
   env.browsers.push(browser);
-  for (const [sizeName, opts] of Object.entries(sizes)) {
+  for (const [sizeName, opts] of Object.entries(sizes).filter(([name]) => selectedSizes.includes(name))) {
     const host = await env.open(browser, opts, init);
     const guest = await env.open(browser, sizeName === 'phone' ? opts : { viewport: { width: 1024, height: 700 } }, init);
     await host.fill('#nameIn', 'Host'); await host.click('[data-host="island"]');
@@ -92,7 +94,7 @@ await fs.writeFile(new URL('perf-island.json', out), JSON.stringify({ when: new 
 const md = [`# Creature Island performance`, '', `Chromium, ${THROTTLE}x CPU throttling, two live explorers over WebRTC, ${SECONDS} s per scene. Budget: p95 frame time <= ${BUDGET} ms on the throttled phone.`, '',
   '| size | scene | effects | p50 ms | p95 ms | heap MB | bytes/s per player |', '|---|---|---|---|---|---|---|',
   ...results.map((r) => `| ${r.size} | ${r.scene} | ${r.effects} | ${r.p50} | ${r.p95}${r.size === 'phone' && r.effects === effects[0] && r.p95 > BUDGET ? ' (over budget)' : ''} | ${r.heapMB} | ${r.bytesPerPlayerPerSec} |`), '',
-  over.length ? `**FAILED**: p95 over ${BUDGET} ms on the throttled phone in ${over.map((r) => r.scene).join(', ')}.` : `Within budget on the throttled phone.`, ''].join('\n');
+  over.length ? `**FAILED**: p95 over ${BUDGET} ms on the throttled phone in ${over.map((r) => r.scene).join(', ')}.` : phone.length ? `Within budget on the throttled phone.` : `Desktop measurements only; phone budgets are checked in the phone jobs.`, ''].join('\n');
 await fs.writeFile(new URL('perf-island.md', out), md);
 console.log('\n' + md);
 process.exit(over.length ? 1 : 0);
