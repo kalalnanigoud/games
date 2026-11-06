@@ -53,15 +53,29 @@ try {
       await wait(180);
       assert.equal(await page.evaluate(async () => (await import('/games/rally.js')).debug.race.cars[0].angle), heading, 'held steering was cleared');
       await page.keyboard.up('ArrowRight');
+      // The race pauses itself when the window loses focus, which WebKit on Linux CI sometimes does around the
+      // menu; Pause is a toggle, so start from a running race and check the click really paused it.
+      const paused = () => page.evaluate(async () => (await import('/games/rally.js')).debug.race.paused);
+      const running = async () => { if (await paused()) await page.click('[data-resume]'); assert.equal(await paused(), false, 'the race is running'); };
+      await running();
       await page.click('[data-pause]');
+      assert.equal(await paused(), true, 'Pause pauses the race');
       const t = await page.evaluate(async () => (await import('/games/rally.js')).debug.race.time);
       await wait(200);
       assert.equal(await page.evaluate(async () => (await import('/games/rally.js')).debug.race.time), t);
       await page.click('[data-resume]');
       if (!phone) {
         // Pause clicked twice keeps focus; Space must then boost rather than press Pause again.
+        await running();
         await page.click('[data-pause]'); await page.click('[data-pause]');
-        const charge = await page.evaluate(async () => (await import('/games/rally.js')).debug.race.cars[0].boost);
+        assert.equal(await paused(), false, 'Pause then Resume leaves the race running');
+        // Boost only drains on the road, and the steering above can leave the car on the grass: put it where a
+        // computer racer is driving, with a full tank.
+        const charge = await page.evaluate(async () => {
+          const r = (await import('/games/rally.js')).debug.race, me = r.cars[0], on = r.cars.find((c, i) => i && !c.offroad) || r.cars[1];
+          Object.assign(me, { x: on.x, y: on.y, angle: on.angle, offroad: false, boost: 1 });
+          return me.boost;
+        });
         // Hold until the tank drains (or 4 s): WebKit on Linux CI can run only a few frames in a fixed short wait.
         await page.keyboard.down('Space');
         await page.waitForFunction(async (c) => { const r = (await import('/games/rally.js')).debug.race; return r.paused || r.cars[0].boost < c; }, charge, { timeout: 4000, polling: 100 }).catch(() => {});
