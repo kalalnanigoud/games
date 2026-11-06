@@ -67,11 +67,6 @@ jobs:
             name: Island four-player adventure (Chromium)
             browsers: chromium
             browser: chromium
-          - id: island-webkit
-            suite: island-ci
-            name: Island solo adventure (WebKit)
-            browsers: webkit
-            browser: webkit
           - id: rally
             suite: rally-ci
             name: Pocket Rally
@@ -141,6 +136,42 @@ jobs:
           path: test-results/
           retention-days: 7
 
+  # WebKit's live island crashed inside the Playwright image ("Target page... has been closed") in two of three
+  # runs, so this one suite runs on the runner itself, installing WebKit as it did before the image.
+  island-webkit:
+    name: Island solo adventure (WebKit)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies and WebKit
+        run: |
+          npm ci
+          npx playwright install --with-deps webkit
+      - name: Run browser suite (retried once if it fails or hangs)
+        env:
+          TEST_BROWSER: webkit
+        run: |
+          for attempt in 1 2; do
+            if timeout -k 10 240 node tools/test-all.mjs --only island-ci; then
+              [ "$attempt" = 1 ] || echo "::warning title=Flaky browser suite::Island solo adventure (WebKit) passed only on attempt $attempt."
+              exit 0
+            fi
+            echo "::warning title=Browser suite retry::Island solo adventure (WebKit) failed or hung on attempt $attempt."
+          done
+          exit 1
+      - name: Upload browser logs, traces and screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-results-island-webkit
+          path: test-results/
+          retention-days: 7
+
   performance:
     name: Island performance (${{ matrix.size }}, ${{ matrix.effects }})
     strategy:
@@ -182,7 +213,7 @@ jobs:
   deploy:
     name: Deploy to GitHub Pages
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [rules, browser, performance]
+    needs: [rules, browser, island-webkit, performance]
     permissions:
       contents: write # to tag each deployed version
       pages: write

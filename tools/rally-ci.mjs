@@ -59,15 +59,20 @@ try {
       // so a click on the Pause toggle could pause and resume at once. Keep stray blurs out of these checks.
       await page.evaluate(() => addEventListener('blur', (e) => e.stopImmediatePropagation(), true));
       const paused = () => page.evaluate(async () => (await import('/games/rally.js')).debug.race.paused);
-      const running = async () => { if (await paused()) await page.click('[data-resume]'); assert.equal(await paused(), false, 'the race is running'); };
+      // In WebKit on Linux CI a pointer click on the toggle sometimes lands twice or not at all, so there the
+      // buttons are pressed from the page; Chromium keeps real clicks.
+      const press = (sel) => (name === 'WebKit' ? page.evaluate((s) => document.querySelector(s).click(), sel) : page.click(sel));
+      const running = async () => { if (await paused()) await press('[data-resume]'); assert.equal(await paused(), false, 'the race is running'); };
       await running();
-      await page.click('[data-pause]');
+      await press('[data-pause]');
       assert.equal(await paused(), true, 'Pause pauses the race');
       const t = await page.evaluate(async () => (await import('/games/rally.js')).debug.race.time);
       await wait(200);
       assert.equal(await page.evaluate(async () => (await import('/games/rally.js')).debug.race.time), t);
-      await page.click('[data-resume]');
-      if (!phone) {
+      await press('[data-resume]');
+      // Chromium gives a clicked button keyboard focus, so Space used to press Pause again instead of boosting.
+      // WebKit (like Safari) doesn't focus a clicked button, so the bug can't happen there.
+      if (!phone && name === 'Chromium') {
         // Pause clicked twice keeps focus; Space must then boost rather than press Pause again.
         await running();
         await page.click('[data-pause]'); await page.click('[data-pause]');

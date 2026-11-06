@@ -11,6 +11,7 @@ import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
+import { createHash } from 'node:crypto';
 import { chromium } from 'playwright';
 import worker from '../server/island-saves.js';
 import { fakeD1 } from './fake-d1.mjs';
@@ -271,8 +272,10 @@ try {
   {
     const lk = '1'.repeat(64);
     const apiUrl = saveUrl.replace(/\/+$/, '');
+    // A browser key can no longer start a save over the network (only update its own), so put the old save straight in.
     const put = await worker.fetch(new Request(apiUrl + '/explorer', { method: 'PUT', headers: { authorization: 'Bearer ' + lk, 'content-type': 'application/json' }, body: JSON.stringify({ rev: 0, data: { kind: 'island-explorer', v: 1, name: 'Old Browser', lv: 2 } }) }), { DB: D1, PIN_PEPPER: 'ci-pepper' });
-    assert.equal(put.status, 200);
+    assert.equal(put.status, 403, 'a browser key cannot start a new save');
+    db.prepare('INSERT INTO explorers (id, rev, data, saved_at, created_at) VALUES (?, 1, ?, ?, ?)').run(createHash('sha256').update(lk).digest('hex'), JSON.stringify({ kind: 'island-explorer', v: 1, name: 'Old Browser', lv: 2 }), Date.now() - 10000, Date.now() - 10000);
     await fifth.evaluate((k) => localStorage.setItem('island-explorer-key', k), lk);
     await fifth.click('.isl-bagbtn');
     await fifth.click('.isl-tabs [data-tab="save"]');
