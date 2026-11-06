@@ -237,7 +237,8 @@ try {
   await checkInteractions(phone, 'WebKit touch');
   await phone.fill('#nameIn','Phone player'); await phone.fill('#codeIn','ABCDE');
   await phone.selectOption('[data-filter="category"]','Party');
-  assert.equal(await phone.locator('.game-card').count(),3);
+  // Court of Whispers, Sketch Party, Word Spies, Bingo and Tambola.
+  assert.equal(await phone.locator('.game-card').count(),5);
   await phone.click('[data-favorite="sketch"]');
   await phone.selectOption('[data-filter="collection"]','favorites');
   assert.equal(await phone.locator('.game-card').count(),1);
