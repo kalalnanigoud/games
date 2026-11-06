@@ -21,14 +21,15 @@ import { levelOption, levelOf } from '../js/levels.js';
 const browser = typeof document !== 'undefined';
 // Calls are paced by the clock on the host; Node simulations call as fast as moves are played.
 const paced = () => globalThis.callerPaced ?? browser;
-export const PACES = { relaxed: 8000, normal: 5500, quick: 3500 };
+// Long enough to find the number on a ticket, mark it and claim (5.5 s felt too fast in play).
+export const PACES = { relaxed: 12000, normal: 8000, quick: 5000 };
 const READY_MS = 4000; // before the first ball
 const LAST_CALL_MS = 4000; // after the last prize, for anyone else on the same number
 const BOGEY_CALLS = 3;
 // How often a computer player notices that a prize is complete on a given number.
 const NOTICE = { easy: 0.2, normal: 0.75, hard: 1 };
 
-const paceOption = { id: 'pace', label: 'Calling pace', default: 'normal', choices: [['relaxed', 'Relaxed (8 s)'], ['normal', 'Normal (5½ s)'], ['quick', 'Quick (3½ s)']] };
+const paceOption = { id: 'pace', label: 'Calling pace', default: 'normal', choices: [['relaxed', 'Relaxed (12 s)'], ['normal', 'Normal (8 s)'], ['quick', 'Quick (5 s)']] };
 
 // The same small number for the same player on the same call: a computer either notices on this number or not,
 // however often it is asked.

@@ -261,12 +261,15 @@ async function sampleFlow(browser) {
 }
 async function sketchFlow(browser) {
   let page = await open(browser, { viewport: { width: 1100, height: 800 } }, {});
-  // The warm-up waits for a turn where you guess. Seats are shuffled at the start, so hold Math.random low for
-  // that moment (the computer is seated first and draws first); it is restored after a few dozen calls.
+  // The warm-up is offered (never opened by itself) while someone else picks a word. Seats are shuffled at the
+  // start, so hold Math.random low for that moment (the computer is seated first and draws first).
   await page.click('[data-local="sketch"]'); await page.click('[data-kick]'); await page.click('#botBtn');
   await page.evaluate(() => { const r = Math.random; let n = 0; Math.random = () => (++n > 40 ? (Math.random = r)() : 0.1); });
   await page.click('#startBtn');
-  await page.waitForSelector('#skWarm', { timeout: 15000 });
+  await page.waitForSelector('.sk-warmbtn', { timeout: 15000 });
+  assert.equal(await page.locator('#skWarm').count(), 0, 'the warm-up does not open by itself');
+  await page.click('.sk-warmbtn');
+  await page.waitForSelector('#skWarm', { timeout: 5000 });
   assert.match(await page.textContent('#skWarm'), /Warm-up 1 of 3/);
   const cv = await page.locator('#skWarm canvas').boundingBox();
   await page.mouse.move(cv.x + 60, cv.y + 60); await page.mouse.down(); await page.mouse.move(cv.x + 200, cv.y + 120, { steps: 6 }); await page.mouse.up();
@@ -282,7 +285,8 @@ async function sketchFlow(browser) {
   await page.waitForSelector('#gamebox .sk-root', { timeout: 15000 });
   await wait(1500);
   assert.equal(await page.locator('#skWarm').count(), 0, 'the warm-up does not come back');
-  console.log('PASS the Sketch Party warm-up is skippable and shows once');
+  assert.equal(await page.locator('.sk-warmbtn').count(), 0, 'and is no longer offered');
+  console.log('PASS the Sketch Party warm-up is offered, never forced, skippable, and offered once');
 }
 
 let chromiumBrowser, webkitBrowser;

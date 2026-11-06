@@ -26,7 +26,14 @@ import island from './island.js';
 import rally from './rally.js';
 import bingo from './bingo.js';
 import tambola from './tambola.js';
+import handcricket from './handcricket.js';
+import rajamantri from './rajamantri.js';
+import antakshari from './antakshari.js';
+import aadupuli from './aadupuli.js';
+import ashtachamma from './ashtachamma.js';
+import npat from './npat.js';
+import atlas from './atlas.js';
 
-export const GAMES = [hexisle, gems, mosaic, bluff, chess, sketch, spies, bingo, tambola, temple, ember, keeper, signal, island, rally];
+export const GAMES = [hexisle, gems, mosaic, bluff, chess, sketch, spies, bingo, tambola, handcricket, rajamantri, npat, atlas, antakshari, aadupuli, ashtachamma, temple, ember, keeper, signal, island, rally];
 
 export const getGame = (id) => GAMES.find((g) => g.id === id) || GAMES[0];

@@ -1,7 +1,31 @@
 {
+  "aadupuli": {
+    "hash": "5e58cd50d5",
+    "file": "aadupuli-5e58cd50d5.webp",
+    "width": 960,
+    "height": 600
+  },
+  "antakshari": {
+    "hash": "e1ab2f6616",
+    "file": "antakshari-e1ab2f6616.webp",
+    "width": 960,
+    "height": 600
+  },
+  "ashtachamma": {
+    "hash": "b2a3ff5e40",
+    "file": "ashtachamma-b2a3ff5e40.webp",
+    "width": 960,
+    "height": 600
+  },
+  "atlas": {
+    "hash": "0352af58cf",
+    "file": "atlas-0352af58cf.webp",
+    "width": 960,
+    "height": 600
+  },
   "bingo": {
-    "hash": "4e4975b2bd",
-    "file": "bingo-4e4975b2bd.webp",
+    "hash": "2a1290f003",
+    "file": "bingo-2a1290f003.webp",
     "width": 960,
     "height": 600
   },
@@ -29,6 +53,12 @@
     "width": 960,
     "height": 600
   },
+  "handcricket": {
+    "hash": "172e1a00a4",
+    "file": "handcricket-172e1a00a4.webp",
+    "width": 960,
+    "height": 600
+  },
   "hexisle": {
     "hash": "3bdf7c6aa9",
     "file": "hexisle-3bdf7c6aa9.webp",
@@ -50,6 +80,18 @@
   "mosaic": {
     "hash": "4f2933d049",
     "file": "mosaic-4f2933d049.webp",
+    "width": 960,
+    "height": 600
+  },
+  "npat": {
+    "hash": "f095396cdc",
+    "file": "npat-f095396cdc.webp",
+    "width": 960,
+    "height": 600
+  },
+  "rajamantri": {
+    "hash": "79b0d35d39",
+    "file": "rajamantri-79b0d35d39.webp",
     "width": 960,
     "height": 600
   },

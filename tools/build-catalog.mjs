@@ -32,7 +32,9 @@ const entries = GAMES.map((g) => ({
   cover: coverOf(g), howTo: g.howTo, options: g.options,
   ...(g.localOnly ? { localOnly: true } : {}),
   // Flags the lobby needs before the game's code has loaded.
-  bot: !!g.bot, onTimeout: !!g.onTimeout, defaultTimer: g.defaultTimer, simultaneous: !!g.simultaneous, keepDom: !!g.keepDom,
+  // noBotSeats: the game has a bot for the test simulator only (Antakshari: computers can't sing), so the lobby
+  // offers no computer players for it.
+  bot: !!g.bot && !g.noBotSeats, onTimeout: !!g.onTimeout, defaultTimer: g.defaultTimer, simultaneous: !!g.simultaneous, keepDom: !!g.keepDom,
   // Live games (characters moving in a shared world): seats open mid-game, one player per device,
   // and nothing kept on the device except what players save themselves.
   ...(g.live ? { live: true, dropIn: !!g.dropIn, soloOnDevice: !!g.soloOnDevice, manualSave: !!g.manualSave } : {}),

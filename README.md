@@ -242,17 +242,20 @@ and the tournament brackets.
 
 ## Number-calling games
 
-- **Bingo** (2–8): the 75-ball game. A 5×5 card under B-I-N-G-O with a free centre; the host picks the
-  winning pattern (any line, four corners, the X or the full card).
+- **Bingo** (2–8): the pen-and-paper game. Everyone arranges 1–25 on their own 5×5 card (tap two numbers to
+  swap them, or shuffle) and presses Ready; then players take turns calling one number, and everyone crosses it off.
+  Each finished row, column or diagonal crosses a letter of B-I-N-G-O; the first to cross all five wins (wins on
+  the same call are shared). Cards stay secret until the end; a 30 s turn timer calls a helpful number for you.
+  `node tools/bingo-test.mjs` checks it.
 - **Tambola** (2–8): Housie with 90 balls. A 3×9 ticket of 15 numbers, and prizes for Early Five, the top,
   middle and bottom lines, Four Corners and Full House (or a quick set: Early Five, Any Line, Full House).
   Most points wins.
 
-Numbers are called automatically at the pace the host picks (about every 3½, 5½ or 8 seconds). Players mark
+In Tambola, numbers are called automatically at the pace the host picks (about every 5, 8 or 12 seconds). Players mark
 their own card by tapping, or switch on Auto-mark; marks stay on the device, and the host checks every claim
 against the numbers actually called. Everyone who rightly claims a prize before the next number shares it;
 a wrong claim is a bogey (no claims for the next 3 numbers). "Read numbers aloud" uses the device's speech.
-Both are built on `games/caller-kit.js`. `node tools/caller-test.mjs` checks cards and tickets, secrecy of
+Tambola is built on `games/caller-kit.js`. `node tools/caller-test.mjs` checks tickets, secrecy of
 the ball order and other cards, calling and pacing, claims, bogeys, shared and late prizes, and the end.
 
 ## Voice chat
@@ -315,6 +318,29 @@ For a lasting fix, sign up for a free TURN relay (Cloudflare Realtime TURN or th
 and add the `turn:` address, username and credential it gives you to `iceServers` in `js/config.js`.
 Board games use only a few KB per move, so a free plan is plenty. Note that anything in `js/config.js`
 is public on your site, so use credentials meant for browsers and keep the plan's usage limits on.
+
+## Indian favourites
+
+- **Hand Cricket** (2): the school-yard odd–eve game. Call the toss, then both throw 1–6 at the same time: a
+  match is OUT, otherwise the batter scores their number; chase the target. 1, 2 or 5 overs; 1–3 wickets.
+- **Raja Mantri Chor Sipahi** (4, computers fill the seats): four chits each round. The Mantri must name the
+  Chor; a wrong guess swaps their points. Highest total after 5 or 10 rounds wins. (No computer levels: the
+  guess is a coin flip.)
+- **Name, Place, Animal, Thing** (2–8, everyone at once): race to write all four for a random letter; unique
+  answers score 10, shared ones 5, and words not in the built-in lists go to a quick table vote.
+- **Atlas** (2–8): name a place starting with the last letter of the one before (India → Agra → …), against a
+  10/15/20 s clock. No repeats; passing, running out of time or a rejected answer costs a life.
+- **Antakshari** (2–8 in two teams, no computers): the singing game. Sing a song starting with the letter on
+  stage, press "We sang it" and type its last letter for the other team, who may challenge to a vote. Any
+  language counts; play over voice chat (the headset button) or in one room.
+- **Aadu Puli Attam** (2): goats and tigers on the 23-point triangle. 3 tigers jump to capture; 15 goats are
+  placed, then move, to hem them in. The tigers need 5, 6 or 7 captures; 100 moves without one is a goat win.
+- **Ashta Chamma** (2–4): the courtyard race with four cowrie shells (all up = 4, none up = 8, both throw
+  again). Race four pieces round a 5×5 board and into the centre, send rivals home, and capture once before
+  turning into the inner ring.
+
+Each has its own checks: `tools/handcricket-test.mjs`, `rajamantri-test.mjs`, `npat-test.mjs`, `atlas-test.mjs`,
+`antakshari-test.mjs`, `aadupuli-test.mjs` and `ashtachamma-test.mjs`, all run by `node tools/test.mjs`.
 
 ## Cooperative collection
 

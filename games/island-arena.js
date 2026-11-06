@@ -248,7 +248,8 @@ export const ARENA_CSS = `
 .isl-arena { position: absolute; right: 64px; top: 10px; min-width: 120px; max-width: min(300px, 44vw); padding: 8px 12px; border-radius: 14px; background: rgba(13,20,44,.78); border: 1px solid rgba(255,212,59,.28); pointer-events: none; text-align: right; z-index: 2; }
 .isl-arena b { display: block; font-family: var(--font-display); font-weight: 600; font-size: 1.35rem; line-height: 1.1; color: #ffe066; font-variant-numeric: tabular-nums; }
 .isl-arena span { display: block; font-size: .78rem; line-height: 1.3; color: #e9ecf5; }
-.isl-arena-end { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; background: rgba(8,12,30,.55); z-index: 9; overflow-y: auto; }
+.isl-arena-end { position: absolute; inset: 0; display: grid; place-items: start center; padding: 16px; background: rgba(8,12,30,.55); z-index: 9; overflow-y: auto; }
+.isl-arena-end > * { margin-block: auto; } /* centred, but a tall card starts at the top (Safari) */
 .isl-arena-end[hidden] { display: none; }
 .isl-arena-score { margin: 4px 0 8px; font-family: var(--font-display); font-size: 2.4rem; color: #fff; line-height: 1.1; }
 .isl-arena-score small { font-size: .9rem; color: #c5cbe0; font-family: var(--font-body); font-weight: 800; }

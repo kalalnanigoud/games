@@ -443,6 +443,7 @@ function skeleton(el) {
     const [kind, arg] = b.dataset.do.split(':');
     if (kind === 'color') { UI.color = +arg; sound('click'); return syncTools(); }
     if (kind === 'size') { UI.size = +arg; sound('click'); return syncTools(); }
+    if (kind === 'warmup') { if (!UI.warm?.el.isConnected) UI.warm = openWarmup(); sound('click'); return draw(); }
     if (kind === 'skip' && !confirm('Give up on this drawing?')) return;
     if (kind === 'clear' && !confirm('Clear the whole drawing?')) return;
     if (kind === 'choose') b.classList.add('sk-chosen'); // the word you picked lifts while the host answers
@@ -496,11 +497,13 @@ function draw() {
 
   // ---- over the canvas: choosing, the reveal, final scores ----
   const ranked = v.players.slice().sort((a, b) => b.score - a.score), got = Object.entries(v.guessed);
+  // The doodle warm-up is offered, never pushed: only in your first round, only while someone else picks a word.
+  const offerWarm = player && !isDrawer && v.round === 1 && !v.over && !UI.warm?.el.isConnected && needsWarmup();
   region('over', v.over
     ? `<div class="sk-card sk-finalcard"><div class="sk-cardtitle">${icon('trophy')}Final scores</div>${ranked.map((p, i) => `<div class="sk-final ${v.winners.includes(p.id) ? 'win' : ''}"><span class="sk-rank">${i + 1}</span>${face(p.id)}<span class="grow">${esc(p.name)}</span><b>${p.score}</b></div>`).join('')}</div>`
     : v.phase === 'choose' ? (isDrawer
       ? `<div class="sk-card sk-choosecard"><p><span class="sk-pickhint">Pick one to draw. </span>Don’t say it out loud!</p><div class="sk-choices">${v.choices.map((w, i) => `<button class="sk-pick" data-do="choose:${i}" style="--r:${[-2.5, 1.5, -1][i % 3]}deg;--t:${['#ff6fae', '#ffd166', '#4cb8ff'][i % 3]}">${IC.pencil}<span>${esc(w)}</span></button>`).join('')}</div></div>`
-      : `<div class="sk-card sk-waitcard">${face(drawer.id, 'big')}<p>${esc(drawer.name)} is picking something to draw…</p></div>`)
+      : `<div class="sk-card sk-waitcard">${face(drawer.id, 'big')}<p>${esc(drawer.name)} is picking something to draw…</p>${offerWarm ? `<button class="small sk-warmbtn" data-do="warmup">${icon('sparkle')}New here? Warm up while you wait</button>` : ''}</div>`)
     : v.phase === 'reveal' ? `<div class="sk-card sk-revealcard"><small>The word was</small><p class="sk-big">${esc(v.word)}</p>${got.length
       ? `<div class="sk-gotlist">${got.map(([id, pts]) => `<div class="sk-gotrow">${face(id)}<span class="grow">${nameOf(id)}</span><b>+${pts}</b></div>`).join('')}<div class="sk-gotrow artist">${face(drawer.id)}<span class="grow">${esc(drawer.name)} <small>drew it</small></span><b>+${got.length * 50}</b></div></div>`
       : '<div class="sk-nobody">Nobody guessed it.</div>'}</div>` : '');
@@ -556,10 +559,9 @@ function render(el, v, ctx) {
   UI.gid = v.players.map((p) => p.id).join() + v.used + v.phase;
   if (fresh && v.phase !== 'draw') { UI.local = []; UI.pending = null; UI.drawing = false; }
   UI.v = v; UI.ctx = ctx;
-  // A device's first round offers a skippable doodle warm-up while someone else draws. It never covers your own turn
-  // to pick or draw: it closes the moment you become the drawer, and waits for a turn where you're guessing.
-  if (UI.warm?.el.isConnected) { if (v.drawer === ctx.me) UI.warm.close(); }
-  else if (!UI.warmShown && v.round === 1 && v.drawer !== ctx.me && v.players.some((p) => p.id === ctx.me) && needsWarmup()) { UI.warmShown = true; UI.warm = openWarmup(); }
+  // The warm-up only opens when a player asks for it (the button while someone picks a word), and closes the
+  // moment it's their own turn to pick or draw.
+  if (UI.warm?.el.isConnected && v.drawer === ctx.me) UI.warm.close();
   draw();
 }
 
@@ -730,6 +732,7 @@ const STYLE = `
 .sk-pick.sk-chosen::after{animation:none;opacity:1}
 .sk-waitcard{display:flex;flex-direction:column;align-items:center;gap:12px}
 .sk-waitcard p{margin:0}
+.sk-warmbtn{display:inline-flex;align-items:center;gap:6px;min-height:40px}.sk-warmbtn .ic{width:1em;height:1em}
 .sk-face.big{width:58px;height:58px;box-shadow:0 0 0 3px var(--pc),0 6px 14px rgba(20,14,70,.3);animation:sk-bob 1.8s ease-in-out infinite}
 @keyframes sk-bob{50%{transform:translateY(-5px) rotate(-4deg)}}
 .sk-gotlist{display:flex;flex-direction:column;gap:6px;text-align:left;min-width:min(240px,100%)}

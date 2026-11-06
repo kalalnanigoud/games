@@ -272,7 +272,10 @@ const ISLAND_CSS = `
 .isl-save-state.good { background: rgba(140,233,154,.12); color: #b2f2bb; }
 .isl-save-state.warn { background: rgba(255,169,77,.14); color: #ffd8a8; }
 .isl-save-state.bad { background: rgba(255,107,107,.15); color: #ffc9c9; }
-.isl-overlay { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; background: rgba(8,12,30,.55); z-index: 8; overflow-y: auto; }
+.isl-overlay { position: absolute; inset: 0; display: grid; place-items: start center; padding: 16px; background: rgba(8,12,30,.55); z-index: 8; overflow-y: auto; }
+/* Centred with auto margins, not grid centring: a card taller than the screen then starts at the top instead of
+   overflowing upwards, where Safari can't scroll to it. */
+.isl-overlay > * { margin-block: auto; }
 .isl-overlay.pass { background: transparent; pointer-events: none; place-items: end center; }
 .isl-overlay.pass > * { pointer-events: auto; }
 .isl-card { width: min(460px, 100%); padding: 18px 18px 20px; border-radius: 22px; background: linear-gradient(180deg, #1b2a5e, #121c42); border: 1px solid rgba(255,255,255,.12); box-shadow: 0 20px 50px rgba(0,0,0,.5); }

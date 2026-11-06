@@ -48,7 +48,9 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; overflow-x: clip; }
+/* manipulation: no double-tap zoom (a quick second tap in a game zoomed the page on iPhone); scrolling and
+   pinch-zoom still work. */
+html, body { margin: 0; padding: 0; overflow-x: clip; touch-action: manipulation; }
 body {
   color: var(--text);
   font-family: var(--font-body);
