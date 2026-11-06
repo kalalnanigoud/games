@@ -1,4 +1,10 @@
 {
+  "bingo": {
+    "hash": "4e4975b2bd",
+    "file": "bingo-4e4975b2bd.webp",
+    "width": 960,
+    "height": 600
+  },
   "bluff": {
     "hash": "e1e83ed5a9",
     "file": "bluff-e1e83ed5a9.webp",
@@ -68,6 +74,12 @@
   "spies": {
     "hash": "2dfae08b59",
     "file": "spies-2dfae08b59.webp",
+    "width": 960,
+    "height": 600
+  },
+  "tambola": {
+    "hash": "91038ba2e2",
+    "file": "tambola-91038ba2e2.webp",
     "width": 960,
     "height": 600
   },

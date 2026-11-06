@@ -235,6 +235,21 @@ rise from the bottom edge.
 `node tools/party-test.mjs` checks both games' rules, that guessers never receive the secret word or key,
 and the tournament brackets.
 
+## Number-calling games
+
+- **Bingo** (2–8): the 75-ball game. A 5×5 card under B-I-N-G-O with a free centre; the host picks the
+  winning pattern (any line, four corners, the X or the full card).
+- **Tambola** (2–8): Housie with 90 balls. A 3×9 ticket of 15 numbers, and prizes for Early Five, the top,
+  middle and bottom lines, Four Corners and Full House (or a quick set: Early Five, Any Line, Full House).
+  Most points wins.
+
+Numbers are called automatically at the pace the host picks (about every 3½, 5½ or 8 seconds). Players mark
+their own card by tapping, or switch on Auto-mark; marks stay on the device, and the host checks every claim
+against the numbers actually called. Everyone who rightly claims a prize before the next number shares it;
+a wrong claim is a bogey (no claims for the next 3 numbers). "Read numbers aloud" uses the device's speech.
+Both are built on `games/caller-kit.js`. `node tools/caller-test.mjs` checks cards and tickets, secrecy of
+the ball order and other cards, calling and pacing, claims, bogeys, shared and late prizes, and the end.
+
 ## Voice chat
 
 In an online room, tap the headset button (in the top bar, or the game bar during a game) to talk to

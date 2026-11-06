@@ -24,7 +24,9 @@ import sketch from './sketch.js';
 import spies from './spies.js';
 import island from './island.js';
 import rally from './rally.js';
+import bingo from './bingo.js';
+import tambola from './tambola.js';
 
-export const GAMES = [hexisle, gems, mosaic, bluff, chess, sketch, spies, temple, ember, keeper, signal, island, rally];
+export const GAMES = [hexisle, gems, mosaic, bluff, chess, sketch, spies, bingo, tambola, temple, ember, keeper, signal, island, rally];
 
 export const getGame = (id) => GAMES.find((g) => g.id === id) || GAMES[0];

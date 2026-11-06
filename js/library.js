@@ -8,6 +8,8 @@ export const GAME_INFO = {
   chess: { category: 'Strategy', minutes: 30, duration: '10–30+', difficulty: 'Deep' },
   sketch: { category: 'Party', minutes: 20, duration: '10–20', difficulty: 'Easy' },
   spies: { category: 'Party', minutes: 20, duration: '15–20', difficulty: 'Medium' },
+  bingo: { category: 'Party', minutes: 5, duration: '3–8', difficulty: 'Easy' },
+  tambola: { category: 'Party', minutes: 10, duration: '8–12', difficulty: 'Easy' },
   temple: { category: 'Strategy', minutes: 30, duration: '20–30', difficulty: 'Medium', coop: true },
   ember: { category: 'Strategy', minutes: 30, duration: '20–30', difficulty: 'Medium', coop: true },
   keeper: { category: 'Adventure', minutes: 45, duration: '25–45', difficulty: 'Medium', coop: true },
