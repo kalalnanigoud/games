@@ -396,7 +396,7 @@ function render(el, v, ctx) {
     const myPiece = moves.find((m) => m.from >= 0 && cellOf(me, m.from) === cell);
     const ring = cell === CENTRE ? 'centre' : r === 0 || r === 4 || c === 0 || c === 4 ? 'outer' : 'inner';
     const cls = ['ac-cell', `ac-${ring}`, SAFE.has(cell) ? 'ac-safe' : '', owner ? 'ac-home' : '', myPiece ? 'ac-tap' : '', dests.has(cell) ? 'ac-dest' : ''].filter(Boolean).join(' ');
-    cells.push(`<div class="${cls}" data-a="ac-c-${cell}" ${myPiece ? `data-piece="${myPiece.piece}" role="button" aria-label="Move the piece here by ${v.throw}"` : ''} style="left:${M + c * C}%;top:${M + r * C}%;${owner ? `--hc:${hexA(colorOf(owner), 0.3)};--hl:${colorOf(owner)}` : ''}">${owner ? `<span class="ac-homemark">${shapeSVG(owner.seat, colorOf(owner))}</span>` : ''}</div>`);
+    cells.push(`<div class="${cls}" data-a="ac-c-${cell}" ${myPiece ? `data-piece="${myPiece.piece}" role="button" tabindex="0" aria-label="Move the piece here by ${v.throw}"` : ''} style="left:${M + c * C}%;top:${M + r * C}%;${owner ? `--hc:${hexA(colorOf(owner), 0.3)};--hl:${colorOf(owner)}` : ''}">${owner ? `<span class="ac-homemark">${shapeSVG(owner.seat, colorOf(owner))}</span>` : ''}</div>`);
   }
 
   // Tokens: grouped by square, waiting ones in each player's yard just outside their home.
@@ -407,7 +407,9 @@ function render(el, v, ctx) {
     const last = v.lastMove && v.lastMove.pid === p.id && v.lastMove.piece === i;
     const pos = p.pieces[i];
     const where = pos === OFF ? 'waiting' : pos === CENTRE_STEP ? 'in the centre' : pos > LAST_OUTER ? 'on the inner ring' : 'on the outer ring';
-    tokens.push(`<button class="ac-tok ${m ? 'ac-can' : ''} ${last ? 'ac-last' : ''} ${extra}" data-k="ac-${esc(p.id)}-${i}" ${m ? `data-piece="${i}"` : 'tabindex="-1"'} style="left:${(x - size / 2).toFixed(2)}%;top:${(y - size / 2).toFixed(2)}%;width:${size}%;--pc:${colorOf(p)}" aria-label="${esc(p.name)}'s ${SHAPES[p.seat % 4]} piece, ${where}${m ? `: move ${v.throw}` : ''}">${shapeSVG(p.seat, colorOf(p))}</button>`);
+    // A picture, not a button: the square underneath (at least 30 px) is the tap target, so several pieces
+    // sharing a square never shrink the target.
+    tokens.push(`<span class="ac-tok ${m ? 'ac-can' : ''} ${last ? 'ac-last' : ''} ${extra}" data-k="ac-${esc(p.id)}-${i}" role="img" style="left:${(x - size / 2).toFixed(2)}%;top:${(y - size / 2).toFixed(2)}%;width:${size}%;--pc:${colorOf(p)}" aria-label="${esc(p.name)}'s ${SHAPES[p.seat % 4]} piece, ${where}${m ? `: move ${v.throw}` : ''}">${shapeSVG(p.seat, colorOf(p))}</span>`);
   };
   for (const [cell, list] of groups) {
     list.sort((a, b) => a[0].seat - b[0].seat || a[1] - b[1]);
@@ -430,7 +432,7 @@ function render(el, v, ctx) {
     const enter = me && p.id === me.id && moves.find((m) => m.from === OFF);
     const horiz = ds === 0 || ds === 2;
     const [yx, yy] = at(1.5);
-    yards.push(`<div class="ac-yard ${enter ? 'ac-tap ac-enter' : ''}" data-a="ac-y-${esc(p.id)}" ${enter ? `data-piece="${enter.piece}" role="button" aria-label="Bring a piece onto your home square"` : ''} style="left:${yx - (horiz ? 15.5 : M / 2)}%;top:${yy - (horiz ? M / 2 : 15.5)}%;width:${horiz ? 31 : M}%;height:${horiz ? M : 31}%;--pc:${colorOf(p)}"></div>`);
+    yards.push(`<div class="ac-yard ${enter ? 'ac-tap ac-enter' : ''}" data-a="ac-y-${esc(p.id)}" ${enter ? `data-piece="${enter.piece}" role="button" tabindex="0" aria-label="Bring a piece onto your home square"` : ''} style="left:${yx - (horiz ? 15.5 : M / 2)}%;top:${yy - (horiz ? M / 2 : 15.5)}%;width:${horiz ? 31 : M}%;height:${horiz ? M : 31}%;--pc:${colorOf(p)}"></div>`);
   }
 
   // Shells, throw and messages.
@@ -492,8 +494,11 @@ function render(el, v, ctx) {
 
   const lb = el.querySelector('.ac-logbox'); if (lb) lb.ontoggle = () => { UI.logOpen = lb.open; };
   const rb = el.querySelector('.ac-rules'); if (rb) rb.ontoggle = () => { UI.rulesOpen = rb.open; };
-  el.querySelectorAll('[data-piece]').forEach((b) => (b.onclick = () => { sound('click'); ctx.send({ type: 'move', piece: +b.dataset.piece }); }));
-  el.querySelectorAll('.ac-tok:not([data-piece]), .ac-cell:not([data-piece]), .ac-yard:not([data-piece])').forEach((b) => (b.onclick = null));
+  el.querySelectorAll('[data-piece]').forEach((b) => {
+    b.onclick = () => { sound('click'); ctx.send({ type: 'move', piece: +b.dataset.piece }); };
+    b.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); b.click(); } };
+  });
+  el.querySelectorAll('.ac-cell:not([data-piece]), .ac-yard:not([data-piece])').forEach((b) => { b.onclick = null; b.onkeydown = null; });
   const go = () => ctx.send({ type: 'throw' });
   const tb = el.querySelector('#acThrow'); if (tb) tb.onclick = go;
   const tray = el.querySelector('.ac-tray'); tray.onclick = canThrow ? go : null;
@@ -561,7 +566,7 @@ const STYLE = `
 .ac-tok:hover:not(:disabled){background:none;box-shadow:none}
 .ac-tok{position:absolute;z-index:2;aspect-ratio:1;height:auto;min-height:0;min-width:0;padding:0;margin:0;border:0;background:none;box-shadow:none;transition:none;pointer-events:none;border-radius:50%}
 .ac-tok svg{display:block;width:100%;height:100%;overflow:visible}
-.ac-tok.ac-can{pointer-events:auto;cursor:pointer;z-index:3}
+.ac-tok.ac-can{pointer-events:none;z-index:3}
 .ac-tok.ac-can::before{content:"";position:absolute;inset:-14%;border-radius:50%;background:radial-gradient(circle,rgba(255,236,150,.8) 30%,rgba(255,236,150,0) 70%);opacity:.4;animation:ac-breathe 1.4s ease-in-out infinite;z-index:-1}
 .ac-tok.ac-can:active{transform:scale(.94)}
 .ac-tok.ac-last::after{content:"";position:absolute;inset:-6%;border-radius:50%;border:2px solid rgba(255,255,255,.75)}
