@@ -1,10 +1,10 @@
 // Shared room state: who is here, which game, options, identities and saved sessions.
 
-import { CATALOG, loaders, VERSION, FILES } from '../games/catalog.js';
+import { CATALOG, loaders, VERSION, RELEASE, FILES } from '../games/catalog.js';
 import { uid, reconnectSecret, sha256hex } from './util.js';
 import { deviceStorage, tabStorage } from './storage.js';
 
-export { VERSION, FILES };
+export { VERSION, RELEASE, FILES };
 export const MAX_ROOM = 8; // seats at the table
 export const MAX_WATCHERS = 8; // spectators on top of that
 export const BOT_NAMES = ['Ada', 'Bram', 'Cleo', 'Dax', 'Esme', 'Finn', 'Gus', 'Hana'];

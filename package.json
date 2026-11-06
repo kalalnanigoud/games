@@ -1,5 +1,6 @@
 {
   "name": "game-night",
+  "version": "1.2.0",
   "private": true,
   "scripts": {
     "test": "node tools/test.mjs 10",
