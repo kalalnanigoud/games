@@ -300,7 +300,9 @@ assert.equal(signedUp.name, 'Bobo');
 assert.match(signedUp.code, CODE_RE, 'a new account gets a recovery code to show once');
 assert.equal(cloud.account().name, 'Bobo');
 assert.equal(cloud.account().recovery, true);
-assert.ok(!JSON.stringify([...store]).includes('5555') && !JSON.stringify([...store]).includes(signedUp.code), 'the PIN and the recovery code are never kept on the device');
+// Random keys, session tokens and timestamps can contain "5555" by chance, so leave those out of the search.
+const kept = JSON.stringify([...store]).replace(/[a-f0-9]{32,}/g, '').replace(/\d{10,}/g, '');
+assert.ok(!kept.includes('5555') && !JSON.stringify([...store]).includes(signedUp.code), 'the PIN and the recovery code are never kept on the device');
 assert.equal(await cloud.claimLegacy(), true, 'the browser’s old save moves into the account');
 assert.equal(store.has('island-explorer-key'), false, 'and the old key is forgotten');
 let found = await cloud.loadExplorer();
