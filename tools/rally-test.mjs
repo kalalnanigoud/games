@@ -49,3 +49,37 @@ assert.equal(debug.spaceForButton(resumeBtn, false), true, 'paused/finished mess
 assert.equal(debug.spaceForButton(el('button'), true), true, 'other page buttons keep Space');
 assert.equal(debug.spaceForButton(el(), true), false); assert.equal(debug.spaceForButton(null, true), false);
 console.log('Rally Space-on-focused-button checks passed.');
+
+// Balance, with the deterministic sim: the player is driven by the same autopilot the computer racers use.
+{
+  const { autopilot, CAR, BOTS } = await import('../games/rally-sim.js');
+  const drive = (level, driver) => {
+    const race = new Race(level); race.countdown = 0; let off = 0;
+    for (let i = 0; i < 4000 && !race.result; i++) { race.step(0.05, driver(race.cars[0])); off += race.cars[0].offroad; }
+    return { ...race.result, off };
+  };
+  // A simple driver: follows the road, never boosts or brakes (a few steering styles).
+  const simple = [[9, 2.5], [7, 3], [12, 2]].map(([ahead, gain]) => c => ({ ...autopilot(c, { ahead, gain }), boost: false, brake: false }));
+  const good = c => autopilot(c, { boost: true, brake: true });
+  for (const d of simple) {
+    assert.equal(drive('easy', d).place, 1, 'a never-boost driver beats Easy');
+    assert.equal(drive('normal', d).place, 2, 'and places 2nd on Normal');
+  }
+  assert.ok(simple.filter(d => drive('hard', d).place >= 3).length >= 2, 'and usually loses on Hard');
+  for (const level of ['easy', 'normal', 'hard']) assert.equal(drive(level, good).place, 1, `a good driver using boost wins ${level}`);
+  assert.ok(BOTS.hard.caps.every(v => v > CAR.cruise) && BOTS.hard.boost > 0, 'Hard racers are faster than your cruise and boost');
+  assert.ok(drive('hard', simple[0]).time - drive('hard', good).time > 2.5, 'boosting well is worth seconds, not tenths');
+  // Holding boost into the tight ends runs wide onto the grass; lifting for them is faster.
+  const hold = drive('hard', c => ({ ...autopilot(c), boost: true, brake: false }));
+  assert.ok(hold.off > 0 && hold.time > drive('hard', good).time, 'the tightest corner needs a lift at full boost');
+  // Racers behind you catch up a little; racers ahead don't.
+  const race = new Race('normal'); race.countdown = 0;
+  race.cars[0].run = 40; assert.ok(race.botCap(1) > BOTS.normal.caps[0] && race.botCap(1) <= BOTS.normal.caps[0] * (1 + BOTS.normal.catchUp) + 1e-9, 'mild catch-up');
+  race.cars[0].run = -40; assert.equal(race.botCap(1), BOTS.normal.caps[0]);
+  // An emptied tank has to refill before boosting again, so tapping can't stretch it.
+  const tap = new Race(); tap.countdown = 0; const me = tap.cars[0];
+  Object.assign(me, { boost: 0.01, empty: false });
+  tap.step(0.05, { boost: true }); tap.step(0.05, { boost: true }); assert.ok(me.empty);
+  const b = me.boost; tap.step(0.05, { boost: true }); assert.ok(me.boost > b, 'an empty tank refills even while Boost is held');
+  console.log('Rally balance passed: never-boost driver 1st on Easy, 2nd on Normal, loses on Hard; a good driver wins Hard; full boost needs a lift.');
+}

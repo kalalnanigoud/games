@@ -263,7 +263,7 @@ export default escapeRoom({
     ],
     tips: [
       'With one player, your terminal holds every fragment. With more, the fragments are dealt out, so no one can solve everything alone.',
-      'Hints come in steps: a gentle nudge first, the full answer last. The hint button glows when you seem stuck.',
+      'Hints come in steps: a gentle nudge first, the full answer last (it asks before showing it to the team). The hint button glows when you seem stuck.',
       'Codes change every game. Computer teammates share their fragments straight away, and only take over a puzzle after the team has been stuck for a while.',
     ],
   },

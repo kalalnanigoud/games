@@ -60,7 +60,7 @@ export const chip = (name, text = '', cls = '') => `<span class="coop-chip ${cls
 export const colour = (i) => PLAYER_COLORS[i % PLAYER_COLORS.length];
 
 const ROLE_GLYPH = { Explorer: 'compass', Engineer: 'wrench', Scholar: 'book', Diver: 'wave', Ranger: 'compass', Firefighter: 'douse', Medic: 'cross', Weatherkeeper: 'wind' };
-const ACT_GLYPH = { move: 'compass', dig: 'pick', drain: 'drain', wait: 'anchor', rest: 'gate', water: 'douse', rescue: 'paw', deliver: 'tent', refill: 'bucket', break: 'shield' };
+const ACT_GLYPH = { move: 'compass', dig: 'pick', drain: 'drain', wait: 'anchor', rest: 'gate', water: 'douse', rescue: 'paw', deliver: 'tent', refill: 'bucket', break: 'shield', brace: 'wrench' };
 const LEVEL_NOTES = ['More breathing room', 'A balanced expedition', 'Stronger hazards'];
 const SIZE = 16; // every co-op board is a 4 × 4 grid
 
@@ -397,7 +397,7 @@ function tileHTML(s, i, d, ui, spec) {
   const cool = ui.look.diff('level-' + i, d.level || 0, -1), save = ui.look.diff('marker-' + i, d.marker ? 1 : 0, -1);
   const fx = ui.look.mark('tile-' + i, save === ' coop-gain' ? ' coop-gain coop-save' : cool === ' coop-gain' ? ' coop-gain coop-cool' : cool || save);
   const pawns = s.players.map((q, k) => q.pos !== i ? '' :
-    `<span class="coop-pawn${k === s.cur && !s.over ? ' coop-now' : ''}" data-k="pawn-${esc(q.id)}" title="${esc(q.name)} · ${esc(q.role)}" style="--pc:${colour(k)}">${portrait({ id: q.id, bot: ui.isBot(q.id) })}${spec.pawnMark?.(s, q) || ''}</span>`).join('');
+    `<span class="coop-pawn${k === s.cur && !s.over ? ' coop-now' : ''}" data-k="pawn-${esc(q.id)}" title="${esc(q.name)} · ${esc(spec.roleNames?.[q.role] || q.role)}" style="--pc:${colour(k)}">${portrait({ id: q.id, bot: ui.isBot(q.id) })}${spec.pawnMark?.(s, q) || ''}</span>`).join('');
   const attrs = move != null ? ` data-move="${move}" role="button" tabindex="0" aria-label="${esc(ui.choices[move].label)}"` : ` role="group" aria-label="${esc(d.label || d.name)}"`;
   const top = d.top || '';
   const scene = d.fx ? `${SCENE}${d.art || ''}</svg><i class="coop-fx" aria-hidden="true">${d.fx}</i>${SCENE}${top}</svg>` : `${SCENE}${d.art || ''}${top}</svg>`;
@@ -417,6 +417,7 @@ function renderGame(game, spec, el, s, ctx) {
   const ui = { look: tracker(s), targets, choices, isBot: (id) => !!ctx.isBot?.(id) };
   const face = (q, i) => `<span class="coop-face" style="--pc:${colour(i)}">${portrait({ id: q.id, bot: ui.isBot(q.id) })}</span>`;
   const roleGlyph = (role) => glyph(ROLE_GLYPH[role] || 'star');
+  const roleName = (q) => esc(game.roleInfo(q.role).name), ability = (q) => esc(game.roleInfo(q.role).ability);
 
   const result = s.over ? `<div class="coop-result ${s.won ? '' : 'loss'}" role="status">${icon(s.won ? 'trophy' : 'rematch')}<div><h2>${s.won ? 'Together, you prevailed' : 'The expedition is over'}</h2><p>${esc(s.reason)}</p><p>${s.won ? 'Every player shares the victory.' : 'Regroup, try a different plan, and start a new game.'}</p></div></div>` : '';
   const brief = s.phase === 'briefing' ? `<div class="coop-hero">${game.cover}<div class="coop-brief"><div class="coop-eyebrow">Cooperative · ${s.players.length} adventurers</div><h2>${esc(spec.name)}</h2><p>${esc(spec.goal)}</p>` +
@@ -430,8 +431,8 @@ function renderGame(game, spec, el, s, ctx) {
   else {
     const hint = s.phase === 'briefing' ? (mine ? 'Choose a difficulty to begin.' : `${esc(p.name)} is choosing a difficulty.`)
       : esc(spec.hint(s, p)) + (targets.size ? ` Tap a glowing ${spec.placeWord || 'space'} to move there.` : '');
-    status = `<div class="coop-status">${face(p, s.cur)}<div class="coop-turn"><div class="coop-turnline"><span class="status ${mine ? 'myturn' : ''}"${mine ? ' data-glow="Your turn"' : ''}>${mine ? 'Your turn' : esc(p.name) + '’s turn'}</span><span class="coop-roletag">${roleGlyph(p.role)}${esc(p.role)}</span></div>` +
-      `<div class="coop-hint">${hint}</div>${live ? `<small class="coop-ability">${esc(p.ability)}</small>` : ''}</div></div>`;
+    status = `<div class="coop-status">${face(p, s.cur)}<div class="coop-turn"><div class="coop-turnline"><span class="status ${mine ? 'myturn' : ''}"${mine ? ' data-glow="Your turn"' : ''}>${mine ? 'Your turn' : esc(p.name) + '’s turn'}</span><span class="coop-roletag">${roleGlyph(p.role)}${roleName(p)}</span></div>` +
+      `<div class="coop-hint">${hint}</div>${live ? `<small class="coop-ability">${ability(p)}</small>` : ''}</div></div>`;
   }
 
   const board = `<div class="coop-board">${Array.from({ length: SIZE }, (_, i) => tileHTML(s, i, spec.place(s, i, ui), ui, spec)).join('')}${spec.overlay?.(s) || ''}</div>`;
@@ -441,9 +442,9 @@ function renderGame(game, spec, el, s, ctx) {
   const team = `<div class="panel coop-panel"><h3>${icon('users')}<span>Expedition team</span></h3><div class="coop-team">${s.players.map((q, i) =>
     `<div class="coop-person ${i === s.cur && !s.over ? 'active' : ''}" style="--pc:${colour(i)}" data-a="coop-p-${esc(q.id)}">${face(q, i)}<div class="coop-who">` +
     `<div class="coop-nameline"><strong>${esc(q.name)}</strong>${q.id === ctx.me ? '<span class="tag t-you">You</span>' : ''}${ui.isBot(q.id) ? '<span class="tag t-bot">Bot</span>' : ''}</div>` +
-    `<div class="coop-role">${roleGlyph(q.role)}${esc(q.role)}</div>${spec.personal ? `<small>${spec.personal(s, q, ui)}</small>` : ''}</div></div>`).join('')}</div></div>`;
+    `<div class="coop-role">${roleGlyph(q.role)}${roleName(q)}</div>${spec.personal ? `<small>${spec.personal(s, q, ui)}</small>` : ''}</div></div>`).join('')}</div></div>`;
   const guide = `<details class="panel drawer coop-guide"${drawers.guide ? ' open' : ''}><summary>${icon('book')}<span>Field guide</span>${icon('chevron', 'chev')}</summary><div class="drawer-body">` +
-    `<p class="coop-goal">${esc(spec.goal)}</p><ul class="coop-roles">${s.players.map((q, i) => `<li style="--pc:${colour(i)}">${roleGlyph(q.role)}<div><b>${esc(q.role)}</b> · ${esc(q.name)}<small>${esc(q.ability)}</small></div></li>`).join('')}</ul>` +
+    `<p class="coop-goal">${esc(spec.goal)}</p><ul class="coop-roles">${s.players.map((q, i) => `<li style="--pc:${colour(i)}">${roleGlyph(q.role)}<div><b>${roleName(q)}</b> · ${esc(q.name)}<small>${ability(q)}</small></div></li>`).join('')}</ul>` +
     `<ul class="coop-tips">${spec.tips.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div></details>`;
   const journal = `<details class="panel drawer coop-journal"${drawers.journal ? ' open' : ''}><summary>${glyph('journal')}<span>Journal</span><span class="note">${esc(s.log[0] || '')}</span>${icon('chevron', 'chev')}</summary>` +
     `<div class="drawer-body"><ol class="coop-log">${s.log.slice(0, 14).map((line) => `<li>${esc(line)}</li>`).join('') || '<li>Your story starts here.</li>'}</ol></div></details>`;
@@ -482,6 +483,18 @@ export function cooperative(spec) {
       s.theme=spec.theme;spec.setup(s);
       s.level=levelOf(opts); // how sharp computer teammates are (public, so it is in every view); separate from s.difficulty
       return s;
+    },
+    // A role's name and ability as players read them. Roles are stored by id (spec.roles[i][0]) so saved games
+    // keep working when a role is renamed (spec.roleNames) or its ability text changes.
+    roleInfo(role) { const r = spec.roles.find((x) => x[0] === role); return { name: spec.roleNames?.[role] || role, ability: r ? r[1] : '' }; },
+    // Everything a player can read about state s (rules, roles, board, actions, journal), for text checks.
+    textOf(s) {
+      const look = Object.assign(() => '', { diff: () => '', mark: () => '', commit() {} }), ui = { look, targets: new Map(), choices: [], isBot: () => false };
+      const p = s.players[s.cur];
+      return [spec.name, spec.description, spec.goal, spec.timeout, ...spec.steps, ...spec.tips, game.cover,
+        ...s.players.flatMap((q) => [game.roleInfo(q.role).name, game.roleInfo(q.role).ability, spec.personal?.(s, q, ui) || '']),
+        ...spec.gauges(s, ui).flatMap((g) => [g.label, g.value]), ...Array.from({ length: SIZE }, (_, i) => { const d = spec.place(s, i, ui); return [d.name, d.label].join(' '); }),
+        s.over ? s.reason : spec.hint(s, p), s.event, ...s.log, ...(s.over ? [] : game.moves(s).map((m) => m.label)), ...LEVEL_NOTES].join('\n');
     },
     turnOf(s) {return s.over?[]:[s.players[s.cur].id];},
     moves(s) {return s.phase==='briefing'?[0,1,2].map(level=>action('begin',['Relaxed','Standard','Daring'][level],level===1?100:0,{level})):spec.moves(s,s.players[s.cur]);},

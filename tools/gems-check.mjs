@@ -17,8 +17,29 @@ for (const [n, per] of [[2, 4], [3, 5], [4, 7]]) {
   ok(s.decks[1].length === 36 && s.decks[2].length === 26 && s.decks[3].length === 16, 'deck sizes');
   ok(new Set([...s.decks[1], ...s.decks[2], ...s.decks[3], ...s.market[1], ...s.market[2], ...s.market[3]].map((c) => c.id)).size === 90, '90 unique ids');
 }
-// Turn validation & take rules
-let s = G.setup(P(2));
+// First player: drawn at random at setup (rematches too), and the round ends when the turn returns to them
+{
+  const firsts = new Set();
+  for (let i = 0; i < 200; i++) {
+    const t = G.setup(P(3));
+    firsts.add(t.cur);
+    ok(t.first === t.cur && G.turnOf(t)[0] === 'P' + t.cur && t.log[0].startsWith(`N${t.cur} goes first`), 'first player is current, named in the log');
+  }
+  ok(firsts.size === 3, `every seat can go first (${[...firsts].sort()})`);
+  const t = clone(G.setup(P(3))); t.first = t.cur = 1; t.players[1].points = 15;
+  G.act(t, 'P1', { type: 'take', gems: ['red', 'blue', 'green'] });
+  ok(t.finalRound && t.cur === 2 && t.round === 1, 'final round starts on the first player\'s turn');
+  G.act(t, 'P2', { type: 'take', gems: ['red', 'blue', 'green'] });
+  ok(!t.over && t.cur === 0 && t.round === 1, 'seat 0 still plays: the round began at seat 1');
+  G.act(t, 'P0', { type: 'take', gems: ['red', 'blue', 'green'] });
+  ok(t.over && t.winners[0] === 'P1', 'game ends once the turn is back to the first player');
+  const old = clone(G.setup(P(2))); delete old.first; old.cur = 0;
+  G.act(old, 'P0', { type: 'take', gems: ['red', 'blue', 'green'] }); G.act(old, 'P1', { type: 'take', gems: ['red', 'blue', 'green'] });
+  ok(old.round === 2 && old.cur === 0, 'a saved game from before `first` existed still counts rounds from seat 0');
+  ok(/fewest cards/.test(G.howTo.goal), 'rules state the tie-break (fewest cards)');
+}
+// Turn validation & take rules (seat 0 moves first in these scenarios)
+let s = G.setup(P(2)); s.cur = s.first = 0;
 throws(() => G.act(clone(s), 'P1', { type: 'take', gems: ['red', 'blue', 'green'] }), 'out of turn');
 throws(() => G.act(clone(s), 'P0', { type: 'take', gems: ['gold'] }), 'take gold');
 throws(() => G.act(clone(s), 'P0', { type: 'take', gems: ['red', 'blue'] }), 'take 2 different when 5 colours available');
@@ -71,7 +92,7 @@ throws(() => G.act(clone(s), 'P0', { type: 'pass' }), 'pass with legal moves');
 }
 // End: equal turns and tie-break
 {
-  const t = clone(G.setup(P(3))); t.cur = 1; t.players[1].points = 15;
+  const t = clone(G.setup(P(3))); t.first = 0; t.cur = 1; t.players[1].points = 15;
   G.act(t, 'P1', { type: 'take', gems: ['red', 'blue', 'green'] });
   ok(t.finalRound && !t.over && t.cur === 2, 'final round continues');
   t.players[2].points = 15; t.players[2].cards = [{}, {}];  t.players[1].cards = [{}, {}, {}];

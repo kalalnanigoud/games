@@ -195,6 +195,23 @@ function coverSVG() {
     '<g fill="#ece6f4" opacity=".55"><circle cx="288" cy="128" r="8"/><circle cx="298" cy="121" r="6"/><circle cx="279" cy="122" r="5"/></g></svg>';
 }
 
+/* ===================== fire spread ===================== */
+
+// After every team round the wind spreads fire. How many spreads grows with the difficulty and the team (every
+// player adds an action a round) and by one more every ESCALATE rounds as the wind rises. Firebreaks and
+// forecasts can hold back at most half of them, so some fire always spreads.
+// Tuned with bot teams (200 games per difficulty and team size): Expert teammates win about 100% on Relaxed,
+// 97-99% on Standard and 70-80% on Daring at every team size; Steady ones clearly less.
+const SPREADS = [[1, 2, 3], [3, 4, 5], [5, 7, 9]];   // [difficulty][team size - 2]
+const ESCALATE = [12, 12, 10];
+function spreadsDue(s) {
+  const d = s.difficulty, k = Math.min(2, Math.max(0, s.players.length - 2));
+  return SPREADS[d][k] + Math.floor((s.round - 1) / ESCALATE[d]);
+}
+const preventable = (s) => Math.floor(spreadsDue(s) / 2);
+// The spreads the next wind will make, after this round's firebreaks and forecasts.
+const spreadsNext = (s) => spreadsDue(s) - Math.min(s.breaks, preventable(s));
+
 /* ===================== Expert teammates (computer level 'hard') ===================== */
 
 // Expert teammates plan the rescue: they try every way to split the animals left between them (and every order
@@ -241,7 +258,7 @@ function danger(s, i) {
 // prevented. When the next wind can blow fire into a village it beats wandering (more the likelier that
 // is), and when that village is one level from losing protection it beats a step toward an animal.
 function breakScore(s) {
-  if (1 + s.difficulty - s.breaks <= 0) return 0;
+  if (s.breaks >= preventable(s)) return 0;
   const burning = s.tiles.map((t, i) => (t.fire ? i : -1)).filter((i) => i > 0);
   let hot = 0, near = false;
   for (const i of burning) {
@@ -268,7 +285,7 @@ function expert(s, p, moves) {
     if (danger(s, i) && (!best || v > best.v)) best = { i, v };
   }
   if (p.pos === 0 && p.water < 4) return pick('refill');
-  if (!best || best.v < 15) return 1 + s.difficulty - s.breaks > 0 ? pick('break') : pick('refill') || pick('break');
+  if (!best || best.v < 15) return s.breaks < preventable(s) ? pick('break') : pick('refill') || pick('break');
   if (!p.water && steps(p, p.pos, 0) <= 2) return p.pos === 0 ? pick('refill') : toward(0);
   if (p.pos !== best.i) return toward(best.i);
   return pick('water') || pick('refill') || pick('break');
@@ -281,7 +298,7 @@ export default cooperative({
   goal:'Rescue four woodland animals to River Camp while protecting both villages from the wildfire.',limit:24,timeout:'Night fell before the rescue was complete. The remaining forest paths became impassable.',
   roles:[['Ranger','Move up to two forest spaces.'],['Firefighter','Extinguish two fire levels for one water.'],['Medic','Rescue animals even in heavy fire.'],['Weatherkeeper','Shelter the forest from two spreading fires.']],
   steps:['Identify animal locations and the current wind direction.','Move, fight fire, refill at camp, rescue an animal, or deliver carried animals.','The wind spreads fire after every team round. Villages at fire level 3 lose protection.'],
-  tips:['Carry animals back to River Camp to count them as rescued.','Water is personal: refill at camp or use a turn to collect one water from the rain barrel.','Firebreaks reduce the next fire spread. Keep villages below fire level 3.'],
+  tips:['Carry animals back to River Camp to count them as rescued.','Water is personal: refill at camp or use a turn to collect one water from the rain barrel.','Firebreaks (and the Weatherkeeper’s forecasts) hold back spreads of the next wind, but never more than half of them. Keep villages below fire level 3.','More fire spreads each round for bigger teams, and the wind rises as the rounds pass.'],
   setup(s){s.tiles=names.map((name,i)=>({name,fire:[3,6,11].includes(i)?1:0,animal:animalSites.includes(i)}));s.players.forEach(p=>{p.water=3;p.carry=0;});s.rescued=0;s.safety=8;s.wind=0;s.breaks=0;},
   moves(s,p){const m=[],here=s.tiles[p.pos];const targets=p.carry?[0]:animalSites.filter(i=>s.tiles[i].animal);const target=targets.sort((a,b)=>distance(p.pos,a)-distance(p.pos,b))[0]??0;
     for(let to=0;to<16;to++)if(to!==p.pos&&distance(p.pos,to)<=(p.role==='Ranger'?2:1))m.push(action('move',`Travel to ${names[to]}`,30+10*(distance(p.pos,target)-distance(to,target)),{to}));
@@ -289,11 +306,11 @@ export default cooperative({
     if(here.animal&&(here.fire<2||p.role==='Medic'))m.push(action('rescue','Rescue the animal here',95));
     if(p.pos===0&&p.carry)m.push(action('deliver',`Deliver ${p.carry} rescued animal${p.carry>1?'s':''}`,120));
     if(p.water<4)m.push(action('refill',p.pos===0?'Refill water to 4':'Collect 1 water',p.water===0&&here.fire?105:5));
-    m.push(action('break',p.role==='Weatherkeeper'?'Forecast: prevent two fire spreads':'Build a firebreak (prevent one spread)',breakScore(s)));return m;},
+    m.push(action('break',s.breaks>=preventable(s)?(p.role==='Weatherkeeper'?'Forecast (no more spreads can be held back this round)':'Build a firebreak (no more spreads can be held back this round)'):p.role==='Weatherkeeper'?'Forecast: prevent two fire spreads':'Build a firebreak (prevent one spread)',breakScore(s)));return m;},
   perform(s,p,a){if(a.type==='move')p.pos=a.to;if(a.type==='water'){s.tiles[p.pos].fire=Math.max(0,s.tiles[p.pos].fire-(p.role==='Firefighter'?2:1));p.water--;}if(a.type==='rescue'){s.tiles[p.pos].animal=false;p.carry++;}if(a.type==='deliver'){s.rescued+=p.carry;p.carry=0;}if(a.type==='refill')p.water=p.pos===0?4:Math.min(4,p.water+1);if(a.type==='break')s.breaks+=p.role==='Weatherkeeper'?2:1;},
-  event(s){const burning=s.tiles.map((t,i)=>t.fire?i:-1).filter(i=>i>0);let n=Math.max(0,1+s.difficulty-s.breaks);s.breaks=0;const offsets=[-4,1,4,-1];for(let k=0;k<n;k++){const source=burning.length?burning[rand(burning.length)]:6;let to=source+offsets[s.wind];if(to<=0||to>=16||distance(source,to)!==1)to=source;s.tiles[to].fire=Math.min(3,s.tiles[to].fire+1);}const damage=[12,15].filter(i=>s.tiles[i].fire>=3).length;s.safety-=damage;s.event=`${['North','East','South','West'][s.wind]} wind: ${n} fire spread${n===1?'':'s'}.${damage?' Villages lost '+damage+' protection.':''}`;s.wind=(s.wind+1)%4;},
+  event(s){const burning=s.tiles.map((t,i)=>t.fire?i:-1).filter(i=>i>0);const n=spreadsNext(s),held=spreadsDue(s)-n;s.breaks=0;const offsets=[-4,1,4,-1];for(let k=0;k<n;k++){const source=burning.length?burning[rand(burning.length)]:6;let to=source+offsets[s.wind];if(to<=0||to>=16||distance(source,to)!==1)to=source;s.tiles[to].fire=Math.min(3,s.tiles[to].fire+1);}const damage=[12,15].filter(i=>s.tiles[i].fire>=3).length;s.safety-=damage;s.event=`${['North','East','South','West'][s.wind]} wind: ${n} fire spread${n===1?'':'s'}${held?` (${held} held back)`:''}.${damage?' Villages lost '+damage+' protection.':''}`;s.wind=(s.wind+1)%4;},
   check(s){if(s.safety<=0)finish(s,false,'Both villages exhausted their protection. The rescue team withdrew.');else if(s.rescued===4)finish(s,true,'All four animals are safe at River Camp, and the villages still stand.');},
-  hint:()=> 'Rescue animals, carry them home, and protect the villages.',
+  hint:(s)=>{const n=spreadsNext(s);return `Rescue animals, carry them home, and protect the villages. Next wind: ${n} fire spread${n===1?'':'s'} ${['north','east','south','west'][s.wind]}.`;},
   expert,
 
   /* ---- presentation ---- */
@@ -302,7 +319,7 @@ export default cooperative({
   gauges: (s) => [
     { key: 'animals', label: 'Animals safe', value: `${s.rescued} / 4`, n: s.rescued, art: pawGauge(s) },
     { key: 'safety', label: 'Village protection', value: `${s.safety} / 8`, n: s.safety, art: shieldGauge(s.safety) },
-    { key: 'wind', label: 'Next wind', value: ['North ↑', 'East →', 'South ↓', 'West ←'][s.wind], art: vane(s.wind) },
+    { key: 'wind', label: `Next wind · ${spreadsNext(s)} spread${spreadsNext(s) === 1 ? '' : 's'}`, value: ['North ↑', 'East →', 'South ↓', 'West ←'][s.wind], art: vane(s.wind) },
     { key: 'round', label: 'Round', value: `${s.round} / 24`, art: dusk((s.round - 1) / 24) },
   ],
   // Gusts streak across the board in the direction the fire will spread next.

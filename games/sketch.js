@@ -231,10 +231,14 @@ function view(s, pid) {
 }
 
 // Computer guessers recognise their own doodles stroke by stroke and otherwise guess from the letter hints.
+// They never guess from the blanks alone: the word list is known, so the pattern of a human's word would
+// often give it away at once ("tug of war", "hot air balloon" fit nothing else) however it was drawn.
+// Only once the first letter hint is out (halfway through the drawing time) do the letters count.
 // That is the Normal level. Easy guessers (v.level) pause more, need more of the picture and often name the
 // wrong thing; Hard ones guess more often, spot a doodle from its first line and rule out every wrong guess.
 // The drawing is the same at every level.
 const IDLE = { easy: [0.85, 0.6], normal: [0.75, 0.4], hard: [0.6, 0.2] };
+const hinted = (v) => v.hints.length > 0;
 function bot(v, pid) {
   const level = v.level === 'easy' || v.level === 'hard' ? v.level : 'normal';
   const think = { type: 'think' }, idle = IDLE[level][browser ? 0 : 1];
@@ -254,6 +258,7 @@ function bot(v, pid) {
   if (level !== 'normal') return levelGuess(v, pid, level) || (due ? { type: 'clock' } : think);
   for (const [w, D] of Object.entries(DOODLES))
     if (v.strokes.length >= 2 && v.strokes.length <= D.length && v.strokes.every((st, i) => st.p.join() === D[i].p.join())) return { type: 'guess', text: w };
+  if (!hinted(v)) return due ? { type: 'clock' } : think;
   const tried = new Set(v.feed.filter((f) => f.pid === pid).map((f) => f.text));
   const options = WORDS.filter((w) => fits(w, v.mask) && !tried.has(w));
   if (options.length && options.length <= (browser ? 12 : 1000)) return { type: 'guess', text: options[rand(options.length)] };
@@ -271,6 +276,7 @@ function levelGuess(v, pid, level) {
     const near = turn.filter((f) => f.k === 'close' && f.to === pid).map((f) => /“(.+)”/.exec(f.text)?.[1]).filter(Boolean);
     const wrong = new Set([...turn.filter((f) => f.k === 'guess').map((f) => f.text), ...near]);
     for (const [w, D] of Object.entries(DOODLES)) if (!wrong.has(w) && looks(D, 1)) return { type: 'guess', text: w };
+    if (!hinted(v) && !near.length) return null; // a near miss of its own is more to go on than the blanks
     const options = WORDS.filter((w) => fits(w, v.mask) && !wrong.has(w) && near.every((g) => giveaway(g, w)));
     return options.length && options.length <= (browser ? 20 : 1000) ? pick(options) : null;
   }
@@ -280,6 +286,7 @@ function levelGuess(v, pid, level) {
     const mixUps = Object.keys(DOODLES).filter((d) => d !== w && !tried.has(d));
     return Math.random() < 0.4 && mixUps.length ? pick(mixUps) : { type: 'guess', text: w };
   }
+  if (!hinted(v)) return null;
   const options = WORDS.filter((w) => fits(w, v.mask) && !tried.has(w));
   if (!options.length || options.length > (browser ? 6 : 1000)) return null;
   // Easy guessers often miss the letters already shown.

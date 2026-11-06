@@ -1,8 +1,9 @@
 import { cooperative, action, distance, finish, glyph, chip, colour, layer } from './coop-kit.js';
 import { rand, esc } from '../js/util.js';
-const names=['Landing','Mosaic Hall','West Steps','Moon Well','Courtyard','Echo Vault','Sun Shrine','Aqueduct','Old Library','Stone Gate','Jade Chamber','Deep Stairs','Observatory','Root Garden','Royal Crypt','Star Altar'];
+const names=['The Boat','Mosaic Hall','West Steps','Moon Well','Courtyard','Echo Vault','Sun Shrine','Aqueduct','Old Library','Stone Gate','Jade Chamber','Deep Stairs','Observatory','Root Garden','Royal Crypt','Star Altar'];
 const relics=[5,10,15];
-const goalFor=(s,p)=>{const unclaimed=relics.filter(i=>s.rooms[i].relic);if(!unclaimed.length)return 0;return unclaimed.sort((a,b)=>distance(p.pos,a)-distance(p.pos,b))[0];};
+// Steady teammates head for the nearest relic, preferring one no teammate is already standing at.
+const goalFor=(s,p)=>{const unclaimed=relics.filter(i=>s.rooms[i].relic);if(!unclaimed.length)return 0;const cost=(i)=>distance(p.pos,i)+(s.players.some(q=>q!==p&&q.pos===i)?3:0);return unclaimed.sort((a,b)=>cost(a)-cost(b))[0];};
 
 /* ===================== art (presentation only) ===================== */
 
@@ -151,7 +152,7 @@ function riseFlood(el, s) {
 function coverSVG() {
   const sp = (x, y, r, o = 1) => `<path d="M${x} ${y - r}L${x + r * .25} ${y - r * .25} ${x + r} ${y} ${x + r * .25} ${y + r * .25} ${x} ${y + r} ${x - r * .25} ${y + r * .25} ${x - r} ${y} ${x - r * .25} ${y - r * .25}z" fill="#fffbe6" opacity="${o}"/>`;
   const sky = [[30, 18, .9], [62, 40, .6], [96, 14, .8], [214, 24, .7], [236, 8, .9], [298, 30, .6], [182, 10, .6], [124, 32, .5], [14, 60, .5]].map(([x, y, o]) => `<circle cx="${x}" cy="${y}" r="1" fill="#e9fff9" opacity="${o}"/>`).join('');
-  return '<svg viewBox="0 0 320 200" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Explorers wade out of a flooding temple, one lifting a golden relic"><defs>' +
+  return '<svg viewBox="0 0 320 200" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Adventurers wade out of a flooding temple, one lifting a golden relic"><defs>' +
     '<linearGradient id="tmc-sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#061827"/><stop offset=".55" stop-color="#0f4a5e"/><stop offset="1" stop-color="#2a9a98"/></linearGradient>' +
     '<linearGradient id="tmc-stone" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7f9a94"/><stop offset="1" stop-color="#38524f"/></linearGradient>' +
     '<linearGradient id="tmc-water" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4fe3d4" stop-opacity=".94"/><stop offset=".4" stop-color="#1897a2"/><stop offset="1" stop-color="#063f4b"/></linearGradient>' +
@@ -212,50 +213,85 @@ function coverSVG() {
     '<g fill="#e8fffb" opacity=".7"><circle cx="182" cy="147" r="1.4"/><circle cx="232" cy="147" r="1.2"/><circle cx="122" cy="146" r="1.2"/><circle cx="170" cy="145" r="1.4"/></g></svg>';
 }
 
+/* ===================== roles, water and tremors ===================== */
+
+// Role ids stay as they were stored in saved games; players see the names here.
+const ROLE_NAMES = { Explorer: 'Pathfinder', Engineer: 'Tinkerer', Diver: 'Swimmer' };
+const speedOf = (p) => (p.role === 'Explorer' ? 2 : 1);
+const swims = (p) => p.role === 'Diver';
+// Deep water (level 3 or 4) stops excavation and takes two actions to wade into, unless you swim.
+const deep = (s, i) => i !== 0 && s.rooms[i].water >= 3;
+const wading = (s, p, to) => deep(s, to) && !swims(p) && p.wade !== to;
+// Each round's tremor floods some chambers and raises the flood pressure. Both grow with the difficulty and with
+// the team (every explorer adds an action a round), and the pressure climbs by 1 more every ESCALATE rounds.
+// Tuned with bot teams (200 games per difficulty and team size): Expert teammates win about 100% on Relaxed and
+// Standard and 75-80% on Daring at every team size; Steady ones clearly less.
+const FLOODS = [[2, 3, 4], [4, 5, 6], [5, 5, 7]];   // [difficulty][team size - 2]
+const PRESSURE = [[1, 2, 3], [2, 3, 5], [3, 5, 7]];
+const ESCALATE = [10, 10, 8];
+function tremor(s) {
+  const d = s.difficulty, k = Math.min(2, Math.max(0, s.players.length - 2));
+  return { floods: FLOODS[d][k], pressure: PRESSURE[d][k] + Math.floor((s.round - 1) / ESCALATE[d]) };
+}
+
 /* ===================== Expert teammates (computer level 'hard') ===================== */
 
 // Expert teammates plan the whole expedition: they try every way to split the relics between them (and every
-// order to visit them), take the plan that brings the last explorer home soonest, secure the flood gates only
-// when the round would otherwise end at 30 (or when they have time to spare), and walk straight home.
-const speedOf = (p) => (p.role === 'Explorer' ? 2 : 1);
-const steps = (p, from, to) => Math.ceil(distance(from, to) / speedOf(p));
+// order to visit them), take the plan that brings the last of the team back to the boat soonest, secure the
+// flood gates only when the round would otherwise end at 30 (or when they have time to spare), and walk
+// straight back. Routes avoid wading through deep water where a dry way is as quick.
+// travel(s, p)[a][b]: actions p needs to get from room a to room b.
+function travel(s, p) {
+  const D = Array.from({ length: 16 }, (_, a) => Array.from({ length: 16 }, (_, b) => (a === b ? 0 : Infinity)));
+  for (let a = 0; a < 16; a++) for (let b = 0; b < 16; b++) if (a !== b && distance(a, b) <= speedOf(p)) D[a][b] = deep(s, b) && !swims(p) ? 2 : 1;
+  for (let k = 0; k < 16; k++) for (let a = 0; a < 16; a++) for (let b = 0; b < 16; b++) if (D[a][k] + D[k][b] < D[a][b]) D[a][b] = D[a][k] + D[k][b];
+  return D;
+}
 // Actions p needs in relic room i: drain it until digging is allowed, then dig the rest.
 function workAt(s, p, i) {
-  const r = s.rooms[i], drains = p.role === 'Diver' ? 0 : Math.ceil(Math.max(0, r.water - 2) / (p.role === 'Engineer' ? 2 : 1));
+  const r = s.rooms[i], drains = swims(p) ? 0 : Math.max(0, r.water - 2);
   return drains + Math.ceil((3 - r.work) / (p.role === 'Scholar' ? 2 : 1));
 }
-// Actions p needs to recover the relics in `list`, in that order, and reach the landing.
-function tour(s, p, list) {
+// Actions p needs to recover the relics in `list`, in that order, and reach the boat.
+function tour(s, p, D, list) {
   let at = p.pos, t = 0;
-  for (const i of list) { t += steps(p, at, i) + workAt(s, p, i); at = i; }
-  return t + steps(p, at, 0);
+  for (const i of list) { t += D[at][i] + workAt(s, p, i); at = i; }
+  return t + D[at][0];
 }
 const orders = (list) => (list.length < 2 ? [list] : list.flatMap((x, k) => orders(list.filter((_, j) => j !== k)).map((rest) => [x, ...rest])));
-function plan(s) {
+function plan(s, maps) {
   const left = relics.filter((i) => s.rooms[i].relic), n = s.players.length;
   let best = null;
   for (let code = 0; code < n ** left.length; code++) {
     const lists = s.players.map(() => []);
     left.forEach((i, k) => lists[Math.floor(code / n ** k) % n].push(i));
-    const routes = s.players.map((p, j) => orders(lists[j]).map((o) => ({ o, t: tour(s, p, o) })).reduce((a, b) => (b.t < a.t ? b : a)));
+    const routes = s.players.map((p, j) => orders(lists[j]).map((o) => ({ o, t: tour(s, p, maps[j], o) })).reduce((a, b) => (b.t < a.t ? b : a)));
     const span = Math.max(...routes.map((r) => r.t)), sum = routes.reduce((a, r) => a + r.t, 0);
     if (!best || span < best.span || (span === best.span && sum < best.sum)) best = { span, sum, routes };
   }
   return best;
 }
 function expert(s, p, moves) {
+  const maps = s.players.map((q) => travel(s, q)), D = maps[s.cur];
   const pick = (type, to) => moves.find((m) => m.type === type && (to == null || m.to === to));
-  const toward = (goal) => moves.filter((m) => m.type === 'move').reduce((a, b) => (distance(b.to, goal) < distance(a.to, goal) ? b : a));
-  // The last explorer home ends the game at once, before the water rises again.
-  if (s.recovered === 3 && s.players.every((q) => q === p || q.pos === 0) && pick('move', 0)) return pick('move', 0);
+  // A step toward the goal: the fewest actions left, finishing a wade already begun when that is as quick.
+  const toward = (goal) => moves.filter((m) => m.type === 'move').map((m) => ({ m, t: (wading(s, p, m.to) ? 1 : 0) + 1 + D[m.to][goal] - (p.wade === m.to ? .5 : 0) }))
+    .reduce((a, b) => (b.t < a.t ? b : a)).m;
+  // The last of the team back at the boat ends the game at once, before the water rises again.
+  if (s.recovered === 3 && s.players.every((q) => q === p || q.pos === 0) && D[p.pos][0] === 1 && pick('move', 0)) return pick('move', 0);
   // Teammates still to act this round can each secure the gates once; rest now only if they could not hold it below 30.
   const after = s.players.length - 1 - s.cur;
-  if (Math.ceil((s.pressure + s.difficulty + 1 - 29) / 3) > after) return pick('rest');
-  const { span, routes } = plan(s), mine = routes[s.cur], goal = mine.o[0];
-  // With time to spare (nothing to dig, or already waiting at the landing), lower the pressure for the others.
+  if (Math.ceil((s.pressure + tremor(s).pressure - 29) / 3) > after) return pick('rest');
+  const { span, routes } = plan(s, maps), mine = routes[s.cur], goal = mine.o[0];
+  // With time to spare (nothing to dig, or already waiting at the boat), lower the pressure for the others.
   if ((mine.t < span || (p.pos === 0 && goal == null)) && s.pressure >= 3) return pick('rest');
   if (goal == null) return p.pos === 0 ? pick('wait') || pick('rest') : toward(0);
-  if (p.pos === goal) return pick('dig') || pick('drain') || pick('rest');
+  if (p.pos === goal) {
+    // The Tinkerer braces a relic room that one more flood would close before the digging is done.
+    const r = s.rooms[goal];
+    if (pick('brace') && r.water >= 2 && 3 - r.work >= 2) return pick('brace');
+    return pick('dig') || pick('drain') || pick('rest');
+  }
   return toward(goal);
 }
 
@@ -263,26 +299,41 @@ function expert(s, p, moves) {
 
 export default cooperative({
   id:'temple',theme:'temple',name:'Sunken Temple',description:'Recover three ancient relics, keep the water at bay, and bring the whole expedition home.',
-  goal:'Recover all three relics and bring every explorer back to the landing before the temple floods.',limit:30,timeout:'The temple disappeared beneath the water before everyone escaped.',
-  roles:[['Explorer','Move up to two rooms per action.'],['Engineer','Drain two water levels at once.'],['Scholar','Uncover relics twice as quickly.'],['Diver','Excavate even in deeply flooded rooms.']],
-  steps:['Choose a difficulty and agree who will recover each relic.','Move, excavate a relic, or drain the room you occupy. Each player takes one action.','After everyone acts, water rises in several rooms. Return everyone to the landing after collecting the relics.'],
-  tips:['Relic rooms need three excavation points. Water level 3 or 4 stops excavation unless you are the Diver.','The landing stays dry. Draining water also lowers the shared flood pressure.','All information is shared. Coordinate routes instead of sending everyone to the same relic.'],
-  setup(s){s.rooms=names.map((name,i)=>({name,water:0,work:0,relic:relics.includes(i)}));s.recovered=0;s.pressure=0;},
+  goal:'Recover all three relics and bring everyone back to the boat before the temple floods.',limit:30,timeout:'The temple disappeared beneath the water before everyone escaped.',
+  roles:[['Explorer','Move up to two rooms per action.'],['Engineer','Brace the room you stand in: tremors can never flood it again.'],['Scholar','Uncover relics twice as quickly.'],['Diver','Swim: deep water never slows you, and you can excavate in it.']],
+  roleNames: ROLE_NAMES,
+  steps:['Choose a difficulty and agree who will recover each relic.','Move, excavate a relic, or drain the room you occupy. Each player takes one action.','After everyone acts, a tremor floods several rooms and raises the flood pressure. Bring everyone back to the boat after collecting the relics.'],
+  tips:['Relic rooms need three excavation points. Deep water (level 3 or 4) stops excavation unless you are the Swimmer.','Wading into a room with deep water takes two actions (the Swimmer needs one). Drain it, brace it, or go around.','The boat stays dry. Draining water also lowers the flood pressure by 1; securing the gates lowers it by 3.','Tremors are stronger for bigger teams and grow stronger as the rounds pass (every 10 rounds, or every 8 on Daring). All information is shared, so plan routes together.'],
+  setup(s){s.rooms=names.map((name,i)=>({name,water:0,work:0,relic:relics.includes(i),braced:false}));s.recovered=0;s.pressure=0;s.players.forEach(p=>{p.wade=-1;});},
   moves(s,p){
-    const target=goalFor(s,p), room=s.rooms[p.pos], moves=[];
-    for(let to=0;to<16;to++)if(to!==p.pos&&distance(p.pos,to)<=(p.role==='Explorer'?2:1)){
-      const occupied=s.players.some(q=>q.id!==p.id&&q.pos===to&&s.rooms[to].relic);
-      moves.push(action('move',`Move to ${names[to]}`,30+10*(distance(p.pos,target)-distance(to,target))-(occupied?8:0),{to}));
+    const target=goalFor(s,p), room=s.rooms[p.pos], moves=[], rise=tremor(s).pressure;
+    for(let to=0;to<16;to++)if(to!==p.pos&&distance(p.pos,to)<=speedOf(p)){
+      const occupied=s.players.some(q=>q.id!==p.id&&q.pos===to&&s.rooms[to].relic), wade=wading(s,p,to), finishing=p.wade===to&&deep(s,to);
+      const label=wade?`Wade toward ${names[to]} (deep water: 2 actions)`:finishing?`Wade into ${names[to]}`:`Move to ${names[to]}`;
+      moves.push(action('move',label,30+10*(distance(p.pos,target)-distance(to,target))-(occupied?8:0)-(wade?6:0)+(finishing?12:0),{to}));
     }
-    if(room.relic&&(room.water<3||p.role==='Diver'))moves.push(action('dig',`Excavate relic (${room.work}/3)`,85));
-    if(room.water>0)moves.push(action('drain',`Drain ${p.role==='Engineer'?2:1} water level${p.role==='Engineer'?'s':''}`,room.water>=3&&room.relic?95:s.pressure>13?90:15));
-    if(s.recovered===3&&p.pos===0)moves.push(action('wait','Hold the landing for the team',100));
-    moves.push(action('rest','Secure the flood gates (lower pressure by 3)',s.pressure>23?110:0));return moves;
+    if(room.relic&&(room.water<3||swims(p)))moves.push(action('dig',`Excavate relic (${room.work}/3)`,85));
+    if(room.water>0)moves.push(action('drain','Drain 1 water level',room.water>=3&&room.relic&&!swims(p)?95:10));
+    if(p.role==='Engineer'&&p.pos!==0&&!room.braced)moves.push(action('brace','Brace this room (tremors can no longer flood it)',room.relic&&room.water>=2&&room.work<2?92:(p.pos===1||p.pos===4)&&room.water>=2?45:3));
+    if(s.recovered===3&&p.pos===0)moves.push(action('wait','Hold the boat for the team',100));
+    moves.push(action('rest','Secure the flood gates (lower pressure by 3)',s.pressure+rise>26?110:s.recovered===3&&p.pos===0&&s.pressure>=3?105:s.pressure>=15?80:0));return moves;
   },
-  perform(s,p,a){if(a.type==='move')p.pos=a.to;if(a.type==='drain'){const n=Math.min(s.rooms[p.pos].water,p.role==='Engineer'?2:1);s.rooms[p.pos].water-=n;s.pressure=Math.max(0,s.pressure-n);}if(a.type==='rest')s.pressure=Math.max(0,s.pressure-3);if(a.type==='dig'){const r=s.rooms[p.pos];r.work+=p.role==='Scholar'?2:1;if(r.work>=3){r.relic=false;s.recovered++;}}},
-  event(s){const n=2+s.difficulty;for(let k=0;k<n;k++){const i=1+rand(15);s.rooms[i].water=Math.min(4,s.rooms[i].water+1);}s.pressure+=s.difficulty+1;s.event=`A deep tremor floods ${n} chambers. Flood pressure rises by ${s.difficulty+1}.`;},
-  check(s){if(s.recovered===3&&s.players.every(p=>p.pos===0))finish(s,true,'Three relics recovered. Every explorer reached the landing safely.');else if(s.pressure>=30)finish(s,false,'The flood gates failed. The team had to abandon the relics.');},
-  hint:(s,p)=>s.recovered===3?'Return to the landing.':'Recover relics and keep flood pressure below 30.',
+  perform(s,p,a){
+    if(a.type==='move'){if(wading(s,p,a.to))p.wade=a.to;else{p.pos=a.to;p.wade=-1;}return;}
+    p.wade=-1;
+    if(a.type==='drain'){s.rooms[p.pos].water--;s.pressure=Math.max(0,s.pressure-1);}
+    if(a.type==='brace')s.rooms[p.pos].braced=true;
+    if(a.type==='rest')s.pressure=Math.max(0,s.pressure-3);
+    if(a.type==='dig'){const r=s.rooms[p.pos];r.work+=p.role==='Scholar'?2:1;if(r.work>=3){r.relic=false;s.recovered++;}}
+  },
+  event(s){
+    const {floods,pressure}=tremor(s);let held=0;
+    for(let k=0;k<floods;k++){const i=1+rand(15);if(s.rooms[i].braced)held++;else s.rooms[i].water=Math.min(4,s.rooms[i].water+1);}
+    s.pressure+=pressure;
+    s.event=`A deep tremor floods ${floods} chambers${held?` (${held} held by braces)`:''}. Flood pressure rises by ${pressure}.`;
+  },
+  check(s){if(s.recovered===3&&s.players.every(p=>p.pos===0))finish(s,true,'Three relics recovered. Everyone reached the boat safely.');else if(s.pressure>=30)finish(s,false,'The flood gates failed. The team had to abandon the relics.');},
+  hint:(s,p)=>(p.wade>=0&&deep(s,p.wade)?`You are wading toward ${names[p.wade]}. `:'')+(s.recovered===3?'Return to the boat.':`Recover relics and keep flood pressure below 30. Next tremor: +${tremor(s).pressure} pressure.`),
   expert,
 
   /* ---- presentation ---- */
@@ -295,16 +346,18 @@ export default cooperative({
     return [
       { key: 'relics', label: 'Relics', value: `${s.recovered} / 3`, n: s.recovered, art: relicGauge(s) },
       { key: 'flood', label: 'Flood pressure', value: `${s.pressure} / 30`, n: s.pressure, dir: -1, art: floodGauge(s.pressure) },
-      { key: 'landing', label: 'At landing', value: `${ashore} / ${s.players.length}`, n: ashore, art: dockGauge(s) },
+      { key: 'landing', label: 'At the boat', value: `${ashore} / ${s.players.length}`, n: ashore, art: dockGauge(s) },
       { key: 'round', label: 'Round', value: `${s.round} / 30`, art: hourglass((s.round - 1) / 30) },
     ];
   },
   place(s, i, ui) {
-    const r = s.rooms[i], relicRoom = relics.includes(i);
-    const chips = [i === 0 ? chip('anchor', 'Dry', 'coop-ok') : r.water ? chip('wave', `${r.water}/4`, r.water >= 3 ? 'coop-warn' : '') : '<span></span>'];
+    const r = s.rooms[i], relicRoom = relics.includes(i), name = names[i];
+    // Shallow water is only a warning; deep water (3+) slows everyone but the Swimmer and stops excavation.
+    // A braced room shows a wrench in place of the wave.
+    const chips = [i === 0 ? chip('anchor', 'Dry', 'coop-ok') : r.braced ? chip('wrench', r.water ? `${r.water}/4` : '', r.water >= 3 ? 'coop-warn' : 'coop-ok') : r.water ? chip('wave', `${r.water}/4`, r.water >= 3 ? 'coop-warn' : '') : '<span></span>'];
     if (relicRoom) chips.push(r.relic ? chip('relic', `${r.work}/3`, 'coop-gold' + ui.look('work-' + i, r.work)) : chip('check', '', 'coop-ok'));
-    const label = `${r.name}${relicRoom ? (r.relic ? `, relic ${r.work} of 3 excavated` : ', relic recovered') : ''}${i === 0 ? ', the dry landing' : `, water ${r.water} of 4`}`;
-    return { name: r.name, level: r.water, marker: relicRoom && r.relic, chips, label, ...roomArt(s, i) };
+    const label = `${name}${relicRoom ? (r.relic ? `, relic ${r.work} of 3 excavated` : ', relic recovered') : ''}${i === 0 ? ', the boat (always dry)' : `, water ${r.water} of 4${r.water >= 3 ? ' (deep: two actions to wade in)' : ''}`}${r.braced ? ', braced' : ''}`;
+    return { name, level: r.water, marker: relicRoom && r.relic, chips, label, ...roomArt(s, i) };
   },
-  personal: (s, p) => `<span class="coop-stat">${glyph('pin')}${esc(names[p.pos])}</span>`,
+  personal: (s, p) => `<span class="coop-stat">${glyph('pin')}${esc(names[p.pos])}</span>` + (p.wade >= 0 && deep(s, p.wade) ? `<span class="coop-stat">${glyph('wave')}Wading to ${esc(names[p.wade])}</span>` : ''),
 });

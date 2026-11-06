@@ -10,9 +10,10 @@ import { levelOption, levelOf } from '../js/levels.js';
 
 const ID = 'hexisle';
 const RES = ['lumber', 'brick', 'wool', 'grain', 'ore'];
-const RES_NAME = { lumber: 'Lumber', brick: 'Brick', wool: 'Wool', grain: 'Grain', ore: 'Ore' };
+// Ids stay as they were (saved games and rooms mid-game keep working); only the names players read changed.
+const RES_NAME = { lumber: 'Timber', brick: 'Clay', wool: 'Fleece', grain: 'Harvest', ore: 'Iron' };
 const TER = { forest: 'lumber', hills: 'brick', pasture: 'wool', fields: 'grain', mountains: 'ore', desert: null };
-const TER_NAME = { forest: 'Forest', hills: 'Hills', pasture: 'Pasture', fields: 'Fields', mountains: 'Mountains', desert: 'Desert' };
+const TER_NAME = { forest: 'Woods', hills: 'Clay pits', pasture: 'Meadows', fields: 'Farmland', mountains: 'Peaks', desert: 'Desert' };
 const COST = {
   road: { lumber: 1, brick: 1 },
   settlement: { lumber: 1, brick: 1, wool: 1, grain: 1 },
@@ -21,14 +22,15 @@ const COST = {
 };
 const LIMIT = { road: 15, settlement: 5, city: 4 };
 const DEV = {
-  knight: { name: 'Knight', desc: 'Move the robber and steal a card.' },
+  knight: { name: 'Ranger', desc: 'Move the bandit and steal a card.' },
   vp: { name: 'Victory Point', desc: 'Worth 1 VP. Counted automatically.' },
-  road: { name: 'Road Building', desc: 'Build 2 roads for free.' },
-  plenty: { name: 'Year of Plenty', desc: 'Take any 2 resources from the bank.' },
-  monopoly: { name: 'Monopoly', desc: 'Take every card of one resource from all opponents.' },
+  road: { name: 'Road Crew', desc: 'Build 2 roads for free.' },
+  plenty: { name: 'Bountiful Season', desc: 'Take any 2 resources from the bank.' },
+  monopoly: { name: 'Market Corner', desc: 'Take every card of one resource from all opponents.' },
 };
 const BANK_START = 19;
 const WIN_VP = 10;
+const OFFER_CAP = 3; // trade offers to other players per turn
 const GOALS = ['10', '8', '6'];
 const pipsOf = (n) => (n ? 6 - Math.abs(7 - n) : 0);
 const rep = (x, n) => Array.from({ length: n }, () => x);
@@ -207,17 +209,17 @@ function updateLongest(s) {
   if (next === h) return;
   s.longest = next;
   if (next) {
-    log(s, `${nameOf(s, next)} takes the Longest Road (${L[next]}).`);
-    addFx(s, { kind: 'float', at: `p-${next}-vp`, text: '+2 VP Longest Road', color: '#ffd76a', delay: 500, sound: 'chime' });
-  } else log(s, `${nameOf(s, h)} loses the Longest Road.`);
+    log(s, `${nameOf(s, next)} takes the Grand Highway (${L[next]} roads).`);
+    addFx(s, { kind: 'float', at: `p-${next}-vp`, text: '+2 VP Grand Highway', color: '#ffd76a', delay: 500, sound: 'chime' });
+  } else log(s, `${nameOf(s, h)} loses the Grand Highway.`);
 }
 function updateArmy(s, pid) {
   const k = s.ps[pid].knights;
   if (k < 3 || s.army === pid) return;
   if (s.army && s.ps[s.army].knights >= k) return;
   s.army = pid;
-  log(s, `${nameOf(s, pid)} takes the Largest Army (${k} knights).`);
-  addFx(s, { kind: 'float', at: `p-${pid}-vp`, text: '+2 VP Largest Army', color: '#ffd76a', delay: 600, sound: 'chime' });
+  log(s, `${nameOf(s, pid)} takes the Strongest Guard (${k} rangers).`);
+  addFx(s, { kind: 'float', at: `p-${pid}-vp`, text: '+2 VP Strongest Guard', color: '#ffd76a', delay: 600, sound: 'chime' });
 }
 function checkWin(s) {
   if (s.over || s.phase === 'setup') return;
@@ -345,7 +347,7 @@ function doRoll(s, pid) {
     s.after = 'main';
     s.phase = Object.keys(s.discard).length ? 'discard' : 'robber';
     addFx(s, { kind: 'shake', at: 'robber', delay: 1100, sound: 'bad' });
-    if (s.phase === 'discard') log(s, `Robber! ${Object.keys(s.discard).map((p) => nameOf(s, p)).join(', ')} must discard half.`);
+    if (s.phase === 'discard') log(s, `Bandit! ${Object.keys(s.discard).map((p) => nameOf(s, p)).join(', ')} must discard half.`);
   } else {
     produce(s, sum);
     s.phase = 'main';
@@ -365,11 +367,11 @@ function doDiscard(s, pid, cards) {
   if (!Object.keys(s.discard).length) s.phase = 'robber';
 }
 function moveRobber(s, pid, h) {
-  if (!validH(h)) throw new Error('Pick a hex for the robber.');
-  if (h === s.robber) throw new Error('The robber must move to a different hex.');
+  if (!validH(h)) throw new Error('Pick a hex for the bandit.');
+  if (h === s.robber) throw new Error('The bandit must move to a different hex.');
   s.robber = h;
   addFx(s, { kind: 'sound', sound: 'place', delay: 350 });
-  log(s, `${nameOf(s, pid)} moves the robber to the ${TER_NAME[s.hexes[h].t]}${s.hexes[h].n ? ' (' + s.hexes[h].n + ')' : ''}.`);
+  log(s, `${nameOf(s, pid)} moves the bandit to the ${TER_NAME[s.hexes[h].t]}${s.hexes[h].n ? ' (' + s.hexes[h].n + ')' : ''}.`);
   const vict = [];
   HEXES[h].v.forEach((v) => {
     const b = s.vb[v];
@@ -452,6 +454,8 @@ function offerTrade(s, pid, give, want) {
   if (!ng || !nw) throw new Error('Choose what you give and what you want.');
   if (RES.some((r) => g[r] && w[r])) throw new Error("You can't give and want the same resource.");
   if (!hasRes(s.ps[pid].res, g)) throw new Error("You don't have those cards.");
+  if ((s.offers || 0) >= OFFER_CAP) throw new Error(`You can post ${OFFER_CAP} trade offers a turn. Trade with the bank, build, or end your turn.`);
+  s.offers = (s.offers || 0) + 1;
   const replies = {};
   s.order.forEach((p) => { if (p !== pid) replies[p] = null; });
   s.trade = { give: g, want: w, replies };
@@ -487,7 +491,7 @@ function playDev(s, pid, a) {
   const P = s.ps[pid];
   if (!DEV[t] || t === 'vp') throw new Error('That card cannot be played.');
   if (s.devUsed) throw new Error('You already played a development card this turn.');
-  if (s.phase === 'roll' && t !== 'knight') throw new Error('Only a Knight can be played before rolling.');
+  if (s.phase === 'roll' && t !== 'knight') throw new Error('Only a Ranger can be played before rolling.');
   const idx = P.dev.findIndex((c) => c.t === t && c.turn < s.turn);
   if (idx < 0) throw new Error(P.dev.some((c) => c.t === t) ? "You can't play a card on the turn you bought it." : "You don't have that card.");
   if (t === 'road' && !roadSpots(s, pid).length) throw new Error('There is nowhere to build a road.');
@@ -538,6 +542,7 @@ function endTurn(s, pid) {
   s.phase = 'roll';
   s.devUsed = false;
   s.free = 0;
+  s.offers = 0;
   log(s, `${nameOf(s, curId(s))}'s turn.`);
   void pid;
 }
@@ -586,7 +591,7 @@ function actInner(s, pid, a) {
       throw new Error('Roll the dice first.');
     case 'robber':
       if (t === 'robber') return moveRobber(s, pid, a.h);
-      throw new Error('Move the robber first.');
+      throw new Error('Move the bandit first.');
     case 'steal':
       if (t === 'steal' && s.victims.includes(a.target)) return stealFrom(s, pid, a.target);
       throw new Error('Choose who to steal from.');
@@ -601,7 +606,10 @@ function actInner(s, pid, a) {
 }
 
 function setup(players, opts) {
-  const order = players.map((p) => p.id);
+  // The first player is drawn at random (rematches included): rotate the turn order so they lead the snake setup
+  // and every round. Seats (colours) stay as in the lobby.
+  const ids = players.map((p) => p.id), start = rand(ids.length);
+  const order = [...ids.slice(start), ...ids.slice(0, start)];
   const hexes = makeBoard();
   const types = shuffle(['any', 'any', 'any', 'any', ...RES]);
   const ps = {};
@@ -616,7 +624,7 @@ function setup(players, opts) {
     ps, bank,
     deck: shuffle([...rep('knight', 14), ...rep('vp', 5), ...rep('road', 2), ...rep('plenty', 2), ...rep('monopoly', 2)]),
     dice: [3, 4], rollSeq: 0, lastRoll: 0, devUsed: false, discard: {}, after: 'main', victims: [], free: 0,
-    trade: null, tradeSeq: 0, longest: null, army: null, roadLen: {}, devSeq: 0, lastDev: null,
+    trade: null, tradeSeq: 0, offers: 0, longest: null, army: null, roadLen: {}, devSeq: 0, lastDev: null,
     log: [], fx: [], fxSeq: 0, over: false, winners: [],
     level: levelOf(opts), // computer difficulty, public: every view carries it to the bots
     goal: GOALS.includes(String(opts?.goal)) ? +opts.goal : WIN_VP, // victory points that win: 10, or fewer for a shorter game
@@ -906,9 +914,22 @@ function botNormal(s, pid) {
   return { type: 'end' };
 }
 
-/* ---- Easy: no plan. Settles almost anywhere, builds whatever it happens to afford at a random
-   spot, never trades with the bank and often just ends its turn. ---- */
+/* ---- Easy: no plan. Settles almost anywhere and builds whatever it happens to afford at a random
+   spot. It still plays sensibly: it never ends its turn while it can build, now and then trades
+   with the bank toward a build, and turns down offers that are clearly bad for it. ---- */
 const pick = (a) => a[rand(a.length)];
+// Easy's answer to a trade offer: decline giving more cards than it gets unless the swap finishes a build
+// (and even then at most one card extra); otherwise accept a fair or better swap more often than not.
+function easyReply(s, pid) {
+  const tr = s.trade, res = s.ps[pid].res;
+  if (!hasRes(res, tr.want)) return { type: 'reply', yes: false };
+  const giveN = total(tr.want), getN = total(tr.give);
+  const after = { ...res };
+  RES.forEach((r) => (after[r] += tr.give[r] - tr.want[r]));
+  const done = [COST.city, COST.settlement, COST.dev, COST.road].some((c) => !hasRes(res, c) && hasRes(after, c));
+  if (giveN > getN + (done ? 1 : 0)) return { type: 'reply', yes: false };
+  return { type: 'reply', yes: done || Math.random() < 0.6 };
+}
 function botEasy(s, pid) {
   if (!turnOf(s).includes(pid)) return null;
   const P = s.ps[pid];
@@ -917,7 +938,7 @@ function botEasy(s, pid) {
     for (let i = 0; i < s.discard[pid]; i++) { const r = pick(RES.filter((x) => res[x] > 0)); res[r]--; out[r]++; }
     return { type: 'discard', cards: out };
   }
-  if (s.phase === 'main' && s.trade && s.trade.replies[pid] === null) return { type: 'reply', yes: hasRes(P.res, s.trade.want) && Math.random() < 0.5 };
+  if (s.phase === 'main' && s.trade && s.trade.replies[pid] === null) return easyReply(s, pid);
   switch (s.phase) {
     case 'setup':
       if (s.sub === 'settle') return Math.random() < 0.3 ? botSetup(s, pid) : { type: 'settle', v: pick(settleSpots(s, pid, true)) };
@@ -928,7 +949,6 @@ function botEasy(s, pid) {
     case 'roads': { const sp = roadSpots(s, pid); return sp.length ? { type: 'build', what: 'road', at: pick(sp) } : { type: 'skip' }; }
     case 'main': {
       if (s.trade) return { type: 'cancel' };
-      if (Math.random() < 0.3) return { type: 'end' };
       const res = P.res, u = used(s, pid), opts = [];
       const towns = []; s.vb.forEach((b, v) => { if (b && b.p === pid && !b.city) towns.push(v); });
       if (hasRes(res, COST.city) && u.city < LIMIT.city && towns.length) opts.push({ type: 'build', what: 'city', at: pick(towns) });
@@ -938,7 +958,18 @@ function botEasy(s, pid) {
       if (roads.length) opts.push({ type: 'build', what: 'road', at: pick(roads) });
       if (hasRes(res, COST.dev) && s.deckCount > 0) opts.push({ type: 'buydev' });
       if (canPlay(s, pid, 'knight')) opts.push({ type: 'play', card: 'knight' });
-      return opts.length ? pick(opts) : { type: 'end' };
+      if (opts.length) return pick(opts);
+      // Nothing affordable: sometimes swap spare cards with the bank toward a build, as Normal would.
+      if (Math.random() < 0.4) {
+        const targets = [];
+        if (towns.length && u.city < LIMIT.city) targets.push(COST.city);
+        if (u.settlement < LIMIT.settlement && settleSpots(s, pid, false).length) targets.push(COST.settlement);
+        if (roadSpots(s, pid).length) targets.push(COST.road);
+        if (s.deckCount > 0) targets.push(COST.dev);
+        const tr = botTrade(s, pid, targets);
+        if (tr) return tr;
+      }
+      return { type: 'end' };
     }
   }
   return { type: 'end' };
@@ -1396,7 +1427,7 @@ function tokenSVG(n) {
 }
 
 /* Cover art: a sunny hex island at sea. A settler hammers the roof onto a new cottage while a
-   friend rows in with lumber and a sheep, waving hello (self-contained "hxc-" ids). */
+   friend rows in with timber and a sheep, waving hello (self-contained "hxc-" ids). */
 function islandCover() {
   const f1 = (n) => +n.toFixed(1);
   // Squashed hex for the 3/4 view: r across, r * .56 deep, dy pushes it down (tile thickness).
@@ -1435,7 +1466,7 @@ function islandCover() {
         `<path d="M0 -11 L3.4 -13.3 L12.4 -4.3 L9 -2Z" fill="${c}" stroke="#2a0d05" stroke-width=".7" stroke-linejoin="round"/><path d="M1 -11.3 L3.4 -12.8 L11.5 -4.6" stroke="${hi}" stroke-width=".9" fill="none"/>`) + '</g>';
   const waves = [[24, 78], [52, 96], [262, 120], [286, 98], [38, 132], [252, 150], [62, 150], [292, 138], [226, 186], [176, 190]]
     .map(([x, y], i) => `<path d="M${x} ${y} q5 -3.5 10 0 t10 0" stroke="#fff" stroke-width="1.4" fill="none" stroke-linecap="round" opacity="${i % 2 ? 0.35 : 0.55}"/>`).join('');
-  return `<svg viewBox="0 0 320 200" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Settlers building a cottage on a sunny hex island while a friend rows in with lumber">
+  return `<svg viewBox="0 0 320 200" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Settlers building a cottage on a sunny hex island while a friend rows in with timber">
   <defs>
     <linearGradient id="hxc-sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#36aef0"/><stop offset=".22" stop-color="#7fd3fb"/><stop offset=".3" stop-color="#d4f3ff"/><stop offset="1" stop-color="#d4f3ff"/></linearGradient>
     <linearGradient id="hxc-sea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4fcde4"/><stop offset=".3" stop-color="#22a2cf"/><stop offset=".7" stop-color="#12719f"/><stop offset="1" stop-color="#0b4b80"/></linearGradient>
@@ -2084,16 +2115,16 @@ function statusOf(v, me) {
       return ['Place a road', 'Tap a glowing edge next to your new settlement.'];
     case 'roll':
       if (!mine) return [`${cn} is about to roll…`, 'Hexes matching the roll produce for adjacent buildings.'];
-      return ['Your turn — roll the dice', P && canPlay(v, me, 'knight') ? 'You may play a Knight before rolling.' : 'Settlements collect 1 card, cities collect 2.'];
+      return ['Your turn — roll the dice', P && canPlay(v, me, 'knight') ? 'You may play a Ranger before rolling.' : 'Settlements collect 1 card, cities collect 2.'];
     case 'discard':
       if (v.discard[me]) return [`Discard ${v.discard[me]} cards`, 'A 7 was rolled and you hold more than 7 cards.'];
-      return ['Robber! Waiting for discards…', esc(Object.keys(v.discard).map((p) => nameOf(v, p)).join(', ')) + ' must discard half.'];
+      return ['Bandit! Waiting for discards…', esc(Object.keys(v.discard).map((p) => nameOf(v, p)).join(', ')) + ' must discard half.'];
     case 'robber':
-      return mine ? ['Move the robber', 'Tap a hex to block it — then steal from a neighbour.'] : [`${cn} is moving the robber…`, ''];
+      return mine ? ['Move the bandit', 'Tap a hex to block it — then steal from a neighbour.'] : [`${cn} is moving the bandit…`, ''];
     case 'steal':
       return mine ? ['Choose who to rob', 'Tap a glowing building or a name below.'] : [`${cn} is choosing a victim…`, ''];
     case 'roads':
-      return mine ? [`Place ${v.free} free road${v.free > 1 ? 's' : ''}`, 'Road Building: tap a glowing edge.'] : [`${cn} is building roads…`, ''];
+      return mine ? [`Place ${v.free} free road${v.free > 1 ? 's' : ''}`, 'Road Crew: tap a glowing edge.'] : [`${cn} is building roads…`, ''];
     case 'main':
       if (v.trade && v.trade.replies[me] === null) return [`${cn} offers you a trade`, 'Accept or decline below.'];
       if (!mine) return [`${cn}'s turn`, v.trade ? 'A trade offer is on the table.' : ''];
@@ -2113,13 +2144,13 @@ function chipsHTML(v, me, ctx) {
     const scored = had != null && vp > had; // one-off flash when this player's points go up
     // Redraws keep the chip, so a second flash in a row switches animation name to play again.
     if (scored) scoreAlt[p] = !scoreAlt[p];
-    const badges = [v.longest === p ? `<span class="hexisle-badge">${SMALL.road}Longest Road</span>` : '', v.army === p ? `<span class="hexisle-badge">${SMALL.sword}Largest Army</span>` : '',
+    const badges = [v.longest === p ? `<span class="hexisle-badge">${SMALL.road}Grand Highway</span>` : '', v.army === p ? `<span class="hexisle-badge">${SMALL.sword}Strongest Guard</span>` : '',
       v.phase === 'discard' && v.discard[p] ? '<span class="hexisle-wait">discarding…</span>' : '',
       v.trade && v.trade.replies[p] === 'yes' ? '<span class="hexisle-wait">accepted</span>' : ''].join('');
     return `<div class="pchip hexisle-chip${due.includes(p) && !v.over ? ' turn' : ''}${p === me ? ' hexisle-me' : ''}${scored ? ` hexisle-scored${scoreAlt[p] ? ' hexisle-alt' : ''}` : ''}" style="--pc:${PCOL[P.seat % 4].c}"><div class="hexisle-chipin">
       <div class="hexisle-chiptop">${faceHTML(v, p, ctx)}<span class="hexisle-pname">${esc(P.name)}</span>${p === me ? '<span class="tag t-you">You</span>' : ''}
         <span class="hexisle-vp" data-a="p-${p}-vp">${vp}<small>VP</small></span></div>
-      <div class="hexisle-stats"><span data-a="p-${p}-hand" title="Resource cards">${SMALL.cards}${P.nRes}</span><span data-a="p-${p}-dev" title="Development cards">${SMALL.dev}${P.nDev}</span><span title="Knights played">${SMALL.sword}${P.knights}</span><span title="Longest road">${SMALL.road}${v.roadLen[p] || 0}</span></div>
+      <div class="hexisle-stats"><span data-a="p-${p}-hand" title="Resource cards">${SMALL.cards}${P.nRes}</span><span data-a="p-${p}-dev" title="Development cards">${SMALL.dev}${P.nDev}</span><span title="Rangers played">${SMALL.sword}${P.knights}</span><span title="Road length">${SMALL.road}${v.roadLen[p] || 0}</span></div>
       ${badges ? `<div class="hexisle-badges">${badges}</div>` : ''}</div></div>`;
   }).join('');
 }
@@ -2175,7 +2206,7 @@ function actionsHTML(v, me, ctx) {
   if (v.trade) return offerHTML(v, me, ctx);
   if (!mine) return '';
   if (v.phase === 'roll') {
-    return `<div class="hexisle-actions"><button class="primary hexisle-rollbtn" id="hx-roll">${icon('dice')}Roll dice</button>${canPlay(v, me, 'knight') ? `<button id="hx-knight">${SMALL.sword}Play Knight</button>` : ''}</div>`;
+    return `<div class="hexisle-actions"><button class="primary hexisle-rollbtn" id="hx-roll">${icon('dice')}Roll dice</button>${canPlay(v, me, 'knight') ? `<button id="hx-knight">${SMALL.sword}Play Ranger</button>` : ''}</div>`;
   }
   if (v.phase === 'roads') return '<div class="hexisle-actions"><button id="hx-skip">Skip remaining roads</button></div>';
   if (v.phase === 'steal') return `<div class="hexisle-actions">${v.victims.map((p, i) => `<button class="bad hexisle-rob" data-steal="${i}">${faceHTML(v, p, ctx, 'sm')}Rob ${esc(nameOf(v, p))} (${v.ps[p].nRes})</button>`).join('')}</div>`;
@@ -2213,19 +2244,20 @@ function modalHTML(v, me) {
         <div class="hexisle-row2"><button class="primary" id="hx-banktrade" ${ui.bGive && ui.bGet ? '' : 'disabled'}>${ui.bGive && ui.bGet ? `Trade ${rt[ui.bGive]} ${RES_NAME[ui.bGive]} → 1 ${RES_NAME[ui.bGet]}` : 'Pick what to give and get'}</button><button id="hx-close">Close</button></div>`;
     } else {
       RES.forEach((r) => { ui.give[r] = Math.min(ui.give[r], P.res[r]); });
-      const ok = total(ui.give) > 0 && total(ui.want) > 0 && !RES.some((r) => ui.give[r] && ui.want[r]);
+      const left = OFFER_CAP - (v.offers || 0);
+      const ok = left > 0 && total(ui.give) > 0 && total(ui.want) > 0 && !RES.some((r) => ui.give[r] && ui.want[r]);
       body = `${tabs}<div class="hexisle-lbl2">You give</div><div class="hexisle-hand">${RES.map((r) => stepper('give', r, ui.give[r], P.res[r])).join('')}</div>
         <div class="hexisle-lbl2" style="margin-top:10px">You want</div><div class="hexisle-hand">${RES.map((r) => stepper('want', r, ui.want[r], 9)).join('')}</div>
-        <div class="hexisle-row2" style="margin-top:12px"><button class="primary" id="hx-offer" ${ok ? '' : 'disabled'}>Offer to everyone</button><button id="hx-close">Close</button></div>`;
+        <div class="hexisle-row2" style="margin-top:12px"><button class="primary" id="hx-offer" ${ok ? '' : 'disabled'}>${left > 0 ? `Offer to everyone <span class="muted small">${left} left</span>` : 'No offers left this turn'}</button><button id="hx-close">Close</button></div>`;
     }
     body = `<h3>Trade</h3>${body}`;
   } else if (ui.modal === 'plenty') {
-    body = `<h3>Year of Plenty</h3><p class="muted small">Take any 2 resources from the bank.</p>
+    body = `<h3>${DEV.plenty.name}</h3><p class="muted small">Take any 2 resources from the bank.</p>
       <div class="hexisle-pick">${RES.map((r) => `<button data-pl="${r}" ${v.bank[r] > ui.plenty.filter((x) => x === r).length ? '' : 'disabled'}>${cardHTML(r)}<span>${RES_NAME[r]}</span></button>`).join('')}</div>
       <div class="row"><span class="hexisle-lbl2">Chosen:</span><span class="hexisle-mcards">${ui.plenty.map((r) => cardHTML(r, true)).join('')}</span></div>
       <div class="hexisle-row2" style="margin-top:12px"><button class="primary" id="hx-plenty" ${ui.plenty.length === 2 ? '' : 'disabled'}>Take them</button><button id="hx-plclear">Clear</button><button id="hx-close">Close</button></div>`;
   } else if (ui.modal === 'mono') {
-    body = `<h3>Monopoly</h3><p class="muted small">Name a resource: every opponent hands you all of theirs.</p>
+    body = `<h3>${DEV.monopoly.name}</h3><p class="muted small">Name a resource: every opponent hands you all of theirs.</p>
       <div class="hexisle-pick">${RES.map((r) => `<button data-mono="${r}">${cardHTML(r)}<span>${RES_NAME[r]}</span></button>`).join('')}</div>
       <div class="hexisle-row2"><button id="hx-close">Close</button></div>`;
   }
@@ -2404,7 +2436,7 @@ export default {
   id: ID,
   name: 'Isle of Hexes',
   emoji: '🏝️',
-  description: 'Settle a sun-drenched hex island, haggle for lumber and ore, and race your rivals to 10 victory points with roads, cities and clever cards.',
+  description: 'Settle a sun-drenched hex island, haggle for timber and iron, and race your rivals to 10 victory points with roads, cities and clever cards.',
   minPlayers: 2,
   maxPlayers: 4,
   cover: COVER,
@@ -2422,14 +2454,14 @@ export default {
     turn: [
       ['🏠', 'Start: place 2 settlements', 'Everyone places a settlement and a road, twice (the order snakes back). Your second settlement gives you its neighbouring resources.'],
       ['🎲', 'Roll the dice', 'Every tile showing that number produces: each settlement on its corner gets 1 card, each city 2. Red 6s and 8s roll most often.'],
-      ['🔨', 'Build', '<b>Road</b> lumber + brick · <b>Settlement</b> lumber + brick + wool + grain (at least 2 roads apart from any building) · <b>City</b> upgrade 2 grain + 3 ore · <b>Development card</b> wool + grain + ore.'],
-      ['🤝', 'Trade', 'With the bank 4 : 1, or 3 : 1 / 2 : 1 at a harbor you have built on. Or post an offer to the other players.'],
+      ['🔨', 'Build', '<b>Road</b> timber + clay · <b>Settlement</b> timber + clay + fleece + harvest (at least 2 roads apart from any building) · <b>City</b> upgrade 2 harvest + 3 iron · <b>Development card</b> fleece + harvest + iron.'],
+      ['🤝', 'Trade', 'With the bank 4 : 1, or 3 : 1 / 2 : 1 at a harbor you have built on. Or post an offer to the other players (up to 3 offers a turn).'],
       ['⏭️', 'End your turn', 'Tap End turn. If a turn timer is on, your turn ends by itself when it runs out.'],
     ],
     tips: [
-      '<b>Rolled a 7?</b> Anyone holding more than 7 cards discards half. The roller moves the hooded robber to a tile (it stops producing) and steals a card from someone there.',
-      '<b>Development cards:</b> Knight (move the robber), Road Building, Year of Plenty, Monopoly, or a hidden Victory Point. Play one per turn, not on the turn you bought it.',
-      '<b>Longest Road</b> (5+ connected roads) and <b>Largest Army</b> (3+ knights) are each worth 2 points.',
+      '<b>Rolled a 7?</b> Anyone holding more than 7 cards discards half. The roller moves the hooded bandit to a tile (it stops producing) and steals a card from someone there.',
+      '<b>Development cards:</b> Ranger (move the bandit), Road Crew (2 free roads), Bountiful Season (any 2 resources), Market Corner (every rival hands you one resource), or a hidden Victory Point. Play one per turn, not on the turn you bought it.',
+      '<b>Grand Highway</b> (the longest trail of 5+ connected roads) and <b>Strongest Guard</b> (the most rangers played, at least 3) are each worth 2 points.',
       'Spread your settlements over different resources and numbers so you collect cards on many rolls.',
     ],
   },
@@ -2444,5 +2476,5 @@ function onTimeout(v, pid) {
   }
   if (v.phase === 'roads') return { type: 'skip' };
   if (v.phase === 'roll') return { type: 'roll' };
-  return botNormal(v, pid); // setup placement, discarding, robber, steal: let the computer choose (as before, whatever the computer level)
+  return botNormal(v, pid); // setup placement, discarding, bandit, steal: let the computer choose (as before, whatever the computer level)
 }

@@ -61,7 +61,7 @@ export default {
   minPlayers: 1, maxPlayers: 4,
   options: [
     { id: 'mode', label: '🏟️ Mode', default: 'adventure', choices: [['adventure', 'Adventure (save when you like)'], ['arena', 'Arena Rush (5 min, no saving)']] },
-    { id: 'arenaKit', label: 'Arena Rush starting kit', default: 'classic', choices: [['classic', 'Starter squad · varied companions'], ['swift', 'Swift striker · Emberkit, faster movement'], ['guardian', 'Bubble guardian · Dewpaw, +30 HP']] },
+    { id: 'arenaKit', label: 'Arena Rush starting kit', default: 'classic', choices: [['classic', 'Starter squad · varied companions, Leaf Charm, extra berries'], ['swift', 'Swift striker · Emberkit, faster movement'], ['guardian', 'Bubble guardian · Dewpaw, +30 HP']] },
   ],
   live: true, dropIn: true, soloOnDevice: true, manualSave: true, simultaneous: true,
   cover: islandArt.COVER_SVG || '',

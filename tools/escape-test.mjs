@@ -2,6 +2,7 @@
 // Bot teams at every size, privacy of each player's view, illegal actions, hints, and scripted solves.
 import assert from 'node:assert/strict';
 import { GAMES } from '../games/index.js';
+import { shownTime } from '../games/keeper.js';
 
 globalThis.escapeBotIdle = 0.3; // fewer idle ticks: faster simulated games
 const games = GAMES.filter((g) => ['keeper', 'signal'].includes(g.id));
@@ -46,8 +47,16 @@ const go = (room) => ({ type: 'go', room });
   const s = g.setup(team(2)), sec = s.secret;
   assert.throws(() => g.act(s, 'P0', go('study')), /locked/);
   assert.throws(() => g.act(s, 'P0', { type: 'take', obj: 'fireplace' }), /nothing like that/);
-  g.act(s, 'P0', { type: 'hint' }); g.act(s, 'P1', { type: 'hint' }); g.act(s, 'P0', { type: 'hint' });
-  assert.match(s.hints[2].text, new RegExp(String(sec.year)));
+  g.act(s, 'P0', { type: 'hint' }); g.act(s, 'P1', { type: 'hint' });
+  // The last hint gives the answer away, so asking for it only asks; "Not yet" takes it back, and a second press
+  // (by anyone on the team) shows it.
+  assert.throws(() => g.act(s, 'P0', { type: 'hint', cancel: true }), /Nobody has asked/);
+  g.act(s, 'P0', { type: 'hint' });
+  assert.equal(s.hints.length, 2, 'the answer is not shown on the first press'); assert.equal(s.hintAsk, 'toolbox');
+  assert.ok(!JSON.stringify(g.view(s, 'P1').hints).includes(String(sec.year)));
+  g.act(s, 'P1', { type: 'hint', cancel: true }); assert.equal(s.hintAsk, ''); assert.equal(s.hints.length, 2);
+  g.act(s, 'P0', { type: 'hint' }); assert.equal(s.hints.length, 2); g.act(s, 'P1', { type: 'hint' });
+  assert.match(s.hints[2].text, new RegExp(String(sec.year))); assert.equal(s.hintAsk, '');
   assert.throws(() => g.act(s, 'P0', { type: 'hint' }), /no more hints/);
   const wrong = String(sec.year === 1842 ? 1857 : 1842).split('').map(Number);
   g.act(s, 'P0', { type: 'code', obj: 'toolbox', value: wrong });
@@ -57,14 +66,22 @@ const go = (room) => ({ type: 'go', room });
   assert.deepEqual(s.inv, ['oilcan', 'brasskey']);
   assert.throws(() => g.act(s, 'P0', { type: 'use', obj: 'frontdoor', item: 'oilcan' }), /doesn't help/);
   play(g, s, 'P0', [{ type: 'use', obj: 'stairdoor', item: 'brasskey' }, go('study')]);
+  // Restarting the clock: a nudge about reading the window bottom-up comes before the bookshelf's answer.
+  play(g, s, 'P0', [{ type: 'hint' }, { type: 'hint' }, { type: 'hint' }]);
+  assert.match(s.hints[5].text, /bottom up/); assert.ok(!s.hints[5].text.includes('<b>'), 'the nudge does not give the answer');
+  g.act(s, 'P0', { type: 'hint' }); assert.equal(s.hints.length, 6, 'the bookshelf answer waits for confirmation');
+  // The stopped hands hang loose rather than pointing at a time players might try.
+  assert.equal(shownTime(g.view(s, 'P0')), null);
   assert.throws(() => g.act(s, 'P1', { type: 'take', obj: 'fireplace' }), /Go to the Study/);
   play(g, s, 'P1', [go('study'), { type: 'take', obj: 'fireplace' }, { type: 'code', obj: 'bookshelf', value: sec.window.slice().reverse() }, go('gears')]);
   play(g, s, 'P1', [{ type: 'use', obj: 'pendulum', item: 'oilcan' }, { type: 'use', obj: 'train', item: 'gear' }]);
   assert.ok(!s.open.includes('belfry'));
   play(g, s, 'P1', [{ type: 'use', obj: 'weights', item: 'crank' }, go('belfry')]);
   assert.throws(() => g.act(s, 'P1', { type: 'take', obj: 'keeper' }), /nothing like that/);
-  play(g, s, 'P1', [{ type: 'code', obj: 'clockface', value: [sec.hour - 1, sec.minute / 5] }, { type: 'take', obj: 'keeper' }, go('workshop'), { type: 'use', obj: 'frontdoor', item: 'towerkey' }]);
-  assert.equal(s.won, true); assert.equal(s.hintsUsed, 3);
+  play(g, s, 'P1', [{ type: 'code', obj: 'clockface', value: [sec.hour - 1, sec.minute / 5] }]);
+  assert.deepEqual(shownTime(g.view(s, 'P1')), { hour: sec.hour, minute: sec.minute }, 'once set, the hands show this game’s answer');
+  play(g, s, 'P1', [{ type: 'take', obj: 'keeper' }, go('workshop'), { type: 'use', obj: 'frontdoor', item: 'towerkey' }]);
+  assert.equal(s.won, true); assert.equal(s.hintsUsed, 6);
 }
 {
   const g = games.find((x) => x.id === 'signal');

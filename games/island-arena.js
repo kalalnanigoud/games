@@ -14,15 +14,19 @@ export const ARENA = {
   dur: 300, intro: 5, level: 5,
 };
 const POOL = [['nettlebug', 1], ['clackle', 2], ['gullwisp', 3], ['gemmole', 4], ['fizzwing', 5], ['ripplefin', 6], ['cindermite', 7]];
+// Each kit has its own edge, so none is simply better. Starter squad: mixed companions a level up that hit
+// harder (Leaf Charm), extra berries, and more health back between waves (mend). Swift striker moves and
+// dodges faster. Bubble guardian has more HP.
 export const ARENA_KITS = {
-  classic: { name: 'Starter squad', charm: null },
+  classic: { name: 'Starter squad', charm: 'leafcharm', berries: 2, compLv: 1, mend: 0.45 },
   swift: { name: 'Swift striker', sp: 'emberkit', charm: 'feather' },
   guardian: { name: 'Bubble guardian', sp: 'dewpaw', charm: 'tidecharm' },
 };
+// Every other murkling takes on the wave's element (the rest stay Shade), so no companion wins every wave.
 const THEMES = [
-  { name: 'Forest swarm', species: ['nettlebug'] },
-  { name: 'Tide rush', species: ['clackle', 'gullwisp', 'ripplefin'] },
-  { name: 'Crystal storm', species: ['gemmole', 'fizzwing', 'cindermite'] },
+  { name: 'Forest swarm', species: ['nettlebug'], el: 'stone' },
+  { name: 'Tide rush', species: ['clackle', 'gullwisp', 'ripplefin'], el: 'tide' },
+  { name: 'Crystal storm', species: ['gemmole', 'fizzwing', 'cindermite'], el: 'stone' },
 ];
 const BLOCKED = new Set(['new', 'load', 'save', 'saved', 'buy', 'sell', 'craft', 'ranch', 'release', 'respawn']);
 const spotFor = (seat) => { const a = (seat / 4) * Math.PI * 2 + 0.6; return { x: ARENA.at[0] * T + Math.cos(a) * 52, y: ARENA.at[1] * T + Math.sin(a) * 52 }; };
@@ -31,9 +35,9 @@ export function arenaExplorer(name, seat, kitId = 'classic') {
   const kit = Object.hasOwn(ARENA_KITS, kitId) ? ARENA_KITS[kitId] : ARENA_KITS.classic;
   const ex = newExplorer(name, { skin: seat, hair: seat + 1 });
   if (kit.charm) { ex.gear.push(kit.charm); ex.equip.charm = kit.charm; }
-  ex.lv = ARENA.level; ex.hp = playerMax(ex.lv, kit.charm); ex.shells = 0; ex.inv = { sunberry: 3 };
-  const sp = kit.sp || STARTERS[seat % STARTERS.length];
-  ex.team = [{ uid: 'arena' + seat + Math.random().toString(36).slice(2, 7), sp, lv: ex.lv, xp: 0, hp: creatureMax(sp, ex.lv) }];
+  ex.lv = ARENA.level; ex.hp = playerMax(ex.lv, kit.charm); ex.shells = 0; ex.inv = { sunberry: 3 + (kit.berries || 0) };
+  const sp = kit.sp || STARTERS[seat % STARTERS.length], lv = ex.lv + (kit.compLv || 0);
+  ex.team = [{ uid: 'arena' + seat + Math.random().toString(36).slice(2, 7), sp, lv, xp: 0, hp: creatureMax(sp, lv) }];
   ex.quests = { starter: 9 };
   ex.loc = spotFor(seat);
   return ex;
@@ -55,6 +59,7 @@ export class Arena {
     this.t0 = 0; this.shift = 0;
     this.score = 0; this.kills = 0; this.wave = 0; this.nextWave = ARENA.intro; this.cleared = true;
     this.foes = new Set();
+    this.winds = 1; // a solo explorer's one second wind per run
     this.result = null;
     this.theme = '';
   }
@@ -73,10 +78,10 @@ export class Arena {
   }
   respawn(p) {
     const w = this.w;
-    p.downT = 0; p.body.down = 0; p.hp = w.maxHp(p); p.iT = 2; w.chan(p, null);
-    const s = spotFor(p.seat);
-    w.warp(p, s.x, s.y);
-    w.personal(p, ['toast', 'Back on your feet!']);
+    const wind = p.wind;
+    p.downT = 0; p.body.down = 0; p.hp = wind ? Math.round(w.maxHp(p) * 0.6) : w.maxHp(p); p.iT = wind ? 3 : 2; p.wind = false; w.chan(p, null);
+    if (!wind) { const s = spotFor(p.seat); w.warp(p, s.x, s.y); }
+    w.personal(p, ['toast', wind ? 'Second wind! Back on your feet.' : 'Back on your feet!']);
     w.bump(p);
   }
   // Hook: commands a screen may send. Saving, shops and the ranch don't exist here.
@@ -116,7 +121,14 @@ export class Arena {
     const ready = w.readyPlayers().filter((p) => p.connected);
     const el = this.elapsed;
     if (el >= this.dur) return this.end('time');
-    if (ready.length && ready.every((p) => p.downT > 0)) return this.end('down');
+    if (ready.length && ready.every((p) => p.downT > 0)) {
+      // Alone, the first knockout of a run isn't the end: a second wind gets you up a few seconds later.
+      if (ready.length === 1 && this.winds > 0 && !ready[0].wind) {
+        const p = ready[0];
+        this.winds--; p.wind = true; p.downT = Math.min(p.downT, 4);
+        w.personal(p, ['toast', 'Second wind! You’ll be back up in a moment (once per run).']);
+      } else if (!ready.some((p) => p.wind)) return this.end('down');
+    }
     if (!this.foes.size && this.wave && !this.cleared) { this.cleared = true; this.score += 20 + 5 * this.wave; this.nextWave = Math.min(this.nextWave, el + 3); }
     if (el >= this.nextWave) this.spawnWave(ready);
     w.worldVer++;
@@ -125,20 +137,23 @@ export class Arena {
     const w = this.w, n = Math.max(1, ready.length);
     this.wave++; this.cleared = false;
     this.nextWave = this.elapsed + Math.max(13, this.gap - Math.floor(this.wave / 2));
-    const lv = Math.min(14, Math.round(2 + this.wave * 0.9 + (n - 1) * 0.5));
+    const lv = Math.min(15, Math.round(2 + this.wave * 0.9 + (n - 1) * 0.6));
     const unlocked = POOL.filter(([, from]) => from <= this.wave).map(([sp]) => sp);
     const theme = THEMES[(this.wave - 1) % THEMES.length];
     const themed = unlocked.filter(sp => theme.species.includes(sp));
     const pool = themed.length ? themed : unlocked;
     this.theme = this.wave % 5 === 0 ? 'Brute assault' : themed.length ? theme.name : 'Mixed skirmish';
-    const count = Math.min(3 + Math.floor(this.wave * 0.9) + (n - 1) * 2, 18 - this.foes.size);
+    // Each extra explorer adds most of a solo wave again.
+    const count = Math.max(0, Math.min(Math.round((3 + this.wave * 0.9) * (1 + 0.6 * (n - 1))), 12 + 6 * n - this.foes.size));
     const kinds = [];
     for (let i = 0; i < count; i++) kinds.push(pool.length && i % 3 === 2 ? pool[(i + this.wave) % pool.length] : 'murk');
-    if (this.wave % 5 === 0) kinds.push('murkbrute');
+    if (this.wave % 5 === 0) for (let i = 0; i < Math.ceil(n / 2); i++) kinds.push('murkbrute');
+    let murks = 0;
     for (const sp of kinds) {
       const at = this.ringPoint(ready);
       if (!at) continue;
-      const e = w.creature(sp, sp === 'murkbrute' ? lv + 1 : lv, at.x, at.y, { raid: true, angry: true, arena: true });
+      const el = sp === 'murk' && murks++ % 2 ? theme.el : null;
+      const e = w.creature(sp, sp === 'murkbrute' ? lv + 1 : lv, at.x, at.y, { raid: true, angry: true, arena: true, ...(el ? { el } : {}) });
       const foe = w.nearestFoe(e, 1200);
       if (foe) { e.target = foe; e.state = 'chase'; }
       this.foes.add(e.id);
@@ -146,7 +161,7 @@ export class Arena {
     }
     for (const p of ready) {
       // Each wave a breath of rest: a bit of health back, and a fainted companion rallies.
-      p.hp = Math.min(w.maxHp(p), p.hp + w.maxHp(p) * 0.25);
+      p.hp = Math.min(w.maxHp(p), p.hp + w.maxHp(p) * (ARENA_KITS[this.kit].mend || 0.25));
       const m = p.ex.team.find((x) => x.hp <= 0);
       if (m && !p.comp) { m.hp = Math.round(creatureMax(m.sp, m.lv) / 2); w.summon(p); }
       w.personal(p, ['banner', `Wave ${this.wave} · ${this.theme}`, `${kinds.length} coming`]);

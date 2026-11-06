@@ -238,6 +238,7 @@ function validate(s, pid, a) {
 function setup(players, opts) {
   const n = players.length;
   const per = n <= 2 ? 4 : n === 3 ? 5 : 7;
+  const start = rand(n); // who goes first is drawn at random, rematches included
   const bank = zero(COLORS);
   COLORS.forEach((c) => (bank[c] = per));
   bank.gold = 5;
@@ -255,14 +256,14 @@ function setup(players, opts) {
       id: p.id, name: p.name, seat: i,
       gems: zero(TOKENS), bonus: zero(COLORS), cards: [], reserved: [], nobles: [], points: 0,
     })),
-    cur: 0, turnNo: 0, round: 1,
+    cur: start, first: start, turnNo: 0, round: 1, // a round ends when the turn comes back to `first`
     bank, decks, market,
     nobles: shuffle(buildNobles()).slice(0, n + 1),
     nobleChoices: null, finalRound: false,
     over: false, winners: [], log: [], fx: [], fxSeq: 0,
     level: levelOf(opts), goal: GOALS.includes(String(opts?.goal)) ? +opts.goal : GOAL, // prestige that ends the game: 15, or fewer for a shorter game
   };
-  log(s, `${players[0].name} goes first. Reaching ${s.goal} prestige ends the game after the round.`);
+  log(s, `${players[start].name} goes first. Reaching ${s.goal} prestige ends the game after the round.`);
   return s;
 }
 
@@ -314,7 +315,7 @@ function endTurn(s) {
   }
   s.cur = (s.cur + 1) % s.players.length;
   s.turnNo++;
-  if (s.cur === 0) {
+  if (s.cur === (s.first || 0)) { // saves from before `first` existed always started with seat 0
     if (s.finalRound) return finish(s);
     s.round++;
   }
@@ -1893,7 +1894,7 @@ export default {
   options: [{ id: 'goal', label: '🏆 Prestige to win', default: '15', choices: [['15', '15 prestige'], ['12', '12 prestige (shorter)'], ['10', '10 prestige (quick)']] }, levelOption()],
   cover: coverSVG(),
   howTo: {
-    goal: 'Earn <b>15 prestige</b> (the host can pick 12 or 10 for a shorter game) by buying gem cards and winning patrons. When someone reaches 15, the round is finished so everyone has had the same number of turns; most prestige wins.',
+    goal: 'Earn <b>15 prestige</b> (the host can pick 12 or 10 for a shorter game) by buying gem cards and winning patrons. When someone reaches 15, the round is finished so everyone has had the same number of turns; most prestige wins. <b>Tied?</b> The tied player who bought the fewest cards wins; if that is tied too, they share the victory.',
     turn: [
       ['💎', 'Take gems', 'Take <b>3 different</b> colours, or <b>2 of the same</b> colour if that pile has at least 4.'],
       ['🃏', 'Or buy a card', 'Pay its cost in gems. Gold coins count as any colour. Bought cards may give prestige (top-left number).'],

@@ -329,6 +329,9 @@ export default {
         const row = await withTables(env, () => DB.prepare('SELECT rev, saved_at FROM explorers WHERE id = ?').bind(id).first());
         if (row && now - Number(row.saved_at) < MIN_GAP_MS) return fail(429, 'too-soon', 'Saved a moment ago. Wait a second and try again.');
         if (!row) {
+          // A browser key (from before accounts) may keep updating its own save, but can't start a new one:
+          // otherwise anyone could fill the database with made-up keys and no account.
+          if (who.legacy) return fail(403, 'signin', 'Sign in to your explorer account to save.');
           const r = await DB.prepare('INSERT INTO explorers (id, rev, data, saved_at, created_at) VALUES (?, 1, ?, ?, ?) ON CONFLICT(id) DO NOTHING').bind(id, text, now, now).run();
           if (!r.meta?.changes) return fail(409, 'conflict', 'This explorer was just saved from somewhere else.');
           return json(200, { rev: 1, savedAt: now });

@@ -1,5 +1,5 @@
 ﻿// Court of Whispers — a hidden-role bluffing game of renaissance palace intrigue.
-// Claim any role, call out liars, and be the last courtier with influence.
+// Claim any role, call out liars, and be the last courtier with allies left.
 import { esc, rand, shuffle, log, addFx, PLAYER_COLORS } from '../js/util.js';
 import { injectCSS, morph } from '../js/fx.js';
 import { levelOption, levelOf } from '../js/levels.js';
@@ -12,16 +12,16 @@ import { portrait } from '../js/avatar.js';
    ============================================================ */
 const ROLES = ['chancellor', 'shadow', 'corsair', 'envoy', 'duchess'];
 const R = {
-  chancellor: { name: 'Chancellor', color: '#8a55cf', deep: '#2a1048', ink: '#4a1f86', l1: 'LEVY: +3 COINS', l2: 'Blocks Foreign Aid', act: 'Levy: take 3 coins from the treasury.', blk: 'Blocks Foreign Aid.' },
-  shadow: { name: 'Shadow', color: '#4b505e', deep: '#08080c', ink: '#1d1d24', l1: 'ASSASSINATE: PAY 3', l2: 'Rival loses a card', act: 'Assassinate: pay 3 coins; a rival loses an influence.', blk: 'Blocks nothing.' },
+  chancellor: { name: 'Chancellor', color: '#8a55cf', deep: '#2a1048', ink: '#4a1f86', l1: 'LEVY: +3 COINS', l2: 'Blocks Petitions', act: 'Levy: take 3 coins from the treasury.', blk: 'Blocks Petitions.' },
+  shadow: { name: 'Shadow', color: '#4b505e', deep: '#08080c', ink: '#1d1d24', l1: 'ASSASSINATE: PAY 3', l2: 'Rival loses a card', act: 'Assassinate: pay 3 coins; a rival loses an ally.', blk: 'Blocks nothing.' },
   corsair: { name: 'Corsair', color: '#3279c4', deep: '#0a2244', ink: '#164a85', l1: 'PLUNDER: STEAL 2', l2: 'Blocks Plunder', act: 'Plunder: take up to 2 coins from a rival.', blk: 'Blocks Plunder.' },
   envoy: { name: 'Envoy', color: '#2f9a5e', deep: '#08321d', ink: '#135a33', l1: 'EXCHANGE: DRAW 2', l2: 'Blocks Plunder', act: 'Exchange: draw 2 cards, then return any 2.', blk: 'Blocks Plunder.' },
   duchess: { name: 'Duchess', color: '#d0304a', deep: '#420712', ink: '#8f1028', l1: 'NO ACTION', l2: 'Blocks Assassination', act: 'No action of her own.', blk: 'Blocks Assassination.' },
 };
 const A = {
-  income: { name: 'Income', sub: '+1 coin' },
-  aid: { name: 'Foreign Aid', sub: '+2 coins', blockers: ['chancellor'], by: 'any' },
-  coup: { name: 'Coup', sub: 'pay 7 · unstoppable', cost: 7, target: true },
+  income: { name: 'Tithe', sub: '+1 coin' },
+  aid: { name: 'Petition', sub: '+2 coins', blockers: ['chancellor'], by: 'any' },
+  coup: { name: 'Overthrow', sub: 'pay 7 · unstoppable', cost: 7, target: true },
   levy: { name: 'Levy', sub: '+3 coins', claim: 'chancellor' },
   assassinate: { name: 'Assassinate', sub: 'pay 3 · rival loses a card', claim: 'shadow', cost: 3, target: true, blockers: ['duchess'], by: 'target' },
   plunder: { name: 'Plunder', sub: 'steal up to 2', claim: 'corsair', target: true, blockers: ['corsair', 'envoy'], by: 'target' },
@@ -86,7 +86,7 @@ function blockStands(s) {
 
 function reveal(s, p, c) {
   c.up = true;
-  log(s, `${p.name} loses an influence, revealing the ${R[c.role].name}.`);
+  log(s, `${p.name} loses an ally, revealing the ${R[c.role].name}.`);
   addEv(s, { t: 'lose', pid: p.id, k: c.k, role: c.role });
   if (!isAlive(p)) {
     p.out = true;
@@ -160,7 +160,7 @@ function endTurn(s) {
 function declare(s, p, a) {
   const def = A[a.action];
   if (!def) throw new Error('Unknown action.');
-  if (p.coins >= 10 && a.action !== 'coup') throw new Error('With 10 or more coins you must stage a Coup.');
+  if (p.coins >= 10 && a.action !== 'coup') throw new Error('With 10 or more coins you must stage an Overthrow.');
   if (def.cost && p.coins < def.cost) throw new Error(`${def.name} costs ${def.cost} coins.`);
   let t = null;
   if (def.target) {
@@ -173,7 +173,7 @@ function declare(s, p, a) {
 
   if (a.action === 'income') {
     p.coins += 1;
-    log(s, `${p.name} takes Income (+1).`);
+    log(s, `${p.name} collects a Tithe (+1).`);
     addEv(s, { t: 'act', pid: p.id, action: 'income' });
     coinsFly(s, 'treasury', `p-${p.id}-coins`, 1);
     addFx(s, { kind: 'float', at: `p-${p.id}-coins`, text: '+1', color: '#ffd76a', delay: 500 });
@@ -181,7 +181,7 @@ function declare(s, p, a) {
   }
   if (a.action === 'coup') {
     p.coins -= 7;
-    log(s, `${p.name} stages a Coup against ${t.name}!`);
+    log(s, `${p.name} stages an Overthrow against ${t.name}!`);
     addEv(s, { t: 'act', pid: p.id, action: 'coup', target: t.id });
     addEv(s, { t: 'coup', pid: t.id });
     coinsFly(s, `p-${p.id}-coins`, 'treasury', 7);
@@ -190,7 +190,7 @@ function declare(s, p, a) {
     return processLosses(s);
   }
   if (a.action === 'aid') {
-    log(s, `${p.name} requests Foreign Aid (+2).`);
+    log(s, `${p.name} submits a Petition (+2).`);
     addEv(s, { t: 'act', pid: p.id, action: 'aid' });
     return openWindow(s, 'block', others);
   }
@@ -241,7 +241,7 @@ function doChallenge(s, ch) {
     shuffle(s.deck);
     claimant.cards[idx] = draw(s);
     s.returned = [card.k];
-    log(s, `${claimant.name} reveals the ${R[role].name}! It is shuffled away and replaced; ${ch.name} loses an influence.`);
+    log(s, `${claimant.name} reveals the ${R[role].name}! It is shuffled away and replaced; ${ch.name} loses an ally.`);
     addEv(s, { t: 'proof', pid: claimant.id, role, ok: true, ch: ch.id });
     s.losses = [ch.id];
     s.after = isBlock ? 'blocked' : 'stands';
@@ -272,7 +272,7 @@ function resolve(s) {
   switch (pd.action) {
     case 'aid':
       a.coins += 2;
-      log(s, `${a.name} receives Foreign Aid (+2).`);
+      log(s, `${a.name}'s Petition is granted (+2).`);
       coinsFly(s, 'treasury', `p-${a.id}-coins`, 2);
       addFx(s, { kind: 'float', at: `p-${a.id}-coins`, text: '+2', color: '#ffd76a', delay: 600 });
       return endTurn(s);
@@ -317,7 +317,7 @@ function resolve(s) {
 }
 
 function doLose(s, p, k) {
-  if (s.losses[0] !== p.id) throw new Error('You do not have to give up an influence.');
+  if (s.losses[0] !== p.id) throw new Error('You do not have to give up an ally.');
   const c = p.cards.find((x) => x.k === k && !x.up);
   if (!c) throw new Error('Choose one of your hidden cards.');
   reveal(s, p, c);
@@ -382,7 +382,7 @@ function bot(v, pid) {
 
 // What happens when a player's move timer runs out (the platform falls back to the bot's choice if this move
 // turns out to be illegal): a pending claim or block is allowed, never challenged or blocked; on their own
-// turn they take Income, or stage the Coup they must make with 10+ coins. Choosing which card to give up,
+// turn they collect a Tithe, or stage the Overthrow they must make with 10+ coins. Choosing which card to give up,
 // or which to keep after an Exchange, is left to the Normal courtier, whatever the computer level.
 function onTimeout(v, pid) {
   if (WINDOWS.includes(v.phase)) return { type: 'allow' };
@@ -722,7 +722,7 @@ function botHard(v, pid) {
 
   if (has('shadow') && coins >= 3) {
     const t = strikeTarget();
-    if (!claimsBlock(t, ['duchess'])) return act('assassinate', t); // otherwise save up for a Coup
+    if (!claimsBlock(t, ['duchess'])) return act('assassinate', t); // otherwise save up for an Overthrow
   }
   if (has('chancellor')) return act('levy');
   if (has('corsair')) {
@@ -1649,7 +1649,7 @@ const outAt = new Map(); // pid -> ms when the "Banished" badge lands
 const GAP = { claim: 500, act: 400, block: 500, challenge: 1050, slash: 800, coup: 700, lose: 500, out: 900, stopped: 500, draw: 0, shuffle: 0 };
 
 const short = (name) => String(name || '?').replace(/[^\p{L}\p{N}\s'.-]/gu, '').trim().split(/\s+/)[0].slice(0, 9) || '?';
-const COIN_HUE = '#e2a232'; // Income, Foreign Aid and the winner's medal: the colour of the coins
+const COIN_HUE = '#e2a232'; // Tithe, Petition and the winner's medal: the colour of the coins
 let prevCoins = new Map(); // game id | player id -> coins at the last render, for the "gain" flash
 // The ledger and chronicle fold away on phones so the table gets the screen; they stay as the player left them.
 const WIDE = typeof matchMedia === 'function' ? matchMedia('(min-width: 901px)').matches : true;
@@ -1767,7 +1767,7 @@ function flagHTML(v, pid) {
     if (v.allowed.includes(pid)) return `<span class="bluff-flag ok" title="Allowed">${uiIcon('check')}</span>`;
     if (v.respond.includes(pid)) return `<span class="bluff-flag wait" title="Deciding">${DOTS}</span>`;
   }
-  if (v.phase === 'lose' && v.respond.includes(pid)) return '<span class="bluff-flag bad" title="Giving up an influence"><b>!</b></span>';
+  if (v.phase === 'lose' && v.respond.includes(pid)) return '<span class="bluff-flag bad" title="Giving up an ally"><b>!</b></span>';
   if (v.phase === 'exchange' && v.respond.includes(pid)) return `<span class="bluff-flag wait swap" title="Exchanging cards">${uiIcon('refresh')}</span>`;
   return '';
 }
@@ -1820,7 +1820,7 @@ function stageHTML(v, me, ctx) {
   }
   if (!pd) {
     const a = v.players[v.turn];
-    return `<div class="bluff-plate"><div class="bluff-pl-row">${CANDLE}<div class="bluff-pl-txt"><b>${a.id === me ? (ui.pick ? 'Choose a rival' : 'Your move') : `${esc(short(a.name))}'s move`}</b><small>${a.id === me ? (ui.pick ? `Tap a glowing rival to ${A[ui.pick].name}.` : a.coins >= 10 ? 'You must stage a Coup.' : 'Choose an action below.') : 'weighing their options…'}</small></div></div></div>`;
+    return `<div class="bluff-plate"><div class="bluff-pl-row">${CANDLE}<div class="bluff-pl-txt"><b>${a.id === me ? (ui.pick ? 'Choose a rival' : 'Your move') : `${esc(short(a.name))}'s move`}</b><small>${a.id === me ? (ui.pick ? `Tap a glowing rival to ${A[ui.pick].name}.` : a.coins >= 10 ? 'You must stage an Overthrow.' : 'Choose an action below.') : 'weighing their options…'}</small></div></div></div>`;
   }
   const def = A[pd.action];
   const tgt = pd.target ? ` → ${nm(pd.target)}` : '';
@@ -1928,7 +1928,7 @@ function controlsHTML(v, meP, ctx) {
     const mine = hidden(meP).map((c) => c.role);
     const rivals = alive(v).filter((p) => p.id !== me);
     if (ui.pick) {
-      return `<div class="bluff-hint">Tap a rival's seat to ${A[ui.pick].name}<small>${ui.pick === 'plunder' ? 'Only rivals with coins can be plundered.' : 'They will lose an influence.'}</small></div><div class="bluff-resp"><button data-do="cancel">${uiIcon('close')}Cancel</button></div>`;
+      return `<div class="bluff-hint">Tap a rival's seat to ${A[ui.pick].name}<small>${ui.pick === 'plunder' ? 'Only rivals with coins can be plundered.' : 'They will lose an ally.'}</small></div><div class="bluff-resp"><button data-do="cancel">${uiIcon('close')}Cancel</button></div>`;
     }
     const must = coins >= 10;
     const btn = (action) => {
@@ -1943,8 +1943,8 @@ function controlsHTML(v, meP, ctx) {
 <span class="bluff-act-ic">${shadedIcon(role || action)}</span><span class="bluff-act-l"><b>${def.name}</b><small>${role ? R[role].name + ' · ' : ''}${def.sub}</small></span>
 ${role ? `<span class="bluff-tag ${held ? 'held' : 'bluff'}">${held ? 'Held' : 'Bluff'}</span>` : ''}</button>`;
     };
-    const hint = must ? 'You hold 10+ coins — you must stage a Coup!' : 'Your move: choose an action';
-    const sub = must ? '' : coins < 7 ? `Coup needs 7 coins (you have ${coins}). Claims can be challenged — bluff boldly, or play it safe.` : 'You can afford a Coup. Claims can be challenged.';
+    const hint = must ? 'You hold 10+ coins — you must stage an Overthrow!' : 'Your move: choose an action';
+    const sub = must ? '' : coins < 7 ? `An Overthrow needs 7 coins (you have ${coins}). Claims can be challenged — bluff boldly, or play it safe.` : 'You can afford an Overthrow. Claims can be challenged.';
     return `<div class="bluff-hint">${hint}${sub ? `<small>${sub}</small>` : ''}</div>
 <div class="bluff-groups">
 <div class="bluff-group common"><div class="bluff-glabel">Common</div><div class="bluff-btns">${btn('income')}${btn('aid')}${btn('coup')}</div></div>
@@ -1956,12 +1956,12 @@ ${role ? `<span class="bluff-tag ${held ? 'held' : 'bluff'}">${held ? 'Held' : '
   if (v.phase === 'challenge') {
     const def = A[pd.action];
     const vsYou = pd.target === me;
-    return `<div class="bluff-hint">${nm(pd.actor)} claims the ${R[pd.claim].name} to ${def.name}${pd.target ? (vsYou ? ' you' : ' ' + nm(pd.target)) : ''}.<small>Challenge if you think it's a bluff. Whoever is wrong loses an influence.${vsYou && def.blockers ? ' Allowing lets you block next.' : ''}</small></div>
+    return `<div class="bluff-hint">${nm(pd.actor)} claims the ${R[pd.claim].name} to ${def.name}${pd.target ? (vsYou ? ' you' : ' ' + nm(pd.target)) : ''}.<small>Challenge if you think it's a bluff. Whoever is wrong loses an ally.${vsYou && def.blockers ? ' Allowing lets you block next.' : ''}</small></div>
 <div class="bluff-resp">${ALLOW_BTN}${CHALLENGE_BTN}</div>`;
   }
   if (v.phase === 'block') {
     const def = A[pd.action];
-    const msg = pd.action === 'aid' ? `${nm(pd.actor)} wants Foreign Aid (+2).` : pd.action === 'assassinate' ? `${nm(pd.actor)}'s Shadow is coming for you!` : `${nm(pd.actor)} will plunder up to 2 of your coins.`;
+    const msg = pd.action === 'aid' ? `${nm(pd.actor)} submits a Petition (+2).` : pd.action === 'assassinate' ? `${nm(pd.actor)}'s Shadow is coming for you!` : `${nm(pd.actor)} will plunder up to 2 of your coins.`;
     return `<div class="bluff-hint">${msg}<small>Block by claiming ${def.blockers.map((r) => 'the ' + R[r].name).join(' or ')} — or let it happen.</small></div>
 <div class="bluff-resp">${ALLOW_BTN}${def.blockers.map((r) => `<button class="blockbtn" data-do="block" data-role="${r}" style="--rc:${R[r].color}">${icon(r)} Block as ${R[r].name}${tagFor(r)}</button>`).join('')}</div>`;
   }
@@ -1971,7 +1971,7 @@ ${role ? `<span class="bluff-tag ${held ? 'held' : 'bluff'}">${held ? 'Held' : '
   }
   if (v.phase === 'lose') {
     const sel = ui.sel && meP.cards.find((c) => c.k === ui.sel);
-    return `<div class="bluff-hint">You must give up an influence<small>Tap the card to reveal. It stays face-up and no longer counts.</small></div>
+    return `<div class="bluff-hint">You must give up an ally<small>Tap the card to reveal. It stays face-up and no longer counts.</small></div>
 <div class="bluff-resp"><button class="bad" data-do="lose"${sel ? '' : ' disabled'}>${sel ? `Reveal the ${R[sel.role].name}` : 'Choose a card'}</button></div>`;
   }
   if (v.phase === 'exchange') {
@@ -1992,7 +1992,7 @@ function waitingText(v, me) {
     case 'challenge': return `Waiting on ${names(v.respond)} to allow or challenge…`;
     case 'block': return pd.action === 'aid' ? `Waiting on ${names(v.respond)} — anyone may block with a Chancellor…` : `Waiting on ${names(v.respond)} to decide whether to block…`;
     case 'blockChallenge': return `Waiting on ${names(v.respond)} to accept or challenge the block…`;
-    case 'lose': return `${nm(v.respond[0])} must give up an influence…`;
+    case 'lose': return `${nm(v.respond[0])} must give up an ally…`;
     case 'exchange': return `${nm(v.respond[0])} is exchanging cards with the court deck…`;
   }
   return '';
@@ -2006,9 +2006,9 @@ function statusText(v, me) {
   switch (v.phase) {
     case 'action': return mine ? 'Your move — choose an action' : `${nm(v.respond[0])}'s move`;
     case 'challenge': return mine ? `Challenge ${nm(pd.actor)}'s ${R[pd.claim].name}?` : `${nm(pd.actor)} claims the ${R[pd.claim].name}`;
-    case 'block': return mine ? (pd.action === 'aid' ? `Block ${nm(pd.actor)}'s Foreign Aid?` : `${nm(pd.actor)} targets you — block?`) : 'Waiting for blocks';
+    case 'block': return mine ? (pd.action === 'aid' ? `Block ${nm(pd.actor)}'s Petition?` : `${nm(pd.actor)} targets you — block?`) : 'Waiting for blocks';
     case 'blockChallenge': return mine ? `Challenge ${nm(pd.blocker)}'s block?` : `${nm(pd.blocker)} blocks as ${R[pd.blockRole].name}`;
-    case 'lose': return mine ? 'Give up an influence' : `${nm(v.respond[0])} loses an influence`;
+    case 'lose': return mine ? 'Give up an ally' : `${nm(v.respond[0])} loses an ally`;
     case 'exchange': return mine ? 'Exchange your cards' : `${nm(v.respond[0])} is exchanging`;
   }
   return '';
@@ -2214,10 +2214,10 @@ function playEv(e, v, me, nm) {
     case 'act': {
       const def = A[e.action];
       if (e.action === 'coup') {
-        banner({ color: '#a8202c', icon: 'coup', who: `${nm(e.pid)} ${you ? 'stage' : 'stages'} a`, big: 'Coup', sub: `against ${nm(e.target)} · unstoppable` });
+        banner({ color: '#a8202c', icon: 'coup', who: `${nm(e.pid)} ${you ? 'stage' : 'stages'} an`, big: 'Overthrow', sub: `against ${nm(e.target)} · unstoppable` });
         sound('bad');
       } else {
-        banner({ color: COIN_HUE, icon: e.action, who: `${nm(e.pid)} ${you ? 'take' : 'takes'}`, big: def.name, sub: e.action === 'aid' ? '+2 coins · a Chancellor may block' : '+1 coin · cannot be stopped' });
+        banner({ color: COIN_HUE, icon: e.action, who: `${nm(e.pid)} ${e.action === 'aid' ? (you ? 'submit' : 'submits') : you ? 'collect' : 'collects'} a`, big: def.name, sub: e.action === 'aid' ? '+2 coins · a Chancellor may block' : '+1 coin · cannot be stopped' });
         sound('card');
       }
       break;
@@ -2279,7 +2279,7 @@ function playEv(e, v, me, nm) {
       setTimeout(() => {
         spawn('bluff-seal', `<svg viewBox="0 0 120 120"><path d="${blob(60, 60, 50, 18, 3, 1.3)}" fill="url(#bw-wax)" stroke="#3a0408" stroke-width="2"/><circle cx="60" cy="60" r="38" fill="none" stroke="#5a0610" stroke-width="3"/><circle cx="59" cy="59" r="38" fill="none" stroke="#ff9a9a" stroke-opacity=".3" stroke-width="1"/>
 <g transform="translate(42 26) scale(1.5)" fill="#6a0812" stroke="#ff9a9a" stroke-opacity=".4" stroke-width=".6">${ICON.chancellor}</g>
-<text x="60" y="88" text-anchor="middle" font-family="Cinzel, Georgia, serif" font-weight="800" font-size="17" letter-spacing="2" fill="#ffd9cf">COUP</text></svg>`, r.x, r.y, 1700);
+<text x="60" y="88" text-anchor="middle" font-family="Cinzel, Georgia, serif" font-weight="800" font-size="11" letter-spacing="1" textLength="80" lengthAdjust="spacingAndGlyphs" fill="#ffd9cf">OVERTHROW</text></svg>`, r.x, r.y, 1700);
         sound('place');
         setTimeout(() => sound('build'), 90);
         shakeEl(document.querySelector(`[data-a="p-${CSS.escape(e.pid)}-seat"]`), 12);
@@ -2322,10 +2322,10 @@ function openRef() {
 <p class="small muted" style="margin:6px 0 0">15 cards: three of each role. Claim any role — truthfully or not.</p>
 <div class="bluff-ref-grid">${ROLES.map((r) => `<div class="bluff-ref-role" style="--rc:${R[r].color}">${staticCard(r, '76px')}<div><h3 style="color:${shade(R[r].color, 0.4)}">${R[r].name}</h3><p>${R[r].act}</p><p class="b">${R[r].blk}</p></div></div>`).join('')}</div>
 <h3 class="gold">Common actions</h3>
-<ul><li><b>Income</b> — take 1 coin. Can't be blocked or challenged.</li><li><b>Foreign Aid</b> — take 2 coins. Anyone claiming the Chancellor may block.</li><li><b>Coup</b> — pay 7: a rival loses an influence. Unstoppable. Mandatory with 10+ coins.</li></ul>
+<ul><li><b>Tithe</b> — take 1 coin. Can't be blocked or challenged.</li><li><b>Petition</b> — take 2 coins. Anyone claiming the Chancellor may block.</li><li><b>Overthrow</b> — pay 7: a rival loses an ally. Unstoppable. Mandatory with 10+ coins.</li></ul>
 <h3 class="gold">Challenges</h3>
-<ul><li>Any claim (action or block) may be challenged by any other player.</li><li>If the claimer has the card, the challenger loses an influence; the card is shuffled away and replaced.</li><li>If not, the claimer loses an influence and the claim fails.</li><li>Assassination coins are spent even if blocked, but refunded if the Shadow is exposed.</li></ul>
-<p class="small muted">Lose both influences and you are banished. The last courtier standing wins.</p>
+<ul><li>Any claim (action or block) may be challenged by any other player.</li><li>If the claimer has the card, the challenger loses an ally; the card is shuffled away and replaced.</li><li>If not, the claimer loses an ally and the claim fails.</li><li>Assassination coins are spent even if blocked, but refunded if the Shadow is exposed.</li></ul>
+<p class="small muted">Lose both allies and you are banished. The last courtier standing wins.</p>
 </div>`;
   bg.addEventListener('click', (e) => {
     if (e.target === bg || e.target.closest('[data-close]')) { sound('click'); bg.remove(); }
@@ -2340,21 +2340,22 @@ export default {
   id: 'bluff',
   name: 'Court of Whispers',
   emoji: '🎭',
-  description: 'A candlelit court of masks and lies. Claim any role, call out liars, and be the last courtier with influence left.',
+  description: 'A candlelit court of masks and lies. Claim any role, call out liars, and be the last courtier with allies left.',
   minPlayers: 2,
   maxPlayers: 6,
   cover: COVER,
   options: [levelOption()],
   howTo: {
-    goal: 'Be the <b>last courtier standing</b>. Everyone starts with 2 secret role cards (your "influence") and 2 coins. Lose both cards and you are out.',
+    goal: 'Be the <b>last courtier standing</b>. Everyone starts with 2 secret role cards (your two "allies" at court) and 2 coins. Lose both cards and you are out.',
     turn: [
-      ['🪙', 'Take a safe action', '<b>Income</b> +1 coin (can\'t be stopped) or <b>Foreign Aid</b> +2 coins (a Chancellor can block it).'],
+      ['🪙', 'Take a safe action', '<b>Tithe</b> +1 coin (can\'t be stopped) or <b>Petition</b> +2 coins (a Chancellor can block it).'],
       ['🎭', 'Or claim a role (you may bluff!)', '<b>Chancellor</b> Levy +3 coins · <b>Shadow</b> pay 3 to make a rival lose a card · <b>Corsair</b> steal up to 2 coins · <b>Envoy</b> swap cards with the deck. You don\'t need to really hold the card.'],
-      ['⚔️', 'Or launch a Coup', 'Pay 7 coins: a rival loses a card, and nobody can stop it. With 10+ coins you must Coup.'],
+      ['⚔️', 'Or stage an Overthrow', 'Pay 7 coins: a rival loses a card, and nobody can stop it. With 10+ coins you must Overthrow.'],
       ['❗', 'Others respond', 'Anyone can <b>Challenge</b> a claim. If the claimer had the card, the challenger loses a card; if not, the bluffer loses one. Some actions can be <b>blocked</b> by claiming a role too.'],
     ],
     tips: [
-      '<b>Blocks:</b> Duchess blocks the Shadow · Chancellor blocks Foreign Aid · Corsair or Envoy block a Corsair\'s steal. Blocks can be challenged as well.',
+      '<b>Blocks:</b> Duchess blocks the Shadow · Chancellor blocks a Petition · Corsair or Envoy block a Corsair\'s steal. Blocks can be challenged as well.',
+      '<b>Assassinate</b> costs 3 coins up front. If it is blocked, the 3 coins stay spent; if the Shadow is challenged and exposed as a bluff, they are refunded.',
       'When you lose a card, you choose which one to reveal. Revealed cards are out of play for good.',
       'Watch the Court Ledger: if all 3 copies of a role are revealed, nobody can truly hold it.',
       'Your action buttons say <b>HELD</b> or <b>BLUFF</b> so you always know which claims are honest.',
@@ -2415,7 +2416,7 @@ export default {
         if (a.type === 'block') return doBlock(s, p, a.role);
         throw new Error('Allow it, or block it.');
       case 'lose':
-        if (a.type !== 'lose') throw new Error('Choose an influence to give up.');
+        if (a.type !== 'lose') throw new Error('Choose an ally to give up.');
         return doLose(s, p, a.card);
       case 'exchange':
         if (a.type !== 'exchange') throw new Error('Choose which cards to keep.');

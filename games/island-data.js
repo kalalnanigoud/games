@@ -15,13 +15,14 @@ export const SEATS = [
   { color: '#b197fc', shape: 'diamond', label: 'Violet' },
 ];
 
-// Elements: each beats the ones listed (1.5× damage); the reverse is 0.67×.
+// Elements: each beats the ones listed (1.5× damage); the reverse is 0.67×. Stone doesn't resist Ember,
+// so each starter has a miniboss it is at least even against.
 export const ELEMENTS = {
   leaf: { name: 'Leaf', color: '#51cf66', beats: ['tide', 'stone'] },
   tide: { name: 'Tide', color: '#4dabf7', beats: ['ember', 'stone'] },
   ember: { name: 'Ember', color: '#ff922b', beats: ['leaf', 'shade'] },
   spark: { name: 'Spark', color: '#ffd43b', beats: ['tide', 'storm'] },
-  stone: { name: 'Stone', color: '#c4a484', beats: ['spark', 'ember', 'storm'] },
+  stone: { name: 'Stone', color: '#c4a484', beats: ['spark', 'storm'] },
   moon: { name: 'Moon', color: '#d0bfff', beats: ['shade', 'storm'] },
   shade: { name: 'Shade', color: '#845ef7', beats: [] },
   storm: { name: 'Storm', color: '#748ffc', beats: ['tide'] },
@@ -60,14 +61,14 @@ export const MURKS = {
 export const ABILITIES = {
   leafstorm: { name: 'Leaf Storm', cd: 7, power: 1.6, desc: 'Whirling leaves hit everything around your companion.' },
   flameburst: { name: 'Flame Burst', cd: 7, power: 1.8, desc: 'A cone of fire in front of your companion.' },
-  bubblering: { name: 'Bubble Ring', cd: 9, power: 0.8, desc: 'A bubble shields you and pushes enemies back.' },
+  bubblering: { name: 'Bubble Ring', cd: 9, power: 1.0, desc: 'A bubble shields you (stronger as your companion grows) and pushes enemies back.' },
   thornvolley: { name: 'Thorn Volley', cd: 6, power: 1.0, desc: 'Three thorns fly at the nearest enemies.' },
   healspores: { name: 'Healing Spores', cd: 12, power: 0, desc: 'Heals you, your companion and nearby friends.' },
   clawcrush: { name: 'Claw Crush', cd: 7, power: 2.4, desc: 'One crushing pinch on the nearest enemy.' },
   thunderdive: { name: 'Thunder Dive', cd: 7, power: 2.0, desc: 'Dives through an enemy with a crack of lightning.' },
   tidalwave: { name: 'Tidal Wave', cd: 8, power: 1.8, desc: 'A rolling wave that knocks enemies back.' },
   quake: { name: 'Quake', cd: 10, power: 2.0, desc: 'Shakes the ground around it and stuns enemies.' },
-  staticfield: { name: 'Static Field', cd: 9, power: 0.5, desc: 'A crackling field that zaps and slows enemies inside.' },
+  staticfield: { name: 'Static Field', cd: 9, power: 0.4, desc: 'A crackling field that zaps and slows enemies inside.' },
   moonbeam: { name: 'Moonbeam', cd: 8, power: 2.2, desc: 'A long beam of moonlight.' },
 };
 
@@ -93,7 +94,14 @@ export const GEAR = {
 };
 export const SHOP = ['sunberry', 'charm', 'seed', 'bigberry', 'bronzeblade', 'leafcharm', 'tidecharm'];
 
-export const PLAYER = { hp: 100, hpPerLv: 12, speed: 150, r: 9, swing: 0.38, reach: 54, arc: 1.05, dodge: 0.26, dodgeSpeed: 430, dodgeCd: 0.85, downFor: 30, revive: 1.5 };
+// downFor: seconds knocked out before waking in the village on your own; respawnWait: how soon "Return to the
+// village" can be used instead; revive: seconds a friend spends reviving you; reviveCd: after a revive, how long
+// before a friend can revive you again (until then, wait or return to the village).
+export const PLAYER = { hp: 100, hpPerLv: 12, speed: 150, r: 9, swing: 0.38, reach: 54, arc: 1.05, dodge: 0.26, dodgeSpeed: 430, dodgeCd: 0.85, downFor: 30, respawnWait: 5, revive: 2.5, reviveCd: 25 };
+// Waking up in the village costs a few shells (Healer Sana's fee), never more than you have.
+export const respawnFee = (lv, shells) => Math.max(0, Math.min(shells | 0, 10 + lv));
+// Bubble Ring's shield grows with the companion's level.
+export const bubbleShield = (lv) => Math.round(18 + 4 * lv);
 export const xpToNext = (lv) => Math.round(24 * Math.pow(lv, 1.5));
 export const creatureMax = (sp, lv) => Math.round((SPECIES[sp] || MURKS[sp]).hp * (1 + 0.11 * (lv - 1)));
 export const creatureAtk = (sp, lv) => (SPECIES[sp] || MURKS[sp]).atk * (1 + 0.09 * (lv - 1));
@@ -110,29 +118,41 @@ export const NPCS = {
 };
 
 // Quests: stage 0 = not offered, 1 = active, 2 = ready to hand in (where needed), 9 = done.
-// main: the story line, shown first in the tracker.
+// main: the story line, shown first in the tracker. xp: the reward when it's done (explorers keep 60% of any XP,
+// companions all of it); the boss quests pay through BOSSES[].xp instead.
 export const QUESTS = {
   starter: { name: 'A Companion of Your Own', main: true, giver: 'elder', steps: { 1: 'Talk to Elder Maru in the village square.' } },
-  supplies: { name: 'Supplies for the Healer', giver: 'healer', need: { sunberry: 5 }, steps: { 1: 'Pick 5 Sunberries from berry bushes in Whispering Woods.', 2: 'Bring the Sunberries to Healer Sana.' } },
-  bridge: { name: 'Mend the River Bridge', main: true, giver: 'ranger', need: { driftwood: 4 }, steps: { 1: 'Collect 4 Driftwood on Sunsand Shore.', 2: 'Bring the Driftwood to Captain Ash.' } },
+  supplies: { name: 'Supplies for the Healer', giver: 'healer', xp: 250, need: { sunberry: 5 }, steps: { 1: 'Pick 5 Sunberries from berry bushes in Whispering Woods.', 2: 'Bring the Sunberries to Healer Sana.' } },
+  bridge: { name: 'Mend the River Bridge', main: true, giver: 'ranger', xp: 500, need: { driftwood: 4 }, steps: { 1: 'Collect 4 Driftwood on Sunsand Shore.', 2: 'Bring the Driftwood to Captain Ash.' } },
   marsh: { name: 'Something in the Marsh', main: true, giver: 'fisher', steps: { 1: 'Defeat whatever lurks in the marsh north of Mirror Lake.' } },
   cave: { name: 'The Glow Beneath', main: true, giver: 'ranger', steps: { 1: 'Explore Glowdeep Cave and face what guards its deepest chamber.' } },
-  defend: { name: 'Hold the Village', main: true, giver: 'elder', steps: { 1: 'Return to the village: murklings are coming!', 2: 'Drive the murklings out of the village.' } },
+  defend: { name: 'Hold the Village', main: true, giver: 'elder', xp: 500, steps: { 1: 'Return to the village: murklings are coming!', 2: 'Drive the murklings out of the village.' } },
   peak: { name: 'The Storm on Stormcrown', main: true, giver: 'elder', steps: { 1: 'Climb Stormcrown Peak and calm the storm.' } },
-  lost: { name: 'A Cry in the Woods', giver: 'kid', steps: { 1: 'Find the hurt creature in the woods’ western clearing.', 2: 'Lead it to Healer Sana in the village.' } },
-  tracks: { name: 'Glowing Tracks', giver: 'kid', steps: { 1: 'Follow the glowing tracks along Sunsand Shore.', 2: 'Befriend the Lunahop before it slips away!' } },
-  fishing: { name: 'The Lake’s Pride', giver: 'fisher', steps: { 1: 'Befriend a Ripplefin and show it to Old Reed.' } },
-  collector: { name: 'Friends of Every Kind', giver: 'elder', steps: { 1: 'Befriend 6 different kinds of creatures.' } },
+  lost: { name: 'A Cry in the Woods', giver: 'kid', xp: 250, steps: { 1: 'Find the hurt creature in the woods’ western clearing.', 2: 'Lead it to Healer Sana in the village.' } },
+  tracks: { name: 'Glowing Tracks', giver: 'kid', xp: 400, steps: { 1: 'Follow the glowing tracks along Sunsand Shore.', 2: 'Befriend the Lunahop before it slips away!' } },
+  fishing: { name: 'The Lake’s Pride', giver: 'fisher', xp: 300, steps: { 1: 'Befriend a Ripplefin and show it to Old Reed.' } },
+  collector: { name: 'Friends of Every Kind', giver: 'elder', xp: 600, steps: { 1: 'Befriend 6 different kinds of creatures.' } },
 };
 export const QUEST_ORDER = ['starter', 'bridge', 'supplies', 'marsh', 'cave', 'defend', 'peak', 'lost', 'tracks', 'fishing', 'collector'];
 
-// Bosses: hp before scaling for the party, the shard they leave, and the flag a win sets.
+// Bosses: hp for one explorer (bossHp scales it for the party), the shard they leave, the flag a win sets, and
+// the XP the first win gives. Tuned so one explorer at the recommended level needs about a minute for a
+// miniboss and two to three for Tempestra.
 export const BOSSES = {
-  mirebrute: { name: 'Mirebrute', el: 'tide', hp: 900, atk: 18, r: 40, speed: 70, shard: 'tideshard', quest: 'marsh', title: 'Terror of the Marsh' },
-  quartzhulk: { name: 'Quartzhulk', el: 'stone', hp: 1400, atk: 22, r: 42, speed: 62, shard: 'stoneshard', quest: 'cave', title: 'Warden of Glowdeep' },
-  tempestra: { name: 'Tempestra', el: 'storm', hp: 2400, atk: 26, r: 56, speed: 90, shard: null, quest: 'peak', title: 'Heart of the Storm' },
+  mirebrute: { name: 'Mirebrute', el: 'tide', hp: 1600, atk: 18, r: 40, speed: 70, shard: 'tideshard', quest: 'marsh', title: 'Terror of the Marsh', xp: 450 },
+  quartzhulk: { name: 'Quartzhulk', el: 'stone', hp: 2000, atk: 22, r: 42, speed: 62, shard: 'stoneshard', quest: 'cave', title: 'Warden of Glowdeep', xp: 600 },
+  tempestra: { name: 'Tempestra', el: 'storm', hp: 6500, atk: 26, r: 56, speed: 90, shard: null, quest: 'peak', title: 'Heart of the Storm', xp: 1000 },
 };
+// Each explorer past the first adds 70% of a solo boss's health (with quicker, more spread-out attacks).
+export const bossHp = (kind, n) => Math.round(BOSSES[kind].hp * (1 + 0.7 * (Math.max(1, n) - 1)));
 
+// The level the story expects in each area: shown when you first walk in, never a gate.
+export const AREA_LEVEL = { village: 1, meadow: 1, woods: 2, shore: 3, lake: 5, marsh: 7, cave: 8, peak: 10 };
+export function recommendNote(zone, lv) {
+  const want = AREA_LEVEL[zone];
+  if (!want || want <= 1) return '';
+  return lv >= want ? `Recommended level ${want}` : `Recommended level ${want} · you are level ${lv}`;
+}
 export const AREAS = {
   village: 'Brightwater Village', woods: 'Whispering Woods', shore: 'Sunsand Shore', lake: 'Mirror Lake',
   marsh: 'Mirelight Marsh', cave: 'Glowdeep Cave', peak: 'Stormcrown Peak', meadow: 'Island Meadows', cliffs: 'Northern Cliffs',

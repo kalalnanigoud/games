@@ -48,6 +48,17 @@ function tally(n, x, y, scale = 1) {
 
 /* ---------------- art ---------------- */
 
+// The time the great hands show: none while they hang loose from the jammed escapement (both point straight
+// down, a time that is never the answer), then the time the team set, which is the moment Elias was trapped.
+export const shownTime = (v) => (v.flags.freed ? { hour: v.facts.hour, minute: v.facts.minute } : null);
+// Hour and minute hands about (cx, cy). mirror: the belfry sees the face from behind.
+function hands(v, cx, cy, hourLen, minLen, hourW, minW, mirror = false) {
+  const t = shownTime(v);
+  const tip = (turn, len) => { const a = turn * 2 * Math.PI - Math.PI / 2; return `${(cx + (mirror ? -1 : 1) * len * Math.cos(a)).toFixed(1)} ${(cy + len * Math.sin(a)).toFixed(1)}`; };
+  const hourTurn = t ? ((t.hour % 12) + t.minute / 60) / 12 : 0.49, minTurn = t ? t.minute / 60 : 0.515;
+  return `<path d="M${cx} ${cy}L${tip(hourTurn, hourLen)}" stroke="#2a1806" stroke-width="${hourW}" stroke-linecap="round"/><path d="M${cx} ${cy}L${tip(minTurn, minLen)}" stroke="#2a1806" stroke-width="${minW}" stroke-linecap="round"/>`;
+}
+
 const DEFS = `<defs>
   <linearGradient id="kp-plank" x2="1"><stop stop-color="#3b2414"/><stop offset=".5" stop-color="#5a3820"/><stop offset="1" stop-color="#3b2414"/></linearGradient>
   <linearGradient id="kp-wall" x2="0" y2="1"><stop stop-color="#2a1a10"/><stop offset="1" stop-color="#4a2f1c"/></linearGradient>
@@ -136,7 +147,7 @@ function belfry(v) {
   const f = v.flags;
   const nums = Array.from({ length: 12 }, (_, i) => { const a = ((i + 1) / 12) * Math.PI * 2 - Math.PI / 2; return `<text x="${(200 - 72 * Math.cos(a)).toFixed(1)}" y="${(116 + 72 * Math.sin(a)).toFixed(1)}" font-size="13" text-anchor="middle" fill="#3b2a17" opacity=".55" font-family="Georgia" transform="scale(1 1)">${roman(i + 1)}</text>`; }).join('');
   const face = `<circle cx="200" cy="112" r="92" fill="url(#kp-face)" opacity=".9" stroke="url(#kp-brass)" stroke-width="6"/><circle cx="200" cy="112" r="92" fill="#ffefb8" opacity=".25"/>${nums}
-    <path d="M200 112L${f.freed ? '168 86' : '232 70'}" stroke="#2a1806" stroke-width="5" stroke-linecap="round"/><path d="M200 112L${f.freed ? '200 40' : '150 150'}" stroke="#2a1806" stroke-width="3" stroke-linecap="round"/><circle cx="200" cy="112" r="7" fill="url(#kp-brass)" stroke="#2a1806"/>`;
+    ${hands(v, 200, 112, 42, 70, 5, 3, true)}<circle cx="200" cy="112" r="7" fill="url(#kp-brass)" stroke="#2a1806"/>`;
   const bell = `<path d="M296 52H396" stroke="#4c2e17" stroke-width="10"/><path d="M346 56v10" stroke="#2a170a" stroke-width="4"/><path d="M312 160Q314 70 346 66Q378 70 380 160L392 170H300Z" fill="url(#kp-bronze)" stroke="#2a1806" stroke-width="2"/><circle cx="346" cy="172" r="7" fill="#5a3a14"/>`;
   const letter = `<g transform="rotate(-5 330 34)"><rect x="310" y="18" width="42" height="32" fill="url(#kp-paper)" stroke="#8a6a3a"/><path d="M314 26h32M314 32h26M314 38h30M314 44h18" stroke="#3b2a17" stroke-opacity=".45" stroke-width="1.6"/></g><circle cx="330" cy="20" r="2" fill="#555"/>`;
   const hidden = f.freed
@@ -165,7 +176,7 @@ const closeups = {
   tally: (v) => frame(`<rect x="20" y="14" width="360" height="192" rx="6" fill="#2a2420" stroke="#4c2e17" stroke-width="8"/><text x="44" y="52" font-size="22" fill="#f3efe3" font-style="italic" font-family="Georgia" opacity=".9">stopped at…</text>${tally(v.facts.minute, 52, 74, 1.5)}`),
   clockface: (v) => frame(`<circle cx="200" cy="110" r="100" fill="url(#kp-face)" stroke="url(#kp-brass)" stroke-width="8"/>${Array.from({ length: 12 }, (_, i) => { const a = ((i + 1) / 12) * Math.PI * 2 - Math.PI / 2; return `<text x="${(200 + 78 * Math.cos(a)).toFixed(1)}" y="${(116 + 78 * Math.sin(a)).toFixed(1)}" font-size="16" text-anchor="middle" fill="#3b2a17" font-family="Georgia" font-weight="700">${roman(i + 1)}</text>`; }).join('')}
     ${Array.from({ length: 60 }, (_, i) => { const a = (i / 60) * Math.PI * 2; return `<path d="M${(200 + 94 * Math.cos(a)).toFixed(1)} ${(110 + 94 * Math.sin(a)).toFixed(1)}L${(200 + (i % 5 ? 90 : 86) * Math.cos(a)).toFixed(1)} ${(110 + (i % 5 ? 90 : 86) * Math.sin(a)).toFixed(1)}" stroke="#3b2a17" stroke-width="${i % 5 ? 1 : 2.4}"/>`; }).join('')}
-    <path d="M200 110L${v.flags.freed ? '160 80' : '236 60'}" stroke="#2a1806" stroke-width="7" stroke-linecap="round"/><path d="M200 110L${v.flags.freed ? '200 28' : '144 160'}" stroke="#2a1806" stroke-width="4" stroke-linecap="round"/><circle cx="200" cy="110" r="9" fill="url(#kp-brass)" stroke="#2a1806" stroke-width="2"/>`, '#141a2c'),
+    ${hands(v, 200, 110, 50, 80, 7, 4)}<circle cx="200" cy="110" r="9" fill="url(#kp-brass)" stroke="#2a1806" stroke-width="2"/>`, '#141a2c'),
   keeper: () => frame(`<rect width="400" height="220" fill="#3a2414"/>${glow(200, 90, 160)}<circle cx="200" cy="78" r="40" fill="#e9c9a0" stroke="#3b2a17" stroke-width="3"/><path d="M160 66q40-46 80 0" fill="#e8e8e8" stroke="#9a9a9a" stroke-width="2"/><path d="M168 84q-6 26 32 34q38-8 32-34" fill="#eee" opacity=".85"/>
     <circle cx="186" cy="78" r="9" fill="none" stroke="url(#kp-brass)" stroke-width="2.5"/><circle cx="214" cy="78" r="9" fill="none" stroke="url(#kp-brass)" stroke-width="2.5"/><path d="M195 78h10" stroke="#d9a84a" stroke-width="2"/><circle cx="186" cy="78" r="2.4" fill="#222"/><circle cx="214" cy="78" r="2.4" fill="#222"/>
     <path d="M120 220V170q0-40 80-40t80 40v50z" fill="#3a3a4a" stroke="#1d1d22" stroke-width="3"/><path d="M200 132v88" stroke="#1d1d22" stroke-width="2"/><circle cx="232" cy="168" r="10" fill="url(#kp-brass)" stroke="#4a3008"/><path d="M232 162v6l4 2" stroke="#3b2a17" stroke-width="1.5" fill="none"/>`),
@@ -332,7 +343,7 @@ export default escapeRoom({
     ],
     tips: [
       'Many puzzles need clues from two different rooms. Read the journal and talk to each other.',
-      'Hints come in steps: a gentle nudge first, the full answer last. The hint button glows when you seem stuck.',
+      'Hints come in steps: a gentle nudge first, the full answer last (it asks before showing it to the team). The hint button glows when you seem stuck.',
       'Codes change every game. Play solo, or add computer teammates. They explore and share clues, and only solve puzzles after the team has been stuck for a while.',
     ],
   },
@@ -420,7 +431,7 @@ export default escapeRoom({
 
     /* Belfry */
     { id: 'clockface', room: 'belfry', name: 'Back of the clock face', hot: [106, 18, 188, 188],
-      look: (v) => ({ art: closeups.clockface(v), text: v.flags.freed ? '<p>The hands rest where you set them. Below, the hidden panel stands open.</p>' : '<p>Through a maintenance gap you can reach the great hands. Set the hour and the minutes by hand.</p>' }),
+      look: (v) => ({ art: closeups.clockface(v), text: v.flags.freed ? '<p>The hands rest where you set them. Below, the hidden panel stands open.</p>' : '<p>When the escapement jammed it knocked the great hands loose: they hang straight down and show nothing. Through a maintenance gap you can reach them. Set the hour and the minutes by hand.</p>' }),
       lock: { slots: [Array.from({ length: 12 }, (_, i) => String(i + 1)), Array.from({ length: 12 }, (_, i) => pad(i * 5))], labels: ['Hour', 'Minutes'], flag: 'freed', verb: 'Set the hands',
         check: (sec, val) => val[0] + 1 === sec.hour && val[1] * 5 === sec.minute, format: (val) => `${val[0] + 1}:${pad(val[1] * 5)}`,
         msg: (p, t) => `${p.name} set the clock to ${t}. The bell tolled, and a hidden panel slid open. Elias Thorne is alive!`,
@@ -441,6 +452,7 @@ export default escapeRoom({
       hints: [() => 'The toolbox held a key. It is in your shared inventory.', () => 'Open the door at the top of the stairs and choose the study key under “Use an item here”.'] },
     { id: 'clock', label: 'Restart the great clock', done: restarted,
       hints: [() => 'Elias’s journal in the study explains what a stopped clock needs.', () => 'Three repairs in the gear loft: the oil can (workshop tool rack) on the pendulum, the winding crank (study fireplace) on the weights, and a spare gear (hidden behind the study bookshelf) on the gear train.',
+        () => 'The bookshelf’s four spines copy the stained-glass window, but Elias’s journal says to read the window from the bottom up: the 1st book takes the bottom pane, the 4th book the top one.',
         (s) => `The bookshelf opens when the spines match the window read from the bottom up: <b>${shelfAnswer(s.secret.window).map((i) => SYMS[i]).join(', ')}</b>.`] },
     { id: 'time', label: 'Find Elias Thorne', done: (s) => !!s.flags.freed,
       hints: [() => 'Read the letter on the beam in the belfry.', () => 'The newspaper clipping in the workshop says how many times the bell struck. The chalk tally in the gear loft counts the minutes.', (s) => `Set the clock’s hands to <b>${s.secret.hour}:${pad(s.secret.minute)}</b>.`] },

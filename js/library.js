@@ -6,15 +6,15 @@ export const GAME_INFO = {
   mosaic: { category: 'Strategy', minutes: 30, duration: '20–30', difficulty: 'Medium' },
   bluff: { category: 'Party', minutes: 15, duration: '10–15', difficulty: 'Easy' },
   chess: { category: 'Strategy', minutes: 30, duration: '10–30+', difficulty: 'Deep' },
-  sketch: { category: 'Party', minutes: 20, duration: '10–20', difficulty: 'Easy' },
+  sketch: { category: 'Party', minutes: 15, duration: '5–25', difficulty: 'Easy' },
   spies: { category: 'Party', minutes: 20, duration: '15–20', difficulty: 'Medium' },
   bingo: { category: 'Party', minutes: 5, duration: '3–8', difficulty: 'Easy' },
   tambola: { category: 'Party', minutes: 10, duration: '8–12', difficulty: 'Easy' },
   temple: { category: 'Strategy', minutes: 30, duration: '20–30', difficulty: 'Medium', coop: true },
   ember: { category: 'Strategy', minutes: 30, duration: '20–30', difficulty: 'Medium', coop: true },
-  keeper: { category: 'Adventure', minutes: 45, duration: '25–45', difficulty: 'Medium', coop: true },
-  signal: { category: 'Adventure', minutes: 45, duration: '25–45', difficulty: 'Deep', coop: true },
-  island: { category: 'Adventure', minutes: 90, duration: '30–180', difficulty: 'Medium', coop: true, quick: { minutes: 5, option: 'mode', value: 'arena', label: 'Arena Rush' } }, // a lobby option makes it a 5 min run
+  keeper: { category: 'Adventure', minutes: 25, duration: '15–30', difficulty: 'Medium', coop: true },
+  signal: { category: 'Adventure', minutes: 25, duration: '15–30', difficulty: 'Deep', coop: true },
+  island: { category: 'Adventure', minutes: 75, duration: '30–95', difficulty: 'Medium', coop: true, quick: { minutes: 5, option: 'mode', value: 'arena', label: 'Arena Rush' } }, // a lobby option makes it a 5 min run
 };
 // Quick Play: games that are good on your own. The island is a solo adventure; the board games have
 // computer players, and `seats` is the table size Quick Play fills (you plus computers).

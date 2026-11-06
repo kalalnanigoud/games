@@ -3,10 +3,11 @@
 Free multiplayer party games, strategy, and cooperative adventures in the browser, on phones and computers.
 
 Arena Rush is Creature Island's five-minute survival mode. Start it directly from its library button,
-or choose it in the lobby to select a starting kit: Starter squad (varied companions), Swift striker
+or choose it in the lobby to select a starting kit: Starter squad (varied companions, a Leaf Charm and extra berries), Swift striker
 (Emberkit and faster movement), or Bubble guardian (Dewpaw and 30 extra HP). The lobby's kit applies to
 the explorers in that run and stays selected for Play again. Forest, tide and crystal waves rotate as
-new enemies unlock, with a Brute assault every fifth wave. Arena runs do not save adventure progress.
+new enemies unlock, with a Brute assault every fifth wave; each extra player brings a bigger wave. Playing alone,
+you get one second wind per run. Arena runs do not save adventure progress.
 
 In Adventure, healthy calm wildlife gathers near its own kind and pauses to watch nearby explorers or
 companions, with an occasional curiosity cue. Injured creatures, hostile encounters, rare quests and
@@ -14,7 +15,8 @@ Arena Rush retain their existing behaviour.
 
 Pocket Rally is a solo arcade prototype: three laps around Seabreeze Circuit against three computer
 racers, with Easy, Normal and Hard opponents. The car accelerates automatically; steer with A/D or
-Left/Right, brake with Down/S, and hold Space for boost. Phone controls are on screen. P pauses, and
+Left/Right, brake with Down/S, and hold Space for boost. Hard racers are faster than your cruising speed
+and boost too; a full boost needs a lift at the tight ends of the track. Phone controls are on screen. P pauses, and
 leaving the tab also pauses. Race again starts fresh. Races are not saved; multiplayer racing and
 additional tracks are future work.
 One player hosts a room, friends join with a 5-letter code. No sign-up, no game server.
@@ -232,8 +234,8 @@ rise from the bottom edge.
 
 - **Sketch Party** (2–8): each turn one player draws a secret word and everyone else races to type it.
   Letter hints appear as time runs down; faster guesses score more. The host picks rounds and drawing time.
-- **Word Spies** (4–8): two teams, 25 words. Spymasters see the secret key and give one-word clues;
-  teammates reveal words and must avoid the assassin.
+- **Word Spies** (4–8): two teams, 25 words. Handlers see the secret dossier and give one-word clues;
+  decoders reveal words and must avoid the Mole.
 
 `node tools/party-test.mjs` checks both games' rules, that guessers never receive the secret word or key,
 and the tournament brackets.
@@ -316,7 +318,7 @@ is public on your site, so use credentials meant for browsers and keep the plan'
 
 ## Cooperative collection
 
-- **Sunken Temple** (2–4): recover three relics and get every explorer home before the flood gates fail. Explorer, Engineer, Scholar, and Diver have different abilities.
+- **Sunken Temple** (2–4): recover three relics and get everyone back to the boat before the flood gates fail. Pathfinder, Tinkerer, Scholar, and Swimmer have different abilities.
 - **Emberwatch** (2–4): carry four rescued animals to River Camp while protecting villages from wind-driven wildfire. Ranger, Firefighter, Medic, and Weatherkeeper share the mission.
 
 Both games offer Relaxed, Standard, and Daring expeditions, shared team victories and defeats,
@@ -353,7 +355,11 @@ same time, each with their own explorer and creature companion, and can split up
 - **What:** befriend 12 original creatures, fight in real time with readable warnings on the ground, and
   raise companions with their own special moves.
 - **The story:** quests for the villagers, two minibosses, a raid on the village and a final boss. It is
-  designed for 2–3 hours of first play; that length hasn't been playtested yet.
+  designed for about 1–1.5 hours of first play (estimated from simulations, not playtested yet). Each area
+  shows a recommended level when you first enter; nothing is locked by level.
+- **Getting knocked out:** a friend can revive you (each player once every 25 seconds), or after 5 seconds you can
+  return to the village for a few shells. During the village raid you wake in the meadow to the north, and if the
+  murklings wear down the square's defences they pull back and the raid starts again, with nothing lost.
 
 **Controls**
 - **Computer:** WASD or the arrow keys move; J, Space or a click attacks; K or Shift dodges; L or Q is the

@@ -5,6 +5,7 @@
 import {
   TILE, TICK, MAX_LV, TEAM_MAX, RANCH_MAX, CATCH_HP, SPECIES, MURKS, ABILITIES, ITEMS, GEAR, SHOP, PLAYER, QUESTS,
   BOSSES, STARTERS, NPCS, CONTENT_VERSION, SEATS, xpToNext, creatureMax, creatureAtk, playerMax, typeMult,
+  bossHp, respawnFee, bubbleShield,
 } from './island-data.js';
 import { island, W, H, GATES, TELEPORTS, SPAWN, ARENAS, VILLAGE, RAID_FROM, LOST_AT, LUNA_AT, TRACKS, SPAWNS, zoneAt, fits, slide, inRect } from './island-map.js';
 
@@ -127,6 +128,7 @@ export class World {
     this.open = {};
     this.raid = null;
     this.bossDue = {};
+    this.bossLeft = {}; // kind -> { frac, until }: a boss's health share when everyone left its arena
     this.worldVer = 1;
     this.arena = null; // Arena Rush (island-arena.js) attaches itself here
     this.lastW = new Map();
@@ -243,7 +245,7 @@ export class World {
       if (!f || !f.downT || dist(f.body, b) > INTERACT + 10) this.chan(p, null);
       else if ((p.chan.left -= TICK) <= 0) {
         this.chan(p, null);
-        f.downT = 0; f.hp = Math.round(this.maxHp(f) * 0.4); f.iT = 1.5; f.body.down = 0;
+        f.downT = 0; f.hp = Math.round(this.maxHp(f) * 0.4); f.iT = 1.5; f.body.down = 0; if (!this.arena) f.reviveAt = this.t + PLAYER.reviveCd;
         this.event(f.body, ['float', f.body.x, f.body.y - 40, 'Revived!', '#8ce99a']);
         this.personal(f, ['toast', `${p.name} revived you!`]);
         this.bump(f);
@@ -263,13 +265,18 @@ export class World {
     if (esc) { esc.x = x + 20; esc.y = y + 10; }
     this.personal(p, ['warp', Math.round(x), Math.round(y)]);
   }
+  // Waking in the village (after PLAYER.downFor, or sooner from "Return to the village") costs a few shells.
+  // During the raid you wake in the meadow just outside it, and have to walk back in.
   respawn(p) {
     if (this.arena) return this.arena.respawn(p);
-    p.downT = 0; p.body.down = 0; p.hp = this.maxHp(p); p.iT = 2; this.chan(p, null);
-    const v = villageSpot(p.seat);
+    const fee = respawnFee(p.ex.lv, p.ex.shells);
+    p.ex.shells -= fee;
+    p.downT = 0; p.body.down = 0; p.hp = this.maxHp(p); p.iT = 2; p.reviveAt = 0; this.chan(p, null);
+    const v = this.raid ? raidSpot(p.seat) : villageSpot(p.seat);
     this.warp(p, v.x, v.y);
-    this.personal(p, ['toast', 'You wake up in Brightwater Village, rested.']);
-    this.bump(p);
+    const paid = fee ? ` Healer Sana’s fee: ${fee} shells.` : '';
+    this.personal(p, ['toast', this.raid ? `You wake up just outside the village. Hurry back to the square!${paid}` : `You wake up in Brightwater Village, rested.${paid}`]);
+    this.bump(p, fee > 0);
   }
   maxHp(p) { return playerMax(p.ex.lv, p.ex.equip.charm); }
   bump(p, progress = false) { p.meVer++; if (progress) p.prog++; }
@@ -363,7 +370,7 @@ export class World {
       case 'leafstorm': ring(78, 1); break;
       case 'quake': ring(105, 1, { stun: 0.9, knock: 120 }); break;
       case 'flameburst': for (const e of this.enemiesNear(c.x, c.y, 100, area)) if (angDiff(angTo(c, e), ang) < 0.85) this.hurt(e, atk, el, { ...src, ang }); break;
-      case 'bubblering': p.shield = 30; ring(70, 1, { knock: 300 }); break;
+      case 'bubblering': p.shield = bubbleShield(c.lv); ring(70, 1, { knock: 300 }); break;
       case 'thornvolley': for (const d of [-0.25, 0, 0.25]) this.shoot(c, 'thorn', ang + d, 340, atk, el, 'ally', p.id); break;
       case 'healspores': {
         for (const f of this.readyPlayers()) if (dist(f.body, c) < 150 && !f.downT) { f.hp = Math.min(this.maxHp(f), f.hp + Math.round(this.maxHp(f) * (f === p ? 0.25 : 0.15))); this.bump(f); }
@@ -376,7 +383,7 @@ export class World {
       case 'tidalwave': this.shoot(c, 'wave', ang, 300, atk, el, 'ally', p.id, { r: 30, pierce: true, knock: 260, life: 0.9 }); break;
       case 'staticfield': {
         const at2 = target || { x: c.x + Math.cos(ang) * 90, y: c.y + Math.sin(ang) * 90 };
-        const z = { id: this.id(), type: 'z', kind: 'static', x: at2.x, y: at2.y, r: 70, life: 3, tickT: 0, dmg: atk, el, from: 'ally', owner: p.id };
+        const z = { id: this.id(), type: 'z', kind: 'static', x: at2.x, y: at2.y, r: 70, life: 2.5, tickT: 0, dmg: atk, el, from: 'ally', owner: p.id };
         this.ents.set(z.id, z);
         break;
       }
@@ -485,6 +492,13 @@ export class World {
       if (m.lv >= MAX_LV) m.xp = 0;
     }
   }
+  // A quest's own XP reward (QUESTS[].xp), shown like a creature's.
+  questXp(p, quest) {
+    const xp = QUESTS[quest]?.xp;
+    if (!xp) return;
+    this.gainXp(p, xp);
+    this.personal(p, ['float', Math.round(p.body.x), Math.round(p.body.y - 56), `+${xp} XP`, '#ffd43b']);
+  }
   give(p, item, n) {
     p.ex.inv[item] = Math.min(99, (p.ex.inv[item] || 0) + n);
     this.personal(p, ['got', item, n]);
@@ -521,6 +535,7 @@ export class World {
       this.addCreature(p, e.sp, e.lv, `${SPECIES[e.sp].name} joined you!`);
       if (e.sp === 'lunahop' && p.ex.quests.tracks && p.ex.quests.tracks !== 9) {
         p.ex.quests.tracks = 9;
+        this.questXp(p, 'tracks');
         this.give(p, 'charm', 3);
         if (!p.ex.gear.includes('feather')) p.ex.gear.push('feather');
         this.personal(p, ['banner', 'Quest complete', 'Glowing Tracks · Lili will be thrilled!']);
@@ -548,7 +563,13 @@ export class World {
   interact(p) {
     const b = p.body;
     // A friend who is down comes first.
-    for (const f of this.readyPlayers()) if (f !== p && f.downT > 0 && dist(f.body, b) < INTERACT + 6) { this.chan(p, { who: f.id, left: PLAYER.revive, x: b.x, y: b.y }); this.personal(p, ['chan', PLAYER.revive]); return; }
+    for (const f of this.readyPlayers()) if (f !== p && f.downT > 0 && dist(f.body, b) < INTERACT + 6) {
+      // Someone revived a moment ago needs a breather before they can be revived again. Arena Rush keeps its
+      // own quicker revives (its runs are balanced around them).
+      if (!this.arena && f.reviveAt > this.t) return this.personal(p, ['toast', `${f.name} was just revived. You can help them up again in ${Math.ceil(f.reviveAt - this.t)} s.`]);
+      const left = this.arena ? 1.5 : PLAYER.revive;
+      this.chan(p, { who: f.id, left, x: b.x, y: b.y }); this.personal(p, ['chan', left]); return;
+    }
     for (const e of this.ents.values()) if (e.only === p.id && e.quest === 'lost' && dist(e, b) < INTERACT + 10) return this.helpLost(p, e);
     const best = interactables(b.x, b.y, p.ex, this.t, p.nodes)[0];
     if (!best) return;
@@ -630,7 +651,12 @@ export class World {
       if (d.leaving && upToDate) this.park(p);
       return;
     }
-    if (c === 'respawn') { if (p.downT > 0) this.respawn(p); return; }
+    if (c === 'respawn') {
+      if (!(p.downT > 0)) return;
+      const wait = PLAYER.respawnWait - (PLAYER.downFor - p.downT);
+      if (wait > 0) throw new Error(`Rest a moment: you can head back in ${Math.ceil(wait)} s.`);
+      return this.respawn(p);
+    }
     if (p.downT > 0) throw new Error('You’re knocked out.');
     if (c === 'choose') return this.choose(p, d);
     if (c === 'active') {
@@ -967,7 +993,7 @@ export class World {
     if (e.raid) {
       const foe = this.nearestFoe(e, 900);
       if (foe) { e.target = foe; e.state = 'chase'; return; }
-      return this.moveEnt(e, angTo(e, { x: 64.5 * T, y: 71 * T }), speed * 0.7, false);
+      return this.moveEnt(e, angTo(e, SQUARE), speed * 0.7, false);
     }
     if (sp.temper === 'feisty' || e.murk) {
       const foe = this.nearestFoe(e, 175);
@@ -1057,6 +1083,7 @@ export class World {
       this.ents.delete(e.id);
       p.escort = 0;
       p.ex.quests.lost = 9;
+      this.questXp(p, 'lost');
       this.addCreature(p, e.sp, 5, `${SPECIES[e.sp].name} is healed and wants to stay with you!`);
       this.talkResult(p, 'healer', { lines: [`Oh, the poor little thing! There… all better. ${SPECIES[e.sp].name} has really taken to you.`, 'Look after each other out there.'] });
     }
@@ -1161,8 +1188,12 @@ export class World {
       if (!boss && inside.some((p) => !p.ex.flags.includes(kind)) && !(this.bossDue[kind] > this.t)) {
         const def = BOSSES[kind];
         const n = Math.max(1, inside.length);
-        const hp = Math.round(def.hp * (0.6 + 0.4 * n));
-        boss = { id: this.id(), type: 'b', kind, x: c.x, y: c.y - 20, hp, max: hp, el: def.el, r: def.r, state: 'intro', t: 1.6, anim: 'idle', flip: false, home: [c.x, c.y], cd: 1.2, phase: 1, summonT: 0, hitBy: [] };
+        // A boss you were driven off from remembers its wounds for a couple of minutes (healing a quarter), so a
+        // knockout costs the walk back, not the whole fight.
+        const was = this.bossLeft[kind]?.until > this.t ? this.bossLeft[kind].frac : 1;
+        const max = bossHp(kind, n), hp = Math.max(1, Math.round(max * Math.min(1, was + 0.25)));
+        delete this.bossLeft[kind];
+        boss = { id: this.id(), type: 'b', kind, x: c.x, y: c.y - 20, hp, max, el: def.el, r: def.r, state: 'intro', t: 1.6, anim: 'idle', flip: false, home: [c.x, c.y], cd: 1.2, phase: 1, summonT: 0, hitBy: [], n, party: Object.fromEntries(inside.map((p) => [p.id, this.t])) };
         this.ents.set(boss.id, boss);
         for (const p of ready) if (dist(p.body, c) < (arena.r + 10) * T) this.personal(p, ['boss', kind]);
         this.worldVer++;
@@ -1170,9 +1201,28 @@ export class World {
       if (boss && boss.state !== 'faint') {
         const anyone = ready.some((p) => dist(p.body, c) < (arena.r + 5) * T && !p.downT);
         boss.empty = anyone ? 0 : (boss.empty || 0) + 1;
-        if (boss.empty > 12) { for (const m of this.ents.values()) if (m.summoner === boss.id) this.ents.delete(m.id); this.ents.delete(boss.id); this.worldVer++; }
+        if (boss.empty > 12) {
+          for (const m of this.ents.values()) if (m.summoner === boss.id) this.ents.delete(m.id);
+          this.ents.delete(boss.id); this.worldVer++;
+          this.bossLeft[kind] = { frac: boss.hp / boss.max, until: this.t + 120 };
+        }
+        else this.bossParty(boss, ready, c, arena);
       }
     }
+  }
+  // The boss sizes itself to whoever is fighting it: anyone near the arena in the last 15 seconds (knocked out
+  // or not). When that changes its health is rescaled, keeping the share already knocked off.
+  bossParty(boss, ready, c, arena) {
+    boss.party ||= {};
+    for (const p of ready) if (dist(p.body, c) < (arena.r + 8) * T) boss.party[p.id] = this.t; // close enough to share the win
+    const n = Math.max(1, ready.filter((p) => boss.party[p.id] > this.t - 15).length);
+    if (n === (boss.n || 1)) return;
+    const max = bossHp(boss.kind, n);
+    boss.hp = Math.max(1, Math.round((boss.hp / boss.max) * max));
+    boss.max = max;
+    if (n > (boss.n || 1)) for (const p of ready) if (dist(p.body, c) < (arena.r + 8) * T) this.personal(p, ['toast', `More explorers! ${BOSSES[boss.kind].name} grows stronger.`]);
+    boss.n = n;
+    this.worldVer++;
   }
   stepBoss(e) {
     const def = BOSSES[e.kind];
@@ -1193,7 +1243,9 @@ export class World {
       if (e.dash.left <= 0) e.dash = null;
       return;
     }
-    e.cd -= TICK * (e.phase === 3 ? 1.35 : 1);
+    // A bigger party faces quicker attacks, aimed at more of them, and more helpers.
+    const party = e.n || 1;
+    e.cd -= TICK * (e.phase === 3 ? 1.35 : 1) * (1 + 0.12 * (party - 1));
     if (f) {
       e.flip = f.x > e.x;
       const d = dist(f, e);
@@ -1204,13 +1256,14 @@ export class World {
     const atk = def.atk;
     const targets = this.readyPlayers().filter((p) => !p.downT && dist(p.body, c) < (arena.r + 3) * T).map((p) => p.body);
     const pick = (list) => list[Math.floor(Math.random() * list.length)];
-    const ang = angTo(e, f);
+    const aim = targets.length > 1 && Math.random() < 0.5 ? pick(targets) : f;
+    const ang = angTo(e, aim);
     const wind = (t) => { e.state = 'windup'; e.t = t; e.anim = 'windup'; };
     // Summon helpers in later phases.
     if (e.phase >= 2 && this.t > e.summonT && e.kind !== 'quartzhulk') {
       e.summonT = this.t + (e.kind === 'tempestra' ? 22 : 18);
       const alive = [...this.ents.values()].filter((x) => x.summoner === e.id && x.hp > 0).length;
-      for (let i = alive; i < (e.kind === 'tempestra' ? 3 : 2); i++) {
+      for (let i = alive; i < (e.kind === 'tempestra' ? 3 : 2) + Math.floor((party - 1) / 2); i++) {
         const a = Math.random() * Math.PI * 2;
         const m = this.creature('murk', e.kind === 'tempestra' ? 15 : 9, e.x + Math.cos(a) * 90, e.y + Math.sin(a) * 90, { summoner: e.id, boss: true, angry: true, state: 'wander' });
         this.event(m, ['spawn', Math.round(m.x), Math.round(m.y), 2]);
@@ -1246,7 +1299,7 @@ export class World {
       if (dist(p.body, c) > (arena.r + 8) * T) continue;
       const first = !p.ex.flags.includes(e.kind);
       p.ex.shells += first ? 120 : 30;
-      this.gainXp(p, first ? 260 + 90 * Object.keys(BOSSES).indexOf(e.kind) : 80);
+      this.gainXp(p, first ? def.xp : 120);
       if (first) {
         p.ex.flags.push(e.kind);
         if (def.shard) this.give(p, def.shard, 1);
@@ -1268,8 +1321,8 @@ export class World {
     if (!this.raid) {
       // A loaded/returning explorer may already be defending, but encounters are not saved.
       const due = inV.filter((p) => p.ex.quests.defend === 1 || p.ex.quests.defend === 2);
-      if (!due.length) return;
-      this.raid = { wave: 0, left: [], gap: 3, quiet: 0 };
+      if (!due.length || this.raidRest > this.t) return;
+      this.raid = { wave: 0, left: [], gap: 3, quiet: 0, hold: 100 };
       for (const p of ready) if (p.ex.quests.defend === 1) { p.ex.quests.defend = 2; this.bump(p); }
       for (const p of ready) this.personal(p, ['banner', 'Murklings attack the village!', 'Drive them out: three waves are coming']);
       this.worldVer++;
@@ -1284,13 +1337,25 @@ export class World {
       return;
     }
     r.left = r.left.filter((id) => this.ents.get(id)?.hp > 0);
+    // Murklings standing in the square wear its defences down. At nothing, the raid is lost: they pull back,
+    // and come again after a breather (the quest is just as it was before the raid started).
+    let press = 0;
+    for (const id of r.left) { const m = this.ents.get(id); if (m && dist(m, SQUARE) < SQUARE.r) press += m.big ? 5 : 2; }
+    if (press) { r.hold = Math.max(0, r.hold - press); this.worldVer++; }
+    if (r.hold <= 0) {
+      for (const id of r.left) this.ents.delete(id);
+      for (const p of ready) if (p.ex.quests.defend === 2) { p.ex.quests.defend = 1; this.bump(p); }
+      for (const p of ready) this.personal(p, ['banner', 'The murklings broke into the square!', 'They’ve pulled back for now. Regroup: they’ll be back soon']);
+      this.raid = null; this.raidRest = this.t + 20; this.worldVer++;
+      return;
+    }
     if (r.left.length) return;
     if (r.wave >= 3) {
       for (const p of ready) if (p.ex.quests.defend === 2 || (p.ex.quests.defend === 1 && inVillage(p.body.x, p.body.y))) {
         p.ex.quests.defend = 9;
         this.give(p, 'embershard', 1);
         p.ex.shells += 150;
-        this.gainXp(p, 300);
+        this.questXp(p, 'defend');
         this.flag(p, 'raid');
         this.personal(p, ['banner', 'The village is safe!', 'Elder Maru gives you the Ember Shard']);
         this.questCheck(p);
@@ -1397,7 +1462,7 @@ export class World {
       inv: ex.inv, gear: ex.gear, equip: ex.equip,
       team: ex.team.map((m) => ({ uid: m.uid, sp: m.sp, lv: m.lv, xp: m.xp, next: xpToNext(m.lv), hp: c && c.uid === m.uid ? Math.round(c.hp) : m.hp, max: creatureMax(m.sp, m.lv), cd: Math.max(0, +((p.cds[m.uid] || 0) - this.t).toFixed(1)), out: !!c && c.uid === m.uid })),
       ranch: ex.ranch.map((m) => ({ uid: m.uid, sp: m.sp, lv: m.lv })), active: ex.active,
-      dex: ex.dex, quests: ex.quests, flags: ex.flags, chests: ex.chests, nodes, unsaved: this.unsaved(p), unsavedWhy: p.prog > p.savedProg ? 'progress' : 'place', savedLoc: p.savedLoc, lastSave: p.lastSave, time: Math.round(ex.time),
+      dex: ex.dex, quests: ex.quests, flags: ex.flags, chests: ex.chests, nodes, reviveAt: p.reviveAt > this.t ? +p.reviveAt.toFixed(1) : 0, unsaved: this.unsaved(p), unsavedWhy: p.prog > p.savedProg ? 'progress' : 'place', savedLoc: p.savedLoc, lastSave: p.lastSave, time: Math.round(ex.time),
     };
   }
   worldView(p) {
@@ -1407,7 +1472,7 @@ export class World {
       arena: this.arena ? this.arena.view() : null,
       roster: [...this.players.values()].map((o) => ({ id: o.id, name: o.name, seat: o.seat, ready: o.ready, connected: o.connected, lv: o.ex?.lv || 0, look: o.ex?.look || null, zone: o.zone, down: o.downT > 0, unsaved: o.ready && this.unsaved(o) })),
       boss: boss ? { kind: boss.kind } : null,
-      raid: this.raid ? { wave: this.raid.wave, left: this.raid.left.length } : null,
+      raid: this.raid ? { wave: this.raid.wave, left: this.raid.left.length, hold: this.raid.hold } : null,
     };
   }
 }
@@ -1429,6 +1494,11 @@ export function catchChance(e) {
 export const npcPos = (id) => ({ x: NPCS[id].at[0] * T, y: NPCS[id].at[1] * T });
 // Where each seat stands in the village square, so friends don't start on top of each other.
 const villageSpot = (seat) => { const [dx, dy] = [[0, 0], [1.6, 0.2], [-1.6, 0.2], [0, -1.3]][seat] || [0, 0]; return { x: (SPAWN[0] + dx) * T, y: (SPAWN[1] + dy) * T }; };
+// While murklings raid the square, knocked-out explorers wake in the meadow north of the village instead.
+export const RAID_WAKE = [[55, 57], [73, 57], [54, 57], [74, 57]];
+// The heart of the square: raiders that reach it wear down the village's defences.
+const SQUARE = { x: 64.5 * T, y: 71 * T, r: 3 * T };
+const raidSpot = (seat) => { const [x, y] = RAID_WAKE[seat] || RAID_WAKE[0]; return { x: x * T, y: y * T }; };
 export const rescueSpecies = (ex) => {
   const mine = ex.team.concat(ex.ranch).map((m) => m.sp);
   return STARTERS.find((s) => !mine.includes(s)) || 'puffcap';
@@ -1521,7 +1591,7 @@ function heal(p, w) {
 }
 function answer(npc, id, p, w) {
   const ex = p.ex, q = ex.quests;
-  const done = (quest, title, lines) => { q[quest] = 9; w.personal(p, ['banner', 'Quest complete', title]); w.bump(p, true); return { lines }; };
+  const done = (quest, title, lines) => { q[quest] = 9; w.questXp(p, quest); w.personal(p, ['banner', 'Quest complete', title]); w.bump(p, true); return { lines }; };
   const start = (quest, lines) => { q[quest] = 1; w.questCheck(p); w.bump(p, true); return { lines }; };
   if (npc === 'elder' && STARTERS.includes(id) && q.starter !== 9) {
     q.starter = 9;

@@ -1,7 +1,8 @@
-// Word Spies: two teams race to find their agents on a grid of 25 words.
-// Each team's spymaster sees the secret key and gives one-word clues with a number;
-// teammates reveal words. Hitting the other team's word or a bystander ends your turn,
-// and the assassin loses the game on the spot.
+// Word Spies: two rival spy rings race to reach their contacts on a grid of 25 code words.
+// Each team's handler sees the secret dossier (the key) and radios one-word clues with a number;
+// the team's decoders reveal words. Hitting the other team's contact or a civilian ends your turn,
+// and the Mole loses the game on the spot. The names are display text only: the state keeps its old field
+// names (`spy` for the handler, key 'n' for a civilian, 'x' for the Mole) so rooms on older versions keep working.
 import { esc, log, addFx, rand, shuffle } from '../js/util.js';
 import { injectCSS, morph } from '../js/fx.js';
 import { sound } from '../js/sound.js';
@@ -11,7 +12,7 @@ import { levelOption, levelOf } from '../js/levels.js';
 
 const browser = typeof document !== 'undefined';
 
-// Themes double as the computer spymaster's clues: it clues a theme that covers its own words.
+// Themes double as the computer handler's clues: it clues a theme that covers its own words.
 const THEMES = Object.fromEntries(`
 ocean: whale ship wave pirate shell anchor fish island coral sailor shark beach
 space: star moon rocket planet alien comet astronaut orbit galaxy satellite
@@ -67,11 +68,11 @@ function setup(players, opts = {}) {
     words: shuffle(WORDS.slice()).slice(0, 25), key, open: Array(25).fill(false),
     level: levelOf(opts), // how sharp the computer players are; public, so it is in every view
   };
-  log(s, `${TEAM[first]} team starts and has 9 agents to find. ${TEAM[other(first)]} has 8.`);
+  log(s, `${TEAM[first]} team starts and has 9 contacts to find. ${TEAM[other(first)]} has 8.`);
   return s;
 }
 const spyOf = (s, t) => s.players.find((p) => p.team === t && p.spy);
-const agentsLeft = (s, t) => s.key.filter((k, i) => k === t && !s.open[i]).length;
+const contactsLeft = (s, t) => s.key.filter((k, i) => k === t && !s.open[i]).length;
 function win(s, t, why) {
   Object.assign(s, { over: true, phase: 'over', winner: t, winners: s.players.filter((p) => p.team === t).map((p) => p.id) });
   log(s, why);
@@ -101,18 +102,18 @@ function act(s, pid, a) {
   if (a.type === 'think') return;
   if (me.team !== s.turn) throw Error(`It is the ${TEAM[s.turn]} team’s turn.`);
   if (a.type === 'clue') {
-    if (s.phase !== 'clue' || !me.spy) throw Error('Only your spymaster gives the clue.');
+    if (s.phase !== 'clue' || !me.spy) throw Error('Only your handler gives the clue.');
     const word = String(a.word || '').trim().toLowerCase(), n = Number(a.n);
     const problem = clueProblem(s, word);
     if (problem) throw Error(problem);
     if (!Number.isInteger(n) || n < 1 || n > 9) throw Error('Pick a number from 1 to 9.');
     s.clue = { word, n, team: me.team }; s.left = n + 1; s.phase = 'guess';
     s.clues.push({ team: me.team, word, n });
-    log(s, `${me.name} (${TEAM[me.team]} spymaster): “${word.toUpperCase()}”, ${n}.`);
+    log(s, `${me.name} (${TEAM[me.team]} handler): “${word.toUpperCase()}”, ${n}.`);
     addFx(s, { kind: 'sound', sound: 'card' });
     return;
   }
-  if (s.phase !== 'guess' || me.spy) throw Error(me.spy ? 'Spymasters can’t touch the board. Let your team guess.' : 'Wait for your spymaster’s clue.');
+  if (s.phase !== 'guess' || me.spy) throw Error(me.spy ? 'Handlers can’t touch the board. Let your decoders guess.' : 'Wait for your handler’s clue.');
   if (a.type === 'pass') return endTurn(s, `${me.name} ended the ${TEAM[me.team]} turn.`);
   if (a.type !== 'guess') throw Error('Unknown action.');
   const i = a.card;
@@ -120,13 +121,13 @@ function act(s, pid, a) {
   s.open[i] = true;
   const k = s.key[i], word = s.words[i].toUpperCase();
   addFx(s, { kind: 'pulse', at: 'spy-card-' + i, sound: k === me.team ? 'chime' : k === 'x' ? 'bad' : 'flip' });
-  if (k === 'x') return win(s, other(me.team), `${me.name} found the assassin (${word})! ${TEAM[other(me.team)]} team wins.`);
-  if (agentsLeft(s, 'r') === 0) return win(s, 'r', `Red team found all its agents and wins!`);
-  if (agentsLeft(s, 'b') === 0) return win(s, 'b', `Blue team found all its agents and wins!`);
+  if (k === 'x') return win(s, other(me.team), `${me.name} made contact with the Mole (${word}). Cover blown: ${TEAM[other(me.team)]} team wins!`);
+  if (contactsLeft(s, 'r') === 0) return win(s, 'r', `Red team reached all its contacts and wins!`);
+  if (contactsLeft(s, 'b') === 0) return win(s, 'b', `Blue team reached all its contacts and wins!`);
   if (k === me.team) {
-    log(s, `${me.name} found a ${TEAM[k]} agent: ${word}.`);
+    log(s, `${me.name} reached a ${TEAM[k]} contact: ${word}.`);
     if (--s.left <= 0) endTurn(s, 'Out of guesses for this clue.');
-  } else endTurn(s, `${me.name} picked ${word}: ${k === 'n' ? 'an innocent bystander' : 'a ' + TEAM[k] + ' agent'}. Turn over.`);
+  } else endTurn(s, `${me.name} picked ${word}: ${k === 'n' ? 'a civilian' : 'a ' + TEAM[k] + ' contact'}. Turn over.`);
 }
 
 function view(s, pid) {
@@ -136,8 +137,8 @@ function view(s, pid) {
   return v;
 }
 
-// Spymaster: clue the theme that covers the most of our words and none of the dangerous ones.
-// Guessers: follow a theme clue; for a clue they don't know, take a guess or pass.
+// Handler: clue the theme that covers the most of our words and none of the dangerous ones.
+// Decoders: follow a theme clue; for a clue they don't know, take a guess or pass.
 // That is the Normal level; Easy and Hard (v.level) play the helpers below instead.
 function bot(v, pid) {
   const me = v.players.find((p) => p.id === pid);
@@ -156,7 +157,7 @@ function bot(v, pid) {
       if (!best || score > best.score) best = { t, own, score };
     }
     if (best && best.score > 0) return { type: 'clue', word: best.t, n: best.own };
-    // Otherwise a theme covering one of ours but never the assassin, the fewer of theirs the better.
+    // Otherwise a theme covering one of ours but never the Mole, the fewer of theirs the better.
     const hits = (t, k) => v.words.filter((w, j) => !v.open[j] && v.key[j] === k && THEMES[t].includes(w)).length;
     const safe = Object.keys(THEMES).filter((t) => hits(t, me.team) && !hits(t, 'x') && !clueProblem(v, t)).sort((a, b) => hits(a, other(me.team)) - hits(b, other(me.team)));
     const fallback = safe[0] || ['thing', 'object', 'stuff'].find((t) => !clueProblem(v, t));
@@ -173,7 +174,7 @@ function bot(v, pid) {
 }
 
 // What a clue points at: a theme's words or, for a word that belongs to several themes (MOON: space, night,
-// round), the words of all of them. Hard spymasters clue such words; hard agents (and people) follow them.
+// round), the words of all of them. Hard handlers clue such words; hard decoders (and people) follow them.
 const themeNamed = (w) => (Object.prototype.hasOwnProperty.call(THEMES, w) ? THEMES[w] : null);
 const LINKED = new Map();
 function pointsAt(word) {
@@ -184,7 +185,7 @@ function pointsAt(word) {
 const LINKS = WORDS.filter((w) => themesOf(w).length > 1);
 const under = (words, word) => { const list = pointsAt(word); return words.map((w) => list.includes(w)); };
 
-// Easy spymaster: any theme with one of our words in it, never minding the other team's words or bystanders.
+// Easy handler: any theme with one of our words in it, never minding the other team's words or civilians.
 function easyClue(v, me) {
   const ok = Object.keys(THEMES).filter((t) => {
     if (clueProblem(v, t)) return false;
@@ -196,7 +197,7 @@ function easyClue(v, me) {
   return { type: 'clue', word: t, n: v.key.filter((k, i) => k === me.team && on[i] && !v.open[i]).length };
 }
 
-// Hard agents read the clues so far: "MOON, 2" said that 2 of the hidden words MOON points at were the clue
+// Hard decoders read the clues so far: "MOON, 2" said that 2 of the hidden words MOON points at were the clue
 // giver's. The giver's cards revealed under it since use that up, so for a word still hidden there,
 // (n - revealed) / hidden is a floor on the chance that it is the giver's. Public information only: a board
 // `b` has the revealed cards' colours in `known`, the clues, and `on[j]`, the words clue j points at.
@@ -211,7 +212,7 @@ function readClues(b, team) {
   });
   return { mine, theirs };
 }
-// The cards hard agents choose between (at random), or none to end the turn: the likeliest of the words the clue
+// The cards hard decoders choose between (at random), or none to end the turn: the likeliest of the words the clue
 // points at, then with the extra guess a word an earlier clue of theirs still points at when it is probably theirs.
 function hardChoices(b, team) {
   const { mine, theirs } = readClues(b, team);
@@ -228,15 +229,15 @@ function hardChoices(b, team) {
 }
 const board = (v, clues, known) => ({ open: v.open.slice(), known, clues, on: clues.map((c) => under(v.words, c.word)), left: v.left });
 
-// Hard spymaster: plays each possible clue (every theme, and every word that links several themes) through its
-// agents' reasoning above and gives the one they will do best with: agents found now (the last one wins the
-// game), words of ours the clues will still point at for later, minus the other team's agents handed over.
-// The assassin is never under the clue unless every clue for the words left risks it.
+// Hard handler: plays each possible clue (every theme, and every word that links several themes) through its
+// decoders' reasoning above and gives the one they will do best with: contacts found now (the last one wins the
+// game), words of ours the clues will still point at for later, minus the other team's contacts handed over.
+// The Mole is never under the clue unless every clue for the words left risks it.
 function hardClue(v, me) {
   const rival = other(me.team), hiddenOf = (t) => v.key.filter((k, i) => k === t && !v.open[i]).length;
   const base = board(v, v.clues, v.key.map((k, i) => (v.open[i] ? k : null)));
   const reveal = (b, i, left) => { const open = b.open.slice(), known = b.known.slice(); open[i] = true; known[i] = v.key[i]; return { ...b, open, known, left }; };
-  // Leftovers the agents can pick up with a later extra guess.
+  // Leftovers the decoders can pick up with a later extra guess.
   const later = (b) => {
     const { mine, theirs } = readClues(b, me.team);
     let sum = 0;
@@ -268,16 +269,16 @@ function hardClue(v, me) {
     if (x && (!risky || score > risky.score)) risky = { t, n: own, score };
   }
   if (best) return { type: 'clue', word: best.t, n: best.n };
-  // Every clue for our last words also points at the assassin: weigh the best of those against a clue that
-  // points at nothing, after which the agents go by the earlier clues.
+  // Every clue for our last words also points at the Mole: weigh the best of those against a clue that
+  // points at nothing, after which the decoders go by the earlier clues.
   const blank = ['thing', 'object', 'stuff'].find((t) => !clueProblem(v, t));
   const blankScore = blank ? tryClue(blank, 1, under(v.words, blank)) : -Infinity;
   if (risky && risky.score > blankScore) return { type: 'clue', word: risky.t, n: risky.n };
   return blank ? { type: 'clue', word: blank, n: 1 } : null;
 }
 
-// Agents at the Easy and Hard levels, from public information only (the board, revealed cards and the clues).
-// Easy agents often tap any hidden word.
+// Decoders at the Easy and Hard levels, from public information only (the board, revealed cards and the clues).
+// Easy decoders often tap any hidden word.
 function levelGuess(v, me, level) {
   const used = v.clue.n + 1 - v.left, list = themeNamed(v.clue.word);
   const guess = (cards) => ({ type: 'guess', card: cards[rand(cards.length)] });
@@ -295,9 +296,9 @@ function levelGuess(v, me, level) {
 /* ---------------- interface ---------------- */
 
 const UI = { pick: null, clue: '', n: 1, key: '' };
-const MARK_NAME = { r: 'red agent', b: 'blue agent', n: 'bystander', x: 'assassin' };
+const MARK_NAME = { r: 'red contact', b: 'blue contact', n: 'civilian', x: 'the Mole' };
 const TCOL = { r: '#ff5a6a', b: '#4d94ff' };
-// Every colour also has a shape (diamond = Red, circle = Blue, dot = bystander, cross = assassin),
+// Every colour also has a shape (diamond = Red, circle = Blue, dot = civilian, cross = the Mole),
 // and revealed cards add a pattern (Red stripes, Blue dots).
 const shape = (d) => `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">${d}</svg>`;
 const MARK = {
@@ -306,18 +307,18 @@ const MARK = {
   n: shape('<circle cx="10" cy="10" r="3.4" fill="currentColor"/>'),
   x: shape('<path d="M4 4l12 12M16 4L4 16" stroke="currentColor" stroke-width="3.6" stroke-linecap="round"/>'),
 };
-// Who was behind a revealed card: an agent in a fedora, a passer-by, or the assassin's crosshair.
+// Who was behind a revealed card: a contact in a fedora, a passer-by, or the Mole, hooded and masked.
 const SIL = {
   r: '<svg class="spy-sil" viewBox="0 0 40 40" aria-hidden="true"><path d="M8 16.5h24l-3.4-1.4-1.5-6a2 2 0 0 0-2.5-1.5L20 8.6l-4.6-1a2 2 0 0 0-2.5 1.5l-1.5 6z"/><path d="M13 18.5c0 4.6 3 8 7 8s7-3.4 7-8z"/><path d="M5 40c1-7 7-11.5 15-11.5S34 33 35 40z"/></svg>',
   n: '<svg class="spy-sil" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="17" r="7.5"/><path d="M6 40c1-7 6.5-11.5 14-11.5S33 33 34 40z"/></svg>',
-  x: '<svg class="spy-sil" viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><circle cx="20" cy="20" r="12"/><circle cx="20" cy="20" r="3" fill="currentColor"/><path d="M20 3v8M20 29v8M3 20h8M29 20h8"/></svg>',
+  x: '<svg class="spy-sil" viewBox="0 0 40 40" aria-hidden="true"><path d="M20 3c-7 0-11.5 5.6-11.5 13 0 4 1.3 7.6 3.4 10C7.4 28 4.6 33 4 40h32c-.6-7-3.4-12-7.9-14 2.1-2.4 3.4-6 3.4-10C31.5 8.6 27 3 20 3z"/><path d="M12.6 15.6h14.8l-1.2 4.2H13.8z" fill="#0d0e14"/><circle cx="16.4" cy="17.6" r="1.3" fill="#fff"/><circle cx="23.6" cy="17.6" r="1.3" fill="#fff"/></svg>',
 };
 SIL.b = SIL.r;
 const SPY_IC = '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 11.5h18M6.5 11.5l1.2-5.2A1.5 1.5 0 0 1 9.6 5.2L12 6l2.4-.8a1.5 1.5 0 0 1 1.9 1.1l1.2 5.2"/><circle cx="8" cy="16.5" r="2.6"/><circle cx="16" cy="16.5" r="2.6"/><path d="M10.6 16.3c.9-.6 1.9-.6 2.8 0"/></svg>';
 // The rosters and the mission log fold away on phones so the board gets the screen; they stay as the player left them.
 const wide = () => (typeof matchMedia === 'function' ? matchMedia('(min-width: 901px)').matches : true);
 let teamsOpen = wide(), logOpen = wide();
-let prev = null; // the last board this screen drew: fresh reveals flip, a team that found an agent flashes
+let prev = null; // the last board this screen drew: fresh reveals flip, a team that reached a contact flashes
 
 function render(el, v, ctx) {
   injectCSS('spies', STYLE);
@@ -328,8 +329,8 @@ function render(el, v, ctx) {
   const guessing = myTurn && v.phase === 'guess' && !me.spy, cluing = myTurn && v.phase === 'clue' && me.spy;
   if (!guessing || v.open[UI.pick]) UI.pick = null;
   const spy = spyOf(v, v.turn);
-  // Agents still hidden. Guessers' copy of the key only shows revealed cards, so count from the team sizes:
-  // the team that gave the first clue started with 9 agents, the other with 8.
+  // Contacts still hidden. Decoders' copy of the key only shows revealed cards, so count from the team sizes:
+  // the team that gave the first clue started with 9 contacts, the other with 8.
   const first = v.clues.length ? v.clues[0].team : v.turn;
   const hiddenOf = (t) => (t === first ? 9 : 8) - v.key.filter((k, i) => v.open[i] && k === t).length;
   const left = { r: hiddenOf('r'), b: hiddenOf('b') };
@@ -344,20 +345,20 @@ function render(el, v, ctx) {
   const guesses = (n) => `${n} guess${n === 1 ? '' : 'es'} left`;
 
   // ---- the operations desk: both teams' counters around whose turn it is ----
-  const score = (t) => `<div class="spy-score ${t} ${!v.over && v.turn === t ? 'on' : ''} ${v.over && v.winner === t ? 'win' : ''} ${found[t] ? (again[t] ? 'spy-scored spy-again' : 'spy-scored') : ''}" data-a="spy-left-${t}" title="${left[t]} ${TEAM[t]} agent${left[t] === 1 ? '' : 's'} still hidden">`
+  const score = (t) => `<div class="spy-score ${t} ${!v.over && v.turn === t ? 'on' : ''} ${v.over && v.winner === t ? 'win' : ''} ${found[t] ? (again[t] ? 'spy-scored spy-again' : 'spy-scored') : ''}" data-a="spy-left-${t}" title="${left[t]} ${TEAM[t]} contact${left[t] === 1 ? '' : 's'} still hidden">`
     + `<i>${MARK[t]}</i><b>${left[t]}</b><small>${TEAM[t]}<span> left</span></small></div>`;
   const status = v.over ? `${TEAM[v.winner]} team wins!`
-    : v.phase === 'clue' ? (cluing ? 'Your team is waiting for your clue' : `${face(spy, v.turn)}<span>${esc(spy.name)} (${TEAM[v.turn]} spymaster) is thinking of a clue…</span>`)
+    : v.phase === 'clue' ? (cluing ? 'Your team is waiting for your clue' : `${face(spy, v.turn)}<span>${esc(spy.name)} (${TEAM[v.turn]} handler) is thinking of a clue…</span>`)
     : `<span>${guessing ? 'Your team is guessing' : `${TEAM[v.turn]} team is guessing`}</span>`;
   const slip = !v.over && v.phase === 'guess' && v.clue
     ? `<div class="spy-slip ${newClue ? 'new' : ''}"><span class="spy-slipword">${esc(v.clue.word.toUpperCase())}</span><span class="spy-n">${v.clue.n}</span></div>`
       + `<div class="spy-guesses"><span class="spy-pips" aria-hidden="true">${Array.from({ length: v.clue.n + 1 }, (_, j) => `<i class="${j < v.left ? 'on' : ''}"></i>`).join('')}</span>${guesses(v.left)}</div>` : '';
   const turn = v.over ? `${icon('trophy')}Mission complete` : `<span class="spy-radar"></span>${MARK[v.turn]}${TEAM[v.turn]} turn`;
-  const role = me ? `<span class="spy-role ${me.team}">${me.spy ? SPY_IC : icon('users')}${me.spy ? 'You are the spymaster' : 'You are an agent'} · ${TEAM[me.team]}</span>` : `<span class="spy-role">${icon('eye')}Watching</span>`;
-  const hint = v.over ? (me ? (me.team === v.winner ? 'Well played, agent. The whole key is shown.' : 'Better luck next mission. The whole key is shown.') : 'The whole key is shown.')
+  const role = me ? `<span class="spy-role ${me.team}">${me.spy ? SPY_IC : icon('users')}${me.spy ? 'You are the handler' : 'You are a decoder'} · ${TEAM[me.team]}</span>` : `<span class="spy-role">${icon('eye')}Watching</span>`;
+  const hint = v.over ? (me ? (me.team === v.winner ? 'Well played. The whole dossier is open.' : 'Better luck next mission. The whole dossier is open.') : 'The whole dossier is open.')
     : cluing ? 'Give a one-word clue and how many of your words it covers.'
     : guessing ? (UI.pick == null ? 'Tap a word, then tap it again to reveal it.' : 'Tap it again, or press Reveal.')
-    : me && me.team === v.turn ? (me.spy ? 'Your team is guessing. No hints now!' : 'Wait for your spymaster’s clue.')
+    : me && me.team === v.turn ? (me.spy ? 'Your decoders are guessing. No hints now!' : 'Wait for your handler’s clue.')
     : me ? `The ${TEAM[v.turn]} team is playing.` : '';
 
   const board = v.words.map((w, i) => {
@@ -367,7 +368,7 @@ function render(el, v, ctx) {
   }).join('');
 
   // ---- side: rosters with faces, and the mission log ----
-  const team = (t) => `<div class="spy-team ${t}"><h3>${MARK[t]}${TEAM[t]}<span class="spy-teamleft">${left[t]} left</span></h3>${v.players.filter((p) => p.team === t).map((p) => `<div class="spy-member ${p.id === ctx.me ? 'me' : ''}">${face(p, t)}<span class="spy-mname">${esc(p.name)}</span>${p.spy ? `<span class="tag spy-tag">${SPY_IC}Spymaster</span>` : ''}${p.id === ctx.me ? '<span class="tag t-you">You</span>' : ''}</div>`).join('')}</div>`;
+  const team = (t) => `<div class="spy-team ${t}"><h3>${MARK[t]}${TEAM[t]}<span class="spy-teamleft">${left[t]} left</span></h3>${v.players.filter((p) => p.team === t).map((p) => `<div class="spy-member ${p.id === ctx.me ? 'me' : ''}">${face(p, t)}<span class="spy-mname">${esc(p.name)}</span>${p.spy ? `<span class="tag spy-tag">${SPY_IC}Handler</span>` : ''}${p.id === ctx.me ? '<span class="tag t-you">You</span>' : ''}</div>`).join('')}</div>`;
   const last = v.clues.at(-1);
   const clues = v.clues.length ? v.clues.slice().reverse().map((c) => `<span class="spy-clueline ${c.team}">${MARK[c.team]}<b>${esc(c.word.toUpperCase())}</b><em>${c.n}</em></span>`).join('') : '<p class="muted small" style="margin:0">No clues yet.</p>';
 
@@ -382,14 +383,14 @@ function render(el, v, ctx) {
       ${v.over ? `<div class="winner-banner">${icon('trophy')}${me ? (me.team === v.winner ? 'Your team wins!' : `${TEAM[v.winner]} team wins`) : `${TEAM[v.winner]} team wins`}</div>` : ''}
       <div class="spy-hud">${score('r')}<div class="spy-bar ${v.over ? v.winner : v.turn}"><span class="spy-turn">${turn}</span><span class="spy-status">${status}</span>${slip}</div>${score('b')}</div>
       <div class="spy-rolebar">${role}${hint ? `<span class="spy-hint">${hint}</span>` : ''}</div>
-      <div class="spy-board ${me?.spy && !v.over ? 'spymaster' : ''}">${board}</div>
+      <div class="spy-board ${me?.spy && !v.over ? 'handler' : ''}">${board}</div>
       ${cluing ? `<form class="panel spy-clue"><label class="grow"><small>One-word clue</small><input id="spyClue" maxlength="20" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(UI.clue)}" placeholder="e.g. ocean"></label>
         <label><small>Words</small><select id="spyN">${Array.from({ length: 9 }, (_, i) => `<option ${UI.n === i + 1 ? 'selected' : ''}>${i + 1}</option>`).join('')}</select></label><button class="primary">${icon('check')}Give clue</button></form>
-        <p class="spy-note"><span>Your words have the</span><i class="${v.turn}">${MARK[v.turn]}</i><span>mark. Avoid the</span><i class="x">${MARK.x}</i><span>assassin!</span></p>` : ''}
+        <p class="spy-note"><span>Your words have the</span><i class="${v.turn}">${MARK[v.turn]}</i><span>mark. Avoid the</span><i class="x">${MARK.x}</i><span>Mole!</span></p>` : ''}
       ${guessing ? `<div class="row spy-actions"><button class="primary grow ${UI.pick == null ? '' : 'spy-ready'}" id="spyGo" ${UI.pick == null ? 'disabled' : ''}>${icon('eye')}${UI.pick == null ? 'Tap a word, then reveal it' : `Reveal ${esc(v.words[UI.pick].toUpperCase())}`}</button><button id="spyPass">End turn</button></div>` : ''}
     </div>
     <div class="side spy-side">
-      <details class="panel drawer spy-teams" ${teamsOpen ? 'open' : ''}><summary>${icon('users')}<span>Agents</span><span class="note">${v.players.length} players</span>${icon('chevron', 'chev')}</summary>
+      <details class="panel drawer spy-teams" ${teamsOpen ? 'open' : ''}><summary>${icon('users')}<span>Spy rings</span><span class="note">${v.players.length} players</span>${icon('chevron', 'chev')}</summary>
         <div class="drawer-body">${team('r')}${team('b')}</div></details>
       <details class="panel drawer spy-logbook" ${logOpen ? 'open' : ''}><summary>${icon('book')}<span>Mission log</span><span class="note">${last ? esc(last.word.toUpperCase()) + ' ' + last.n : ''}</span>${icon('chevron', 'chev')}</summary>
         <div class="drawer-body"><div class="spy-clues">${clues}</div><div class="parchment log">${v.log.slice(0, 8).map((l) => `<div>${esc(l)}</div>`).join('')}</div></div></details>
@@ -416,12 +417,12 @@ function render(el, v, ctx) {
     input.oninput = () => (UI.clue = input.value);
     sel.onchange = () => (UI.n = +sel.value);
     form.onsubmit = (e) => { e.preventDefault(); ctx.send({ type: 'clue', word: input.value, n: +sel.value }); };
-    // An update while the spymaster is typing shouldn't knock them out of the box.
+    // An update while the handler is typing shouldn't knock them out of the box.
     if (typing) { input.focus({ preventScroll: true }); try { input.setSelectionRange(...typing); } catch {} }
   }
 }
 
-/* Cover art: a night-time operations room. Two spymasters in trench coats face a glowing word grid;
+/* Cover art: a night-time operations room. Two handlers in trench coats face a glowing word grid;
    Red holds up the clue, Blue points at a card (self-contained ids, prefixed spc-). */
 function coverSVG() {
   const stops = (list) => list.map(([o, c, a = 1]) => `<stop offset="${o}" stop-color="${c}"${a === 1 ? '' : ` stop-opacity="${a}"`}/>`).join('');
@@ -458,7 +459,7 @@ function coverSVG() {
       + `<path d="M${dir > 0 ? cx + 5 : cx - 11} 105q3 1.6 6-.6" fill="none" stroke="#3a2220" stroke-width="1.4" stroke-linecap="round"/>`
       + `<path d="M${cx - 12} 89C${cx - 12} 76 ${cx + 12} 76 ${cx + 12} 89z" fill="${hatTop}"/><rect x="${cx - 12}" y="85" width="24" height="4" fill="${band}"/><ellipse cx="${cx}" cy="89.5" rx="20" ry="4.2" fill="${hatBrim}"/>`;
   };
-  return `<svg viewBox="0 0 320 200" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Two spymasters in trench coats face a glowing grid of word cards"><defs>` +
+  return `<svg viewBox="0 0 320 200" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Two handlers in trench coats face a glowing grid of code-word cards"><defs>` +
     lg('spc-sky', [[0, '#050920'], [0.6, '#0f1a4c'], [1, '#1d2c70']], 'gradientUnits="userSpaceOnUse" x1="0" y1="8" x2="0" y2="112"') +
     lg('spc-wall', [[0, '#0d1538'], [1, '#060a1f']]) +
     rg('spc-red', [[0, '#ff4d5e', 0.5], [1, '#ff4d5e', 0]]) +
@@ -485,12 +486,12 @@ function coverSVG() {
     `<path d="M98 164H222L236 200H84z" fill="url(#spc-desk)"/><path d="M98 164H222" stroke="#8be6ff" stroke-opacity=".75" stroke-width="1.5"/>` +
     `<circle cx="118" cy="184" r="2.6" fill="#ff4d5e"/><circle cx="202" cy="184" r="2.6" fill="#4d94ff"/>` +
     `<g transform="rotate(-5 160 178)"><rect x="140" y="171" width="40" height="13" rx="1.5" fill="#f2d48a"/><rect x="140" y="168.5" width="14" height="4" rx="1" fill="#f2d48a"/><text x="160" y="180.4" ${FONT} font-size="5.6" fill="#c0392b" letter-spacing=".4">TOP SECRET</text></g>` +
-    // Red spymaster raises the clue card
+    // Red handler raises the clue card
     coat(1, 60, 'spc-coatR', '#d8455e', '#4a0d1d', '#e0a57a', '#2a1020', '#1c0b16', '#ff4d5e') +
     `<path d="M80 132Q98 124 104 104" stroke="url(#spc-coatR)" stroke-width="11" stroke-linecap="round" fill="none"/><circle cx="105" cy="100" r="5" fill="#e0a57a"/>` +
     `<g transform="rotate(-10 117 86)"><rect x="98" y="74" width="38" height="22" rx="3" fill="#fffdf3"/><text x="113" y="89" ${FONT} font-size="8.5" fill="#1b2347">MOON</text>` +
     `<circle cx="130.5" cy="85" r="5.5" fill="#ff4d5e"/><text x="130.5" y="88" ${FONT} font-size="7.5" fill="#fff">2</text></g>` +
-    // Blue spymaster points at a card
+    // Blue handler points at a card
     coat(-1, 260, 'spc-coatB', '#4f84ec', '#0d1d4a', '#9a5d36', '#16224a', '#0a1230', '#4d94ff') +
     `<path d="M240 132Q226 122 220 108" stroke="url(#spc-coatB)" stroke-width="11" stroke-linecap="round" fill="none"/><circle cx="218" cy="105" r="5" fill="#9a5d36"/>` +
     `<path d="M216 102L211.5 97.5" stroke="#9a5d36" stroke-width="3.2" stroke-linecap="round"/><circle cx="208" cy="99" r="7" fill="#ffd166" opacity=".25"/>` +
@@ -523,7 +524,7 @@ const STYLE = `
    updates now, and a transition would repaint the blurred shadow on every frame of the fade. */
 .spy-score.on{border-color:var(--tc);box-shadow:0 0 0 1px var(--tc),0 0 24px -4px var(--tc)}
 .spy-score.win{border-color:var(--gold);background:linear-gradient(180deg,rgba(255,207,92,.22),rgba(5,9,28,.65));box-shadow:0 0 0 1px var(--gold),0 0 24px -4px var(--gold)}
-/* A team found one of its agents: its counter flashes and the number pops. The counter is kept between
+/* A team reached one of its contacts: its counter flashes and the number pops. The counter is kept between
    updates, so a second find in a row switches to twin keyframes (spy-again) to play the flash again. */
 .spy-score.spy-scored b{animation:spy-pop .7s var(--spring) .15s}
 .spy-score.spy-scored::after{content:'';position:absolute;inset:-3px;border-radius:18px;pointer-events:none;box-shadow:0 0 0 2px var(--tc),0 0 28px 6px var(--tc);opacity:0;animation:spy-flash 1.3s ease-out .1s}
@@ -582,7 +583,7 @@ const STYLE = `
 .spy-card.pick{transform:translateY(-7px) scale(1.05);z-index:2;box-shadow:inset 0 1px 0 #fff,0 0 0 3px var(--gold),0 9px 0 -3px #7f8cc4,0 16px 26px rgba(2,4,16,.55)}
 .spy-card.pick::after{animation:none;opacity:1;box-shadow:0 0 0 2px rgba(255,207,92,.9),0 0 22px 6px rgba(255,207,92,.45)}
 .spy-card.pick:active:not(:disabled){transform:translateY(-4px) scale(1.01)}
-/* The spymaster's key */
+/* The handler's dossier (the key) */
 .spy-card.known.r{background:repeating-linear-gradient(45deg,rgba(255,90,106,.14) 0 6px,transparent 6px 12px),linear-gradient(180deg,#fff1f2,#ffdadd);box-shadow:inset 0 0 0 3px #ff5a6a,0 3px 0 #c6475a,0 7px 14px rgba(2,4,16,.45)}
 .spy-card.known.b{background:radial-gradient(circle,rgba(77,148,255,.24) 1.4px,transparent 1.9px) 0 0/9px 9px,linear-gradient(180deg,#eef5ff,#d6e6ff);box-shadow:inset 0 0 0 3px #4d94ff,0 3px 0 #3a6fc4,0 7px 14px rgba(2,4,16,.45)}
 .spy-card.known.n{background:linear-gradient(180deg,#f6f5f0,#e3e1d8)}
@@ -598,8 +599,8 @@ const STYLE = `
 .spy-card.open i{color:#fff;width:14px;height:14px}
 .spy-card.open.n i{color:#5b6078}.spy-card.open.x i{color:#ff6b81}
 .spy-sil{position:absolute;left:0;top:7%;width:100%;height:58%;fill:currentColor;opacity:.32;pointer-events:none}
-.spy-card.open.x .spy-sil{opacity:.9;color:#ff6b81}
-/* A fresh reveal: the paper face folds away and the agent appears. The face shows only while it folds; once
+.spy-card.open.x .spy-sil{opacity:.8;color:#ff6b81}
+/* A fresh reveal: the paper face folds away and the person behind it appears. The face shows only while it folds; once
    edge-on it is gone (opacity 0) instead of held there, so no 3D layer is left on the card until the next update. */
 .spy-card.spy-flip::before{content:'';position:absolute;inset:0;z-index:3;border-radius:inherit;pointer-events:none;background:linear-gradient(180deg,#ffffff,#dfe5f7);opacity:0;animation:spy-flip .45s cubic-bezier(.5,0,.75,.4)}
 @keyframes spy-flip{from{opacity:1}to{opacity:1;transform:perspective(500px) rotateY(90deg)}}
@@ -663,19 +664,19 @@ const STYLE = `
 
 export default {
   id: 'spies', name: 'Word Spies',
-  description: 'Two teams, 25 words, one secret key. Spymasters give one-word clues and teammates hunt for their agents. Avoid the assassin! For 4–8.',
+  description: 'Two rival spy rings, 25 code words, one secret dossier. Handlers radio one-word clues while their decoders track down the team’s contacts. Don’t make contact with the Mole! For 4–8.',
   minPlayers: 4, maxPlayers: 8,
   options: [levelOption()],
   cover: coverSVG(),
   howTo: {
-    goal: 'Be the first team to find all of your agents on the board, without ever touching the assassin.',
+    goal: 'Be the first team to reach all of your contacts on the board, without ever making contact with the Mole.',
     turn: [
-      ['🕵️', 'Spymasters see the key', 'One player on each team sees which words belong to Red (◆), Blue (●), bystanders (·) and the assassin (✖).'],
-      ['💬', 'Give a one-word clue', 'The spymaster types one word and a number, e.g. “OCEAN 3”, meaning three of your words relate to the ocean. The clue can’t be a word on the board.'],
-      ['👆', 'Teammates guess', 'Tap a word and confirm to reveal it. Your agent: keep going (up to the number + 1). A bystander or the other team’s agent ends your turn.'],
-      ['✖', 'The assassin', 'Reveal the assassin and your team loses immediately.'],
+      ['🕵️', 'Handlers hold the dossier', 'One player on each team, the handler, sees which words are Red contacts (◆), Blue contacts (●), civilians (·) and the Mole (✖).'],
+      ['💬', 'Radio a one-word clue', 'The handler types one word and a number, e.g. “OCEAN 3”, meaning three of your words relate to the ocean. The clue can’t be a word on the board.'],
+      ['👆', 'Decoders guess', 'Everyone else on the team is a decoder. Tap a word and confirm to reveal it. Your contact: keep going (up to the number + 1). A civilian or the other team’s contact ends your turn.'],
+      ['✖', 'The Mole', 'Reveal the Mole and your cover is blown: your team loses immediately.'],
     ],
-    tips: ['Teams and spymasters are drawn at random each game; the team lists show who’s who.', 'Talk it over with your teammates before revealing (voice chat helps!).', 'You can end your turn early to play it safe.'],
+    tips: ['Teams and handlers are drawn at random each game; the team lists show who’s who.', 'Talk it over with your teammates before revealing (voice chat helps!).', 'You can end your turn early to play it safe.'],
   },
   setup, act, view, bot, render,
   turnOf: (s) => (s.over ? [] : s.phase === 'clue' ? [spyOf(s, s.turn).id] : s.players.filter((p) => p.team === s.turn && !p.spy).map((p) => p.id)),

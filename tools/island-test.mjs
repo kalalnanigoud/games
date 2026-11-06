@@ -399,3 +399,175 @@ console.log('Creature Island checks passed: four explorers at once, first compan
   assert.equal(w.arena, null, 'an adventure world is untouched');
   console.log('Arena Rush checks passed: fresh explorers, walled chamber, waves, score, clock end, play again, all-down end, nothing saved.');
 }
+// Balance: bosses sized to the party, the cost of a knockout, the raid, levels and companion moves.
+{
+  const { BOSSES, bossHp, PLAYER, respawnFee, bubbleShield, typeMult, AREA_LEVEL, recommendNote, QUESTS, xpToNext, creatureMax: cmax } = await import('../games/island-data.js');
+  const { RAID_WAKE } = await import('../games/island-sim.js');
+  const { inRect, fits } = await import('../games/island-map.js');
+  const bw = new World({ send: () => {} });
+  const mk = (id) => {
+    bw.room([...bw.players.values()].map((p) => ({ id: p.id, name: p.name, connected: true })).concat([{ id, name: 'Bal ' + id, connected: true }]));
+    bw.message(id, { k: 'cmd', c: 'new' });
+    const p = bw.players.get(id); p.ex.quests = { starter: 9, marsh: 1 }; p.ex.lv = 8; p.hp = bw.maxHp(p);
+    return p;
+  };
+  const go = (p, x, y) => Object.assign(p.body, { x: x * T, y: y * T });
+  const sec = (n = 1) => { for (let i = 0; i < 20 * n; i++) bw.step(); };
+  bw.open = { bridge: true, cave: true, storm: true };
+
+  // Solo is the full base health; each extra explorer adds most of it again, so a party isn't easier per head.
+  for (const kind of Object.keys(BOSSES)) {
+    assert.equal(bossHp(kind, 1), BOSSES[kind].hp);
+    const per = bossHp(kind, 4) / 4 / BOSSES[kind].hp;
+    assert.ok(per >= 0.7 && per <= 0.85, `${kind}: four explorers share ${per.toFixed(2)} of a solo boss each`);
+  }
+  assert.ok(BOSSES.mirebrute.hp >= 1500 && BOSSES.tempestra.hp >= 3 * BOSSES.mirebrute.hp, 'bosses last minutes, not seconds');
+  // One explorer walks in first: solo health. A friend joins: it grows, keeping the share already knocked off.
+  const a = mk('BA'), b = mk('BB');
+  const [mx, my] = ARENAS.mirebrute.at;
+  go(a, mx, my + 2); go(b, 64, 70);
+  sec(2);
+  const boss = [...bw.ents.values()].find((e) => e.type === 'b' && e.kind === 'mirebrute');
+  assert.ok(boss && boss.max === bossHp('mirebrute', 1), 'a lone explorer meets a solo-sized boss');
+  boss.hp = Math.round(boss.max * 0.6); boss.state = 'intro'; boss.t = 99; // hold still for the check
+  go(b, mx + 1, my + 2);
+  sec(2);
+  assert.equal(boss.max, bossHp('mirebrute', 2), 'a second explorer arriving rescales it');
+  assert.ok(Math.abs(boss.hp / boss.max - 0.6) < 0.03, `keeping the damage already done (${(boss.hp / boss.max).toFixed(2)})`);
+  assert.equal(boss.n, 2);
+  // Everyone leaves: the boss goes, but remembers its wounds (healing a quarter) if you come back soon.
+  go(a, 64, 70); go(b, 65, 70);
+  sec(16);
+  assert.ok(!bw.ents.has(boss.id), 'the boss leaves an empty arena');
+  go(a, mx, my + 2);
+  sec(2);
+  const back = [...bw.ents.values()].find((e) => e.type === 'b' && e.kind === 'mirebrute');
+  assert.ok(back && Math.abs(back.hp / back.max - 0.85) < 0.04, `a knockout costs the walk back, not the fight (${back && (back.hp / back.max).toFixed(2)})`);
+  bw.ents.delete(back.id);
+  delete bw.bossLeft.mirebrute;
+  a.ex.quests.marsh = 9; a.ex.flags.push('mirebrute'); b.ex.quests.marsh = 9; b.ex.flags.push('mirebrute');
+
+  // A knockout: friends can revive you, but not again straight away; heading home waits a moment and costs shells.
+  go(a, 64, 70); go(b, 64.6, 70);
+  sec(1);
+  const knock = (p) => { p.iT = 0; p.shield = 0; bw.hurt({ type: 'p', pid: p.id, hp: 1 }, 1e6, 'none'); assert.ok(p.downT > 0); };
+  const press = (p, bits) => { bw.message(p.id, { k: 'in', s: p.lastSeq + 1 + p.input.length, i: [[0, 0, bits]] }); bw.step(); };
+  knock(a);
+  press(b, BITS.interact);
+  assert.equal(b.chan?.who, 'BA', 'a friend starts reviving');
+  assert.ok(Math.abs(b.chan.left - PLAYER.revive) < 0.11 && PLAYER.revive > 1.5, 'which takes a little longer than before');
+  for (let i = 0; i < 20 * PLAYER.revive + 2; i++) bw.step();
+  assert.ok(!a.downT && a.hp > 0, 'revived');
+  assert.ok(a.reviveAt > bw.t, 'and a revive cooldown starts');
+  assert.ok(bw.personalView(a).reviveAt > 0, 'which their screen is told about');
+  knock(a);
+  press(b, BITS.interact);
+  assert.ok(!b.chan, 'no second revive straight away');
+  a.ex.shells = 100;
+  bw.message('BA', { k: 'cmd', c: 'respawn' });
+  assert.ok(a.downT > 0, '"Return to the village" waits a few seconds first');
+  sec(PLAYER.respawnWait + 0.25);
+  bw.message('BA', { k: 'cmd', c: 'respawn' });
+  assert.ok(!a.downT && inRect(a.body.x, a.body.y, VILLAGE), 'then you wake in the village square');
+  assert.equal(a.ex.shells, 100 - respawnFee(a.ex.lv, 100), 'for a few shells');
+  assert.ok(respawnFee(8, 1000) <= 25 && respawnFee(8, 1000) > 0 && respawnFee(8, 3) === 3 && respawnFee(8, 0) === 0, 'never more than a few, or more than you have');
+  knock(a); a.ex.shells = 0;
+  sec(PLAYER.downFor + 1);
+  assert.ok(!a.downT && a.hp === bw.maxHp(a), 'waking on your own still works with no shells');
+
+  // The raid: knocked-out defenders wake outside the square, and murklings left in the square can win.
+  for (const p of [a, b]) { p.ex.quests.defend = 1; go(p, 63 + p.seat, 70); }
+  sec(1);
+  assert.ok(bw.raid && bw.raid.hold === 100, 'the raid starts with the square fully defended');
+  knock(a); sec(PLAYER.respawnWait + 0.25);
+  bw.message('BA', { k: 'cmd', c: 'respawn' });
+  assert.ok(!inRect(a.body.x, a.body.y, VILLAGE), 'during the raid you wake outside the village');
+  assert.deepEqual([a.body.x / T, a.body.y / T], RAID_WAKE[a.seat]);
+  assert.ok(RAID_WAKE.every(([x, y]) => fits(x * T, y * T, 9, {}) && !inRect(x * T, y * T, VILLAGE)), 'somewhere you can stand, outside the square');
+  const flags = [...a.ex.flags], inv = JSON.stringify(a.ex.inv);
+  for (const id of bw.raid.left) bw.ents.delete(id);
+  bw.raid.left = [];
+  for (let i = 0; i < 4; i++) { const m = bw.creature('murk', 12, 64.5 * T + i * 10, 71 * T, { raid: true, angry: true }); bw.raid.left.push(m.id); }
+  bw.raid.wave = 1;
+  go(a, 50, 40); go(b, 50, 41); // nobody is defending the square
+  let held = 100, guard = 0;
+  while (bw.raid && guard++ < 60) {
+    sec(1);
+    for (const id of bw.raid?.left || []) { const m = bw.ents.get(id); if (m) Object.assign(m, { x: 64.5 * T, y: 71 * T, state: 'wander', target: null }); }
+    if (bw.raid) { assert.ok(bw.raid.hold <= held); held = bw.raid.hold; }
+  }
+  assert.equal(bw.raid, null, 'murklings holding the square end the raid');
+  assert.ok(![...bw.ents.values()].some((e) => e.raid), 'and pull back');
+  assert.ok([a, b].every((p) => p.ex.quests.defend === 1), 'the quest is just as before the raid');
+  assert.deepEqual(a.ex.flags, flags); assert.equal(JSON.stringify(a.ex.inv), inv, 'nothing is lost');
+  go(a, 63, 70); go(b, 64, 70);
+  sec(2);
+  assert.equal(bw.raid, null, 'a breather before they come again');
+  sec(20);
+  assert.ok(bw.raid && bw.raid.hold === 100, 'then the raid restarts cleanly');
+  assert.equal(bw.worldView(a).raid.hold, 100, 'screens are shown the square’s defences');
+  for (const id of bw.raid.left) bw.ents.delete(id);
+  bw.raid = null;
+
+  // Recommended levels: rising along the story, shown when you walk into an area, never a gate.
+  const order = ['woods', 'shore', 'lake', 'marsh', 'cave', 'peak'];
+  assert.ok(order.every((z, i) => !i || AREA_LEVEL[z] > AREA_LEVEL[order[i - 1]]));
+  assert.equal(recommendNote('marsh', 3), `Recommended level ${AREA_LEVEL.marsh} · you are level 3`);
+  assert.equal(recommendNote('marsh', 12), `Recommended level ${AREA_LEVEL.marsh}`);
+  assert.equal(recommendNote('village', 1), '');
+  const { readFileSync } = await import('node:fs');
+  const client = readFileSync(new URL('../games/island-client.js', import.meta.url), 'utf8');
+  assert.ok(/banner\(areaName\(z\), recommendNote\(z, /.test(client), 'the area banner shows the recommended level');
+  // The story's own XP (quests and first boss wins), plus a modest number of fights along the way, reaches
+  // each recommended level without grinding. Explorers keep 60% of XP.
+  {
+    let lv = 1, xp = 0;
+    const gain = (raw) => { xp += Math.round(raw * 0.6); while (xp >= xpToNext(lv)) { xp -= xpToNext(lv); lv++; } };
+    const fights = (n, wildLv) => { for (let i = 0; i < n; i++) gain(8 + 4 * wildLv); };
+    fights(8, 4); fights(8, 5); gain(QUESTS.bridge.xp); gain(QUESTS.supplies.xp); gain(QUESTS.lost.xp); fights(8, 8);
+    assert.ok(lv >= AREA_LEVEL.marsh, `level ${lv} for the Mirebrute`);
+    gain(BOSSES.mirebrute.xp); fights(12, 12);
+    assert.ok(lv >= AREA_LEVEL.cave, `level ${lv} for the Quartzhulk`);
+    gain(BOSSES.quartzhulk.xp); fights(12, 13); gain(QUESTS.defend.xp);
+    assert.ok(lv >= AREA_LEVEL.peak, `level ${lv} for Tempestra`);
+  }
+  assert.ok(Object.values(QUESTS).filter((q) => q.xp).length >= 7, 'quests give XP');
+  {
+    const xp0 = b.ex.xp, lv0 = b.ex.lv;
+    b.ex.quests.fishing = 1; b.ex.team.push({ uid: 'ripfabcd', sp: 'ripplefin', lv: 5, xp: 0, hp: cmax('ripplefin', 5) });
+    const fp = npcPos('fisher'); Object.assign(b.body, { x: fp.x, y: fp.y + 30 });
+    b.dlg = { npc: 'fisher', choices: ['fishing-done'] };
+    bw.message('BB', { k: 'cmd', c: 'choose', npc: 'fisher', id: 'fishing-done' });
+    assert.equal(b.ex.quests.fishing, 9);
+    assert.ok(b.ex.lv > lv0 || b.ex.xp > xp0, 'finishing a quest gives XP');
+  }
+
+  // Companion moves: Bubble Ring's shield grows with the companion; Static Field is trimmed.
+  assert.ok(bubbleShield(5) > 30 && bubbleShield(15) > bubbleShield(5) + 30, 'Bubble Ring scales with level');
+  go(b, 40, 55);
+  for (const clv of [5, 15]) {
+    b.ex.team = [{ uid: 'dew' + clv + 'abcd', sp: 'dewpaw', lv: clv, xp: 0, hp: cmax('dewpaw', clv) }]; b.ex.active = 0; bw.summon(b); b.cds = {};
+    b.shield = 0; bw.ability(b);
+    assert.equal(b.shield, bubbleShield(clv), `level ${clv} Bubble Ring shield`);
+  }
+  {
+    b.ex.team = [{ uid: 'fizzabcd', sp: 'fizzwing', lv: 10, xp: 0, hp: cmax('fizzwing', 10) }]; b.ex.active = 0; bw.summon(b); b.cds = {};
+    for (const e of [...bw.ents.values()]) if (e.type === 'c' && !e.companion) bw.ents.delete(e.id);
+    const c = bw.ents.get(b.comp), dummy = bw.creature('gemmole', 10, c.x + 60, c.y, { state: 'hurt' });
+    dummy.hp = dummy.max = 1e6;
+    let hits = 0; const hurt = bw.hurt.bind(bw);
+    bw.hurt = (e, amt, el, src) => { if (e === dummy) hits += amt; return hurt(e, amt, el, src); };
+    bw.ability(b);
+    const field = [...bw.ents.values()].find((z) => z.type === 'z' && z.owner === 'BB');
+    assert.ok(field, 'Static Field makes a field');
+    for (let i = 0; i < 80 && bw.ents.has(field.id); i++) bw.stepZone(field);
+    bw.hurt = hurt;
+    const total = hits / bw.compAtk(b, c);
+    assert.ok(total <= 2.05 && total >= 1.5, `Static Field deals ${total.toFixed(2)}× over its life (was 3×)`);
+    bw.ents.delete(dummy.id);
+  }
+  // Every starter has a miniboss it is at least even against.
+  for (const sp of STARTERS) assert.ok(['mirebrute', 'quartzhulk'].some((k) => typeMult(SPECIES[sp].el, BOSSES[k].el) >= 1), `${sp} has a fair miniboss`);
+  assert.equal(typeMult('ember', 'stone'), 1, 'Stone no longer resists Ember');
+  console.log('Creature Island balance passed: party-sized bosses that rescale, boss wounds remembered, revive cooldown, respawn wait and fee, raid wake point and defences, recommended levels, story XP, Bubble Ring and Static Field.');
+}

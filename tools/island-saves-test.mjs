@@ -17,6 +17,12 @@ import { fakeCloudflare, fakeWorkerHost, runScript } from './fake-cloudflare.mjs
 const root = fileURLToPath(new URL('../', import.meta.url));
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const newKey = () => crypto.randomBytes(32).toString('hex');
+// A save made before accounts, under a private browser key. Those can no longer be started over the network
+// (only updated), so tests put them straight into the database (the GET creates the tables first if needed).
+async function seedLegacy(db, e, key, data) {
+  await worker.fetch(new Request('https://saves.test/explorer', { headers: { authorization: 'Bearer ' + key } }), e);
+  db.prepare('INSERT INTO explorers (id, rev, data, saved_at, created_at) VALUES (?, 1, ?, ?, ?)').run(sha(key), JSON.stringify(data), Date.now() - 10000, Date.now() - 10000);
+}
 
 /* ---------------- 1. the Worker ---------------- */
 
@@ -117,14 +123,16 @@ clock = Date.parse('2026-11-01T12:00:00Z');
 
 // Saves made before accounts (a private browser key) still work, and move into an account on sign-in.
 const legacyKey = newKey();
-assert.equal((await call('PUT', '/explorer', { key: legacyKey, body: { rev: 0, data: explorer('Old save', 7) } })).status, 200, 'the current site keeps saving until it updates');
+assert.equal((await call('PUT', '/explorer', { key: legacyKey, body: { rev: 0, data: explorer('Old save', 7) } })).status, 403, 'a browser key can no longer start a new save');
+await seedLegacy(sqlite, env, legacyKey, explorer('Old save', 6));
+assert.equal((await call('PUT', '/explorer', { key: legacyKey, body: { rev: 1, data: explorer('Old save', 7) } })).status, 200, 'but an older copy of the site keeps saving its existing explorer');
 const bea = await (await call('POST', '/account', { body: { name: 'Bea', pin: '7310' } })).json();
 r = await call('POST', '/claim', { key: bea.token, body: { key: legacyKey } });
 assert.deepEqual(await r.json(), { moved: true });
 assert.equal((await (await call('GET', '/explorer', { key: bea.token })).json()).data.name, 'Old save', 'the old save is now the account’s');
 assert.equal((await call('GET', '/explorer', { key: legacyKey })).status, 404, 'and no longer under the browser key');
 const legacy2 = newKey();
-await call('PUT', '/explorer', { key: legacy2, body: { rev: 0, data: explorer('Another', 2) } });
+await seedLegacy(sqlite, env, legacy2, explorer('Another', 2));
 assert.equal((await call('POST', '/claim', { key: bea.token, body: { key: legacy2 } })).status, 409, 'an account’s own save is never replaced by a claim');
 assert.equal((await call('POST', '/claim', { key: legacy2, body: { key: legacy2 } })).status, 401, 'claiming needs an account');
 let legacy4;
@@ -133,7 +141,7 @@ let legacy4;
   const dana = await (await call('POST', '/account', { body: { name: 'Dana', pin: '1357' } })).json();
   await call('PUT', '/explorer', { key: dana.token, body: { rev: 0, data: explorer('Dana now', 6) } });
   const legacy5 = newKey();
-  await call('PUT', '/explorer', { key: legacy5, body: { rev: 0, data: explorer('Dana older', 2) } });
+  await seedLegacy(sqlite, env, legacy5, explorer('Dana older', 2));
   clock += 2500;
   r = await call('POST', '/claim', { key: dana.token, body: { key: legacy5, replace: true } });
   const rep = await r.json();
@@ -148,11 +156,11 @@ let legacy4;
   // Replace on an account with no save just moves.
   const cy = await (await call('POST', '/account', { body: { name: 'Cyra', pin: '2468' } })).json();
   const legacy3 = newKey();
-  await call('PUT', '/explorer', { key: legacy3, body: { rev: 0, data: explorer('Third', 3) } });
+  await seedLegacy(sqlite, env, legacy3, explorer('Third', 3));
   assert.deepEqual(await (await call('POST', '/claim', { key: cy.token, body: { key: legacy3, replace: true } })).json(), { moved: true });
   // Keeping it for later: a plain claim that conflicts leaves the browser's save where it is.
   legacy4 = newKey();
-  await call('PUT', '/explorer', { key: legacy4, body: { rev: 0, data: explorer('Fourth', 4) } });
+  await seedLegacy(sqlite, env, legacy4, explorer('Fourth', 4));
   assert.equal((await call('POST', '/claim', { key: cy.token, body: { key: legacy4 } })).status, 409);
   assert.equal((await (await call('GET', '/explorer', { key: legacy4 })).json()).data.name, 'Fourth', 'the browser’s save is untouched by a conflict');
   assert.equal((await (await call('GET', '/explorer', { key: cy.token })).json()).data.name, 'Third');
@@ -296,7 +304,7 @@ await assert.rejects(cloud.loadExplorer(), (e) => e.code === 'signin', 'cloud sa
 // A save from before accounts, made in this browser with the old key.
 const oldKey = newKey();
 store.set('island-explorer-key', oldKey);
-await worker.fetch(new Request('https://saves.test/explorer', { method: 'PUT', headers: { authorization: 'Bearer ' + oldKey, 'content-type': 'application/json' }, body: JSON.stringify({ rev: 0, data: explorer('Bo', 2) }) }), clientEnv);
+await seedLegacy(clientDb, clientEnv, oldKey, explorer('Bo', 2));
 await assert.rejects(cloud.signIn('Bobo', '5555'), (e) => e.code === 'wrong', 'no such account yet');
 const signedUp = await cloud.signUp('Bobo', '5555');
 assert.equal(signedUp.name, 'Bobo');
@@ -318,7 +326,7 @@ assert.match(cloud.explorerTag(), /^[a-f0-9]{32}$/);
   // A browser save and an account that already has one: the key stays, and the player chooses.
   const k2 = newKey();
   store.set('island-explorer-key', k2);
-  await worker.fetch(new Request('https://saves.test/explorer', { method: 'PUT', headers: { authorization: 'Bearer ' + k2, 'content-type': 'application/json' }, body: JSON.stringify({ rev: 0, data: explorer('Browser one', 1) }) }), clientEnv);
+  await seedLegacy(clientDb, clientEnv, k2, explorer('Browser one', 1));
   const c = await cloud.claimLegacy();
   assert.equal(c.conflict?.theirs?.data.name, 'Bo', 'the conflict shows the account’s save');
   assert.equal(c.conflict?.old?.data.name, 'Browser one', 'and the browser’s');
@@ -332,7 +340,7 @@ assert.match(cloud.explorerTag(), /^[a-f0-9]{32}$/);
   // Discard is the only way to drop the key without moving it.
   const k3 = newKey();
   store.set('island-explorer-key', k3);
-  await worker.fetch(new Request('https://saves.test/explorer', { method: 'PUT', headers: { authorization: 'Bearer ' + k3, 'content-type': 'application/json' }, body: JSON.stringify({ rev: 0, data: explorer('Browser two', 1) }) }), clientEnv);
+  await seedLegacy(clientDb, clientEnv, k3, explorer('Browser two', 1));
   assert.ok((await cloud.claimLegacy()).conflict && store.get('island-explorer-key') === k3);
   cloud.discardLegacy();
   assert.equal(cloud.hasLegacy(), false);

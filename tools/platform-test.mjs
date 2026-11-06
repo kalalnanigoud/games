@@ -84,6 +84,7 @@ const replacement=conn(); t.onHostMessage(replacement,{t:'hello',token:'guest',s
 assert.equal(replacement.pid,'guest'); assert.equal(first.open,false); assert.equal(t.S.players[1].connected,true);
 // Real legal/illegal actions: the old connection must not be able to move.
 t.S.gameId='gems'; t.S.started=true; t.S.game=getGame('gems').setup([{id:'guest',name:'Guest'},{id:t.S.token,name:'Host'}]);
+t.S.game.cur=t.S.game.first=0; // the guest moves first here (the first player is random)
 const action={type:'take',gems:['red','blue','green']};
 const before=JSON.stringify(t.S.game);
 t.onHostMessage(first,{t:'action',action}); assert.equal(JSON.stringify(t.S.game),before);

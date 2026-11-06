@@ -203,5 +203,35 @@ const coinsOf = (s, id) => s.players.find((p) => p.id === id).coins;
   ok(e.phase === 'exchange' && timeout(e, 'P0').type === 'exchange' && e.phase === 'action' && total(e) === 15, 'exchange: timeout keeps a legal hand');
 }
 
+// 10. Original names: the court's own terms in rules and log, none of another game's (ids are unchanged).
+{
+  const OLD = /\b(income|foreign aid|coups?|influences?)\b/i;
+  const rules = JSON.stringify([g.name, g.description, g.howTo]);
+  ok(!OLD.test(rules) && !OLD.test(g.cover), 'rules, description and cover use no old action names');
+  ok(/Tithe/.test(rules) && /Petition/.test(rules) && /Overthrow/.test(rules) && /allies/.test(rules), 'rules name Tithe, Petition, Overthrow and allies');
+  ok(/blocked/.test(rules) && /refunded/.test(rules), 'rules say a blocked assassination keeps the coins spent, an exposed one refunds them');
+  const s = game(3, [['envoy', 'corsair'], ['duchess', 'chancellor'], ['envoy', 'duchess']]);
+  g.act(s, 'P0', { type: 'act', action: 'income' });
+  ok(/collects a Tithe/.test(s.log[0]), 'income action logs a Tithe');
+  g.act(s, 'P1', { type: 'act', action: 'aid' }); g.act(s, 'P2', { type: 'allow' }); g.act(s, 'P0', { type: 'allow' });
+  ok(s.log.some((l) => /Petition/.test(l)), 'aid action logs a Petition');
+  s.players[2].coins = 10;
+  let msg = '';
+  try { g.act(s, 'P2', { type: 'act', action: 'income' }); } catch (e) { msg = e.message; }
+  ok(/Overthrow/.test(msg) && !OLD.test(msg), 'the 10-coin rule names the Overthrow');
+  g.act(s, 'P2', { type: 'act', action: 'coup', target: 'P0' });
+  ok(/stages an Overthrow/.test(s.log[0]), 'coup action logs an Overthrow');
+  g.act(s, 'P0', { type: 'lose', card: 'h00' });
+  ok(/loses an ally/.test(s.log[0]), 'losing a card is losing an ally');
+  const logs = [];
+  for (let r = 0; r < 40; r++) {
+    let t = g.setup(Array.from({ length: 2 + (r % 5) }, (_, i) => ({ id: 'P' + i, name: 'N' + i })), { level: ['easy', 'normal', 'hard'][r % 3] });
+    for (let k = 0; !t.over && k < 5000; k++) { const due = g.turnOf(t), pid = due[k % due.length]; g.act(t, pid, g.bot(JSON.parse(JSON.stringify(g.view(t, pid))), pid)); }
+    logs.push(...t.log);
+  }
+  const bad = logs.filter((l) => OLD.test(l));
+  ok(!bad.length, `40 played games log no old terms${bad.length ? ': ' + bad[0] : ''}`);
+}
+
 console.log(fails ? `${fails} FAILED` : 'all passed');
 process.exit(fails ? 1 : 0);

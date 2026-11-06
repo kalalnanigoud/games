@@ -69,7 +69,7 @@ export function escapeRoom(spec) {
         gid: uid(), phase: 'play', over: false, won: false, winners: [], level: levelOf(opts),
         players: players.map((p, i) => ({ id: p.id, name: p.name, seat: i, room: start })),
         open: [start, ...spec.rooms.filter((r) => r.open).map((r) => r.id)].filter((r, i, a) => a.indexOf(r) === i),
-        flags: {}, inv: [], seen: [], shared: [], owner: {}, hintTier: {}, hints: [], hintsUsed: 0,
+        flags: {}, inv: [], seen: [], shared: [], owner: {}, hintTier: {}, hints: [], hintsUsed: 0, hintAsk: '',
         attempts: 0, wrong: 0, started: Date.now(), progressAt: Date.now(), endedAt: 0, log: [], secret: {},
       };
       // Private archive fragments are dealt round the table, so a lone player holds them all.
@@ -105,6 +105,20 @@ export function escapeRoom(spec) {
         const ob = objective(s);
         const tier = ob ? s.hintTier[ob.id] || 0 : 0;
         if (!ob || tier >= ob.hints.length) throw Error('There are no more hints for this step.');
+        // The last hint of a step gives its answer away for the whole team, so the first press only asks;
+        // a second press (by anyone) shows it, and { cancel: true } takes the question back.
+        if (a.cancel) {
+          if (s.hintAsk !== ob.id) throw Error('Nobody has asked to see the answer.');
+          s.hintAsk = '';
+          log(s, `${p.name} kept the answer hidden for now.`);
+          return;
+        }
+        if (tier === ob.hints.length - 1 && s.hintAsk !== ob.id) {
+          s.hintAsk = ob.id;
+          log(s, `${p.name} asked for the last hint, which shows the answer. Press “Show the answer” to reveal it to everyone.`);
+          return;
+        }
+        s.hintAsk = '';
         s.hints.push({ ob: ob.id, text: ob.hints[tier](s) });
         s.hintTier[ob.id] = tier + 1;
         s.hintsUsed++;
@@ -384,6 +398,8 @@ export function escapeRoom(spec) {
     const steps = spec.objectives.map((o) => (o.done(v) ? 'on' : o === ob ? 'now' : ''));
     const stepNo = ob ? spec.objectives.indexOf(ob) + 1 : steps.length;
     const tier = ob ? v.hintTier[ob.id] || 0 : 0;
+    // The step's last hint is its answer: asking for it shows a "Show the answer" / "Not yet" choice first.
+    const last = !!ob && tier === ob.hints.length - 1, asking = last && !v.over && v.hintAsk === ob.id;
 
     paint(el, `<div class="esc-root esc-${spec.id}" style="--accent:${spec.theme.accent};--glow:${spec.theme.glow};--deep:${spec.theme.deep}">
       ${v.over ? ending(v) : ''}
@@ -419,8 +435,9 @@ export function escapeRoom(spec) {
           ${spec.fragments ? `<div class="panel esc-frags"><h3 class="gold">${svgIc(IC.wrist)}<span>${esc(spec.fragLabel)}</span></h3>
             ${myFrags.length ? myFrags.map((f) => `<button class="esc-note ${f.shared ? '' : 'mine'}" data-open="frag:${f.id}"><b>${esc(f.title)}</b><span>${f.shared ? 'Shared with the team' : 'Only you can read this. Tap to open.'}</span></button>`).join('') : '<p class="muted small">Your terminal recovered nothing. Ask your teammates what they see.</p>'}
             ${theirs.map((f) => { const p = v.players.find((q) => q.id === f.owner); return `<div class="esc-other">${face(p, 'esc-sm')}<span><b>${esc(p?.name)}</b> holds “${esc(f.title)}”</span></div>`; }).join('')}</div>` : ''}
-          <div class="panel esc-hintpanel"><div class="row"><h3 class="gold grow" style="margin:0">${icon('help')}<span>Hints</span>${ob && tier ? `<small class="esc-tier">${tier} of ${ob.hints.length}</small>` : ''}</h3>${ob && !v.over ? `<button class="small ${stuck ? 'pulse-glow' : ''}" data-hint ${tier >= ob.hints.length ? 'disabled' : ''}>${icon('bulb')}Ask for a hint</button>` : ''}</div>
-            ${hints.length ? `<ol class="esc-hints">${hints.map((h) => { const k = v.hints.indexOf(h), n = flash('h:' + k); return `<li id="esc-hint-${k}" ${n != null ? `class="esc-newhint"${ago(n)}` : ''}>${h.text}</li>`; }).join('')}</ol>` : `<p class="muted small" style="margin:8px 0 0">${stuck ? 'Feeling stuck? Hints start gentle and get more specific.' : 'Stuck? Hints start gentle and get more specific.'}</p>`}</div>
+          <div class="panel esc-hintpanel"><div class="row"><h3 class="gold grow" style="margin:0">${icon('help')}<span>Hints</span>${ob && tier ? `<small class="esc-tier">${tier} of ${ob.hints.length}</small>` : ''}</h3>${ob && !v.over && !asking ? `<button class="small ${stuck ? 'pulse-glow' : ''}" data-hint ${tier >= ob.hints.length ? 'disabled' : ''}>${icon('bulb')}${last ? 'Last hint: the answer' : 'Ask for a hint'}</button>` : ''}</div>
+            ${asking ? `<div class="esc-askanswer" role="alert"><p>The last hint shows the answer to this step for the whole team.</p><div class="row"><button class="small bad" data-hint>${icon('eye')}Show the answer</button><button class="small ghost" data-hint-cancel>Not yet</button></div></div>` : ''}
+            ${hints.length ? `<ol class="esc-hints">${hints.map((h) => { const k = v.hints.indexOf(h), n = flash('h:' + k); return `<li id="esc-hint-${k}" ${n != null ? `class="esc-newhint"${ago(n)}` : ''}>${h.text}</li>`; }).join('')}</ol>` : `<p class="muted small" style="margin:8px 0 0">${stuck ? 'Feeling stuck? Hints start gentle and get more specific. The last one shows the answer, so it asks first.' : 'Stuck? Hints start gentle and get more specific. The last one shows the answer, so it asks first.'}</p>`}</div>
           <details class="panel drawer esc-journal" ${UI.journal ? 'open' : ''}><summary>${icon('book')}<span>Team journal</span>${entries.length ? `<span class="esc-count">${entries.length}</span>` : ''}<span class="note">${esc(latest ? latest[1] : 'No clues yet')}</span>${icon('chevron', 'chev')}</summary>
             <div class="drawer-body">${journal.length || sharedFrags.length ? `${journal.map((o) => { const n = flash('j:obj:' + o.id); return `<button class="esc-entry ${n != null ? 'esc-got' : ''}" id="esc-j-obj-${o.id}" data-open="obj:${o.id}"${ago(n)}><b>${esc(o.name)}</b> <i>${esc(rooms[o.room].name)}</i><span>${o.clue(v)}</span></button>`; }).join('')}
               ${sharedFrags.map((f) => { const n = flash('j:frag:' + f.id); return `<button class="esc-entry esc-shared ${n != null ? 'esc-got' : ''}" id="esc-j-frag-${f.id}" data-open="frag:${f.id}"${ago(n)}><b>${esc(f.title)}</b> <i>shared by ${esc(v.players.find((p) => p.id === f.owner)?.name)}</i></button>`; }).join('')}` : '<p class="muted small">Clues anyone examines are written here, so the whole team can read them from any room.</p>'}</div></details>
@@ -449,6 +466,8 @@ export function escapeRoom(spec) {
     // Redraws keep these elements, so every handler is a property (replaced, never stacked).
     const hintBtn = el.querySelector('[data-hint]');
     if (hintBtn) hintBtn.onclick = () => ctx.send({ type: 'hint' });
+    const keepHidden = el.querySelector('[data-hint-cancel]');
+    if (keepHidden) keepHidden.onclick = () => ctx.send({ type: 'hint', cancel: true });
     const jump = el.querySelector('[data-jump]');
     if (jump) jump.onclick = () => el.querySelector('.esc-hintpanel')?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
     // <details> toggle events don't bubble: each drawer reports its own state.
@@ -732,6 +751,9 @@ const STYLE = `
 .esc-entry i{font-style:normal;font-weight:800;font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-left:4px}
 .esc-other{display:flex;gap:9px;align-items:center;margin-top:10px;font-size:.82rem;color:var(--muted)}
 .esc-other b{color:var(--text)}
+.esc-askanswer{margin-top:10px;padding:10px 12px;border-radius:12px;background:rgba(255,107,129,.12);border:1px solid rgba(255,107,129,.45)}
+.esc-askanswer p{margin:0 0 8px;font-size:.88rem;line-height:1.4}
+.esc-askanswer .row{gap:8px;flex-wrap:wrap}
 .esc-tier{margin-left:4px;font:700 .7rem var(--font-body);color:var(--muted);letter-spacing:.04em}
 .esc-hints{list-style:none;counter-reset:hint;display:grid;gap:8px;margin:10px 0 0;padding:0;font-size:.88rem;line-height:1.45}
 .esc-hints li{counter-increment:hint;position:relative;padding:8px 12px 8px 40px;border-radius:12px;background:rgba(8,12,34,.5);border:1px solid var(--line)}

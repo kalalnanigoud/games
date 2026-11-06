@@ -1,7 +1,7 @@
 // A player's screen for Creature Island: their own explorer moves the moment they press (and is quietly
 // corrected by the host), everyone else glides between the host's updates, and the HUD, menus,
 // conversations and save choices sit around the world without covering it.
-import { TILE, TICK, SPECIES, ITEMS, GEAR, SHOP, SEATS, QUESTS, QUEST_ORDER, STARTERS, ABILITIES, NPCS, ELEMENTS, BOSSES, CATCH_HP, TEAM_MAX, RANCH_MAX } from './island-data.js';
+import { TILE, TICK, SPECIES, ITEMS, GEAR, SHOP, SEATS, QUESTS, QUEST_ORDER, STARTERS, ABILITIES, NPCS, ELEMENTS, BOSSES, CATCH_HP, TEAM_MAX, RANCH_MAX, PLAYER, respawnFee, recommendNote } from './island-data.js';
 import { stepBody, newBody, BITS, objective, interactables } from './island-sim.js';
 import { island, zoneAt, areaName, TRACKS, G, W } from './island-map.js';
 import { createView, minimap, setEffects, effectsMode, effectsAreLow } from './island-view.js';
@@ -99,7 +99,9 @@ export function createClient(opts) {
   }
   function reconcile(msg) {
     const m = msg.me;
+    const wasDown = st.downT;
     st.hp = m[12]; st.max = m[13]; st.chan = m[15]; st.downT = m[16]; st.shield = m[17];
+    if (st.downT !== wasDown) paintOverlay(); // the knocked-out countdown
     if (!st.body) { st.body = newBody(m[0] / 10, m[1] / 10); st.prev = { x: st.body.x, y: st.body.y }; }
     const base = Object.assign(newBody(m[0] / 10, m[1] / 10), { dir: m[2], kx: m[3], ky: m[4], dT: m[5], dCd: m[6], ddx: m[7], ddy: m[8], sT: m[9], sCd: m[10], down: m[11], mul: st.body.mul });
     st.history = st.history.filter((h) => h[0] > msg.ack);
@@ -315,7 +317,7 @@ export function createClient(opts) {
     // Area names, the first time you walk into each one.
     if (me) {
       const z = zoneAt(me.x, me.y);
-      if (z !== st.zone) { st.zone = z; if (z && z !== 'none' && z !== 'cliffs' && !st.zonesSeen.has(z)) { st.zonesSeen.add(z); banner(areaName(z), '', false, true); } }
+      if (z !== st.zone) { st.zone = z; if (z && z !== 'none' && z !== 'cliffs' && !st.zonesSeen.has(z)) { st.zonesSeen.add(z); banner(areaName(z), recommendNote(z, st.me?.lv || 1), false, true); } }
     }
   }
   function npcMark(id) {
@@ -377,7 +379,7 @@ export function createClient(opts) {
     const raid = st.w.raid;
     const re = el('.isl-raid');
     re.hidden = !raid;
-    if (raid) setText('.isl-raid', raid.wave ? `Murkling raid · wave ${raid.wave} of 3 · ${raid.left} left` : 'Murklings are coming!');
+    if (raid) setText('.isl-raid', raid.wave ? `Murkling raid · wave ${raid.wave} of 3 · ${raid.left} left · square ${raid.hold ?? 100}%` : 'Murklings are coming!');
     el('.isl-bagbtn').classList.toggle('unsaved', isUnsaved());
     paintOverlay();
   }
@@ -643,7 +645,7 @@ export function createClient(opts) {
     else if (sc.modal()) html = sc.overlayHTML();
     else if (!st.ready) html = pickerHTML();
     else if (st.ending) html = `<div class="isl-card isl-end"><h2>The storm is calmed!</h2><p>Sunlight spills over Stormcrown Peak for the first time in weeks. The island’s creatures, and its people, will remember this.</p><p class="small muted">Keep exploring: befriend every kind and find every treasure. Remember to save.</p><div class="isl-row"><button class="primary" data-end="ok">Keep exploring</button></div></div>`;
-    else if (st.downT > 0) html = `<div class="isl-down"><b>Knocked out</b><span>A friend can revive you: they stand beside you and press ${matchMedia('(pointer: coarse)').matches ? 'Revive' : esc(keysFor('interact')[0] || 'E')}.</span><button data-respawn>Return to the village</button></div>`;
+    else if (st.downT > 0) html = downHTML();
     if (box.dataset.html === html) return;
     box.dataset.html = html;
     box.innerHTML = html;
@@ -652,6 +654,20 @@ export function createClient(opts) {
     const nameIn = box.querySelector('[name="acctName"]');
     if (nameIn) nameIn.value = sc.s.acct.name || '';
     if (!st.ready && !st.leave) drawPreview();
+  }
+  // Knocked out: a friend can revive you, or after a short rest you can head back to the village for a few
+  // shells (you wake there on your own when the countdown ends). During the raid you wake outside it.
+  function downHTML() {
+    const me = st.me || {}, wait = Math.max(0, Math.ceil(PLAYER.respawnWait - (PLAYER.downFor - st.downT)));
+    const fee = respawnFee(me.lv || 1, me.shells || 0);
+    const revivedLeft = Math.ceil((me.reviveAt || 0) - serverNow());
+    const friend = revivedLeft > 0
+      ? `You were revived only a moment ago: friends can help you up again in ${revivedLeft} s.`
+      : `A friend can revive you: they stand beside you and press ${matchMedia('(pointer: coarse)').matches ? 'Revive' : esc(keysFor('interact')[0] || 'E')}.`;
+    if (st.w.arena) return `<div class="isl-down"><b>Knocked out</b><span>${friend} Otherwise you’re back on your feet in ${st.downT} s.</span></div>`;
+    const where = st.w.raid ? 'just outside the village' : 'in the village';
+    const cost = fee ? ` · ${fee} shells` : '';
+    return `<div class="isl-down"><b>Knocked out</b><span>${friend} Otherwise you wake up ${where} in ${st.downT} s.</span><button data-respawn ${wait ? 'disabled' : ''}>${wait ? `Return to the village in ${wait} s` : `Return to the village${cost}`}</button></div>`;
   }
   function pickerHTML() {
     const p = st.picker;
