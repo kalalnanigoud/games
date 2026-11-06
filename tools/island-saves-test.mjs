@@ -179,7 +179,7 @@ const recoverCodes = [];
   assert.equal((await call('POST', '/recover', { raw: 'null' })).status, 400, 'a null body is refused');
   assert.equal((await rec('Eli', eli.code, '12')).status, 400, 'the new PIN must be 4 digits');
   r = await rec('Eli', 'AAAA-AAAA-AAAA');
-  assert.deepEqual([r.status, (await r.json()).left], [401, 4], 'a wrong code is counted and says how many tries are left');
+  assert.deepEqual([r.status, (await r.json()).left], [401, undefined], 'a wrong code is refused without counting against the name');
   assert.equal((await rec('Eli', 'not a code')).status, 401, 'a malformed code looks like a wrong one');
   assert.equal((await rec('Nobody Here', eli.code)).status, 401, 'an unknown name looks the same');
   clock += 2500;
@@ -194,21 +194,20 @@ const recoverCodes = [];
   assert.equal((await call('POST', '/login', { body: { name: 'Eli', pin: '1122' } })).status, 401, 'the old PIN is gone');
   assert.equal((await call('POST', '/login', { body: { name: 'Eli', pin: '3344' } })).status, 200, 'the new PIN works');
   assert.equal((await rec('Eli', eli.code)).status, 401, 'the old code works once only');
-  // The same pause as PINs: wrong PINs and wrong codes share one count.
-  for (let i = 0; i < 3; i++) await rec('Eli', 'BBBB-BBBB-BBBB');
-  await call('POST', '/login', { body: { name: 'Eli', pin: '0001' } });
-  r = await rec('Eli', 'CCCC-CCCC-CCCC');
-  assert.equal(r.status, 423, 'the fifth wrong try (PIN or code) pauses the name');
-  assert.equal((await rec('Eli', back.code)).status, 423, 'even the right code waits out the pause');
-  assert.equal((await call('POST', '/login', { body: { name: 'Eli', pin: '3344' } })).status, 423, 'and so does the right PIN');
-  clock += 15 * 60000 + 1000;
+  // Nobody can lock an owner out on purpose: wrong codes never pause the name or its PIN...
   const burst2 = await Promise.all(Array.from({ length: 60 }, (_, i) => rec('Eli', `DDDD-DDDD-${String(2000 + i).replace(/[01]/g, '2')}`.slice(0, 14)).then((x) => x.status)));
-  assert.ok(!burst2.includes(200) && burst2.filter((s) => s === 423).length >= 50, 'guesses sent all at once can’t slip past the limit');
-  clock += 3600 * 1000 + 1000; // the burst's misses reached ten: an hour
+  assert.ok(burst2.every((s) => s === 401), 'wrong codes are refused, and never pause the name');
+  assert.equal((await call('POST', '/login', { body: { name: 'Eli', pin: '3344' } })).status, 200, 'the right PIN still works after wrong codes');
+  // ...and a pause from wrong PINs doesn't stop the right code, which lifts the pause.
+  for (let i = 0; i < 15; i++) await call('POST', '/login', { body: { name: 'Eli', pin: '0001' } });
+  assert.equal((await call('POST', '/login', { body: { name: 'Eli', pin: '3344' } })).status, 423, 'wrong PINs pause sign-in, even with the right PIN');
+  assert.equal((await rec('Eli', 'CCCC-CCCC-CCCC')).status, 401, 'a wrong code is still refused during the pause');
+  clock += 2500;
   r = await rec('Eli', back.code, '5566');
-  assert.equal(r.status, 200, 'after the pause the right code works');
+  assert.equal(r.status, 200, 'the right code works while sign-in is paused');
   const third = await r.json();
   recoverCodes.push(third.code);
+  assert.equal((await call('POST', '/login', { body: { name: 'Eli', pin: '5566' } })).status, 200, 'and recovering lifts the pause');
   // "Get a recovery code" for a signed-in account: needs a session, replaces the old code.
   assert.equal((await call('POST', '/recovery')).status, 401, 'needs an account');
   assert.equal((await call('POST', '/recovery', { key: newKey() })).status, 401, 'a made-up session is refused');
@@ -350,7 +349,7 @@ await assert.rejects(cloud.signIn('Bobo', '0000'), (e) => e.code === 'wrong' && 
   assert.equal((await cloud.loadExplorer()).rev, 3, 'recovering brings the explorer back');
   await assert.rejects(cloud.signIn('Bobo', '5555'), (e) => e.code === 'wrong', 'the old PIN is gone');
   await assert.rejects(cloud.recover('Bobo', signedUp.code, '7777'), (e) => e.code === 'wrong', 'a code works once');
-  await assert.rejects(cloud.recover('Bobo', 'AAAA-AAAA-AAAA', '7777'), (e) => e.code === 'wrong' && e.left >= 1, 'a wrong code says how many tries are left');
+  await assert.rejects(cloud.recover('Bobo', 'AAAA-AAAA-AAAA', '7777'), (e) => e.code === 'wrong' && e.left === undefined, 'a wrong code is refused without a countdown, since it never pauses the name');
   await cloud.signIn('Bobo', '6666');
   const fresh = await cloud.getRecoveryCode();
   assert.match(fresh, CODE_RE);

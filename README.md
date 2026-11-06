@@ -183,7 +183,8 @@ persistent games can reuse them.
 - **Forgotten PINs:** a new account gets a one-time **recovery code** (like `K7QM-2XPA-9TNE`, about 60 bits from
   an alphabet without look-alike characters), shown once with Copy and "I've saved it". It is stored only as an
   HMAC with `PIN_PEPPER`. "Forgot PIN?" on the sign-in form takes the name, the code and a new PIN
-  (`POST /recover`); wrong codes are counted and paused exactly like wrong PINs. A successful recovery sets the
+  (`POST /recover`). Wrong codes are only limited per network: they don't pause the name, and a pause from wrong
+  PINs doesn't block the right code, so nobody can keep an owner out by guessing wrong on purpose. A successful recovery sets the
   new PIN, ends every older session and gives a fresh code. A signed-in account made before codes existed gets a
   "Get a recovery code" button (`POST /recovery`, needs the session). The new `rec_hash` column is added to an
   existing database automatically the first time it is needed.
@@ -315,7 +316,8 @@ illegal actions and JSON state, and checks selected victory, defeat, and role-ab
 There are no turns: everyone explores at once. Rooms are illustrated with tappable objects and close-ups,
 items go into a shared inventory, clues anyone examines are copied to a team journal, and hints get more
 specific each time the team asks. Codes are reshuffled every game. Computer teammates explore and share
-straight away, but only solve a puzzle after the team has made no progress for 45 seconds.
+straight away, but only solve a puzzle after the team has made no progress for a while: 45 seconds for
+Steady teammates, 15 for Expert and 90 for Learning.
 Both games are built on `games/escape-kit.js`, which takes rooms, objects, items, puzzles and hints as data.
 
 `node tools/escape-test.mjs` plays bot teams of every size, checks that answers and other players' private

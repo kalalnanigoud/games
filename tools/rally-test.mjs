@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { Race, TRACK } from '../games/rally-sim.js';
+import { debug } from '../games/rally.js';
 for (const fps of [4, 10, 60]) {
   const clock = new Race();
   for (let i = 0; i < fps * 4; i++) clock.advance(1 / fps, { brake: true });
@@ -39,3 +40,12 @@ for (const level of ['easy', 'normal', 'hard']) {
 }
 assert.ok(times.hard < times.normal && times.normal < times.easy, 'computer difficulty changes completion time');
 console.log('Rally physics, boost/brake, pause, ordered checkpoints, finish and racer difficulty passed.', times);
+// Space boosts mid-race even when an on-screen control kept focus after a click; otherwise it presses the button.
+const el = (...inside) => ({ closest: sel => sel.split(',').some(s => inside.includes(s.trim())) || null });
+const pauseBtn = el('button', '.rally-controls'), resumeBtn = el('button', '.rally-message');
+assert.equal(debug.spaceForButton(pauseBtn, true), false, 'focused Pause does not swallow Space while racing');
+assert.equal(debug.spaceForButton(pauseBtn, false), true, 'paused: Space presses the focused Resume control');
+assert.equal(debug.spaceForButton(resumeBtn, false), true, 'paused/finished message buttons stay keyboard-operable');
+assert.equal(debug.spaceForButton(el('button'), true), true, 'other page buttons keep Space');
+assert.equal(debug.spaceForButton(el(), true), false); assert.equal(debug.spaceForButton(null, true), false);
+console.log('Rally Space-on-focused-button checks passed.');

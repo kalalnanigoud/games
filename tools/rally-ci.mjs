@@ -58,6 +58,15 @@ try {
       await wait(200);
       assert.equal(await page.evaluate(async () => (await import('/games/rally.js')).debug.race.time), t);
       await page.click('[data-resume]');
+      if (!phone) {
+        // Pause clicked twice keeps focus; Space must then boost rather than press Pause again.
+        await page.click('[data-pause]'); await page.click('[data-pause]');
+        const charge = await page.evaluate(async () => (await import('/games/rally.js')).debug.race.cars[0].boost);
+        await page.keyboard.down('Space'); await wait(300); await page.keyboard.up('Space');
+        const after = await page.evaluate(async () => { const r = (await import('/games/rally.js')).debug.race; return { paused: r.paused, boost: r.cars[0].boost }; });
+        assert.equal(after.paused, false, 'Space on the focused Pause button does not pause');
+        assert.ok(after.boost < charge, `Space boosts after clicking Pause (${charge} -> ${after.boost})`);
+      }
       await page.evaluate(async () => { const { debug } = await import('/games/rally.js'); debug.race.result = { time: 60, place: 2 }; });
       await page.click('[data-again]');
       assert.equal(await page.evaluate(async () => (await import('/games/rally.js')).debug.race.cars[0].lap), 0);

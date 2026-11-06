@@ -59,7 +59,7 @@ export function cleanup() {
   clearTimeout(turnTimer);
   clearTimeout(backupTimer);
   clearInterval(pingTimer);
-  turnTimer = backupTimer = pingTimer = null;
+  botTimer = turnTimer = backupTimer = pingTimer = null;
   timedGame = null;
   Object.assign(S, { timer: null, net: {}, relay: false, successor: null, lostAt: 0 });
   retries = 0;
@@ -365,18 +365,35 @@ export const standingIn = (id) => {
   return S.role === 'host' && !!p && !p.bot && !p.watch && !p.connected && !!p.away && Date.now() - p.away >= STAND_IN_MS;
 };
 
-// The host's browser plays for the bots (and stand-ins), using only what that seat could see.
-export function scheduleBots() {
-  clearTimeout(botTimer);
-  if (!S.started || S.role === 'client' || !S.game || S.game.over || !gameReady(S.gameId)) return;
+// Which seats the host's computer must move for now (bots, and stand-ins for dropped players).
+function botsDue() {
+  if (!S.started || S.role === 'client' || !S.game || S.game.over || !gameReady(S.gameId)) return [];
   const g = getGame(S.gameId);
-  if (!g.bot || !g.turnOf) return;
-  const due = (g.turnOf(S.game) || []).filter((id) => isBot(id) || standingIn(id));
-  if (!due.length) return;
+  if (!g.bot || !g.turnOf) return [];
+  return (g.turnOf(S.game) || []).filter((id) => isBot(id) || standingIn(id));
+}
+// A computer's move is never put off for longer than this by a stream of other players' moves.
+const BOT_WAIT_MAX = 3000;
+let botGame = null, botSince = 0;
+
+// The host's browser plays for the bots (and stand-ins), using only what that seat could see.
+// Room updates that leave the game as it was (a guest asking for a resync, voice, seats, reconnects)
+// don't restart a pending move, so no guest can hold the computers back by sending messages.
+export function scheduleBots() {
+  const due = botsDue();
+  if (!due.length) { clearTimeout(botTimer); botTimer = null; return; }
+  const now = Date.now();
+  if (botTimer && (S.game === botGame || now - botSince >= BOT_WAIT_MAX)) return;
+  if (!botTimer) botSince = now;
+  clearTimeout(botTimer);
+  botGame = S.game;
   botTimer = setTimeout(() => {
+    botTimer = null;
+    const g = getGame(S.gameId);
+    const due = botsDue(); // whose turn it is when the wait ends, not when it began
+    if (!due.length) return;
     const id = due[Math.floor(Math.random() * due.length)];
     const p = S.players.find((x) => x.id === id);
-    if (!isBot(id) && !standingIn(id)) return scheduleBots(); // they came back in the meantime
     if (!isBot(id) && !p.standIn) { p.standIn = true; notice(`🤖 A computer is playing for ${p.name} until they reconnect.`); }
     let action = null;
     try {

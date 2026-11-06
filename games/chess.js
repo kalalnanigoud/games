@@ -271,6 +271,7 @@ function act(s, pid, a) {
   s.last = { from: m.from, to: m.to };
   if (s.drawOffer && s.drawOffer !== pid) { log(s, `${me.name} declined the draw by playing on.`); s.drawOffer = null; }
   log(s, `${me.name}: ${notation}`);
+  if (a.engineFailed && !s.engineNote) { s.engineNote = true; log(s, "The chess engine couldn't load, so the computer is playing at Easy strength."); }
   const key = posKey(s);
   s.counts[key] = (s.counts[key] || 0) + 1;
   addFx(s, { kind: 'sound', sound: notation.includes('+') || notation.includes('#') ? 'chime' : next.captured !== '.' ? 'steal' : 'place' });
@@ -322,11 +323,15 @@ function engineMove(v, P) {
 }
 
 // Easy: a quick, honest club player that grabs safe material, avoids hanging pieces and finds mate in one.
+// A draw offer is accepted only when clearly behind; declining it plays on at the chosen level.
 function bot(v, pid) {
   const me = seatOf(v, pid), P = pos(v), moves = legal(P);
-  if (v.level && v.level !== 'easy' && browser && typeof Worker !== 'undefined' && !(v.drawOffer && v.drawOffer !== pid)) {
+  const accept = v.drawOffer && v.drawOffer !== pid && material(v.board, me.color) < -300;
+  let engineFailed = false;
+  if (v.level && v.level !== 'easy' && browser && typeof Worker !== 'undefined' && !accept) {
     const a = engineMove(v, P);
     if (a) return a;
+    engineFailed = true;
   }
   let best = null, bestScore = -Infinity;
   for (const m of moves) {
@@ -349,8 +354,8 @@ function bot(v, pid) {
     if (t === 'k' && v.sans.length < 40 && !m.flag) score -= 25;
     if (score > bestScore) { bestScore = score; best = m; }
   }
-  if (v.drawOffer && v.drawOffer !== pid && material(v.board, me.color) < -300) return { type: 'accept' };
-  return { type: 'move', from: best.from, to: best.to, promo: best.promo };
+  if (accept) return { type: 'accept' };
+  return { type: 'move', from: best.from, to: best.to, promo: best.promo, ...(engineFailed ? { engineFailed } : {}) };
 }
 
 /* ---------------- pieces ---------------- */

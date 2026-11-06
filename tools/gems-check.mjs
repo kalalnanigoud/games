@@ -85,5 +85,28 @@ throws(() => G.act(clone(s), 'P0', { type: 'pass' }), 'pass with legal moves');
   G.act(t, 'P0', { type: 'pass' }); ok(t.cur === 1, 'pass when no legal move');
   ok(G.bot(G.view(t, 'P1'), 'P1') !== null, 'bot returns action when stuck-ish');
 }
+// Turn timer: the timeout move is legal in every phase, whatever the computer level
+{
+  ok(typeof G.onTimeout === 'function', 'gems exports onTimeout');
+  const timeout = (t, pid, level) => { const a = G.onTimeout({ ...G.view(t, pid), level }, pid); G.act(t, pid, a); return a; };
+  for (const level of ['easy', 'normal', 'hard']) {
+    const t = clone(s);
+    const a = timeout(t, 'P0', level);
+    ok(['take', 'buy', 'reserve'].includes(a.type) && t.cur === 1, `own turn (${level}): timeout makes a legal move`);
+    const d = clone(s); Object.assign(d.players[0].gems, { white: 3, blue: 3, green: 2, red: 0, black: 0 });
+    G.act(d, 'P0', { type: 'take', gems: ['red', 'black', 'white'] });
+    ok(d.phase === 'discard' && timeout(d, 'P0', level).type === 'discard' && d.cur === 1 && d.players[0].gems.white + d.players[0].gems.blue + d.players[0].gems.green + d.players[0].gems.red + d.players[0].gems.black + d.players[0].gems.gold === 10, `forced discard (${level}): timeout returns the right number of gems`);
+    const n = clone(s); const p = n.players[0];
+    for (const nb of n.nobles) for (const [c, k] of Object.entries(nb.req)) p.bonus[c] = Math.max(p.bonus[c], k);
+    G.act(n, 'P0', { type: 'take', gems: ['red', 'blue', 'green'] });
+    ok(n.phase === 'noble' && timeout(n, 'P0', level).type === 'noble' && p.nobles.length === 1 && n.cur === 1, `patron choice (${level}): timeout picks a patron`);
+    const st = clone(s); for (const c of ['white', 'blue', 'green', 'red', 'black']) st.bank[c] = 0; st.players[0].reserved = [st.decks[1].pop(), st.decks[1].pop(), st.decks[1].pop()];
+    ok(timeout(st, 'P0', level).type === 'pass' && st.cur === 1, `stuck (${level}): timeout passes`);
+  }
+  // A whole game where every move is a timeout move ends normally.
+  let t = G.setup(P(3)), moves = 0;
+  while (!t.over && moves++ < 2000) { const pid = G.turnOf(t)[0]; t = clone(t); timeout(t, pid, 'easy'); }
+  ok(t.over, 'a game of timeout moves finishes');
+}
 console.log(fails ? `${fails} failure(s)` : 'all checks passed');
 process.exit(fails ? 1 : 0);

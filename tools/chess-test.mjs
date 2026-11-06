@@ -138,3 +138,41 @@ for (const [fenText, draw, why] of [
 }
 console.log('Chess timeout material regressions passed (bishop blockers, knights, both colors and timeout paths).');
 
+// Stockfish levels: a pending draw offer from the human must not drop the computer to Easy, and
+// an engine that fails to load says so once in the log. A fresh copy of chess.js is loaded with a
+// stand-in browser and Worker, which answers every search with a2a3 (a move Easy never prefers).
+{
+  const posted = [];
+  let worker = null;
+  globalThis.document = {}; globalThis.localStorage = { getItem: () => null }; globalThis.addEventListener = () => {};
+  globalThis.Worker = class {
+    constructor() { worker = this; }
+    postMessage(m) { posted.push(m); if (m.startsWith('go')) this.onmessage({ data: 'bestmove a2a3' }); }
+  };
+  const realInterval = globalThis.setInterval; globalThis.setInterval = () => 0;
+  const { default: sf } = await import('../games/chess.js?engine');
+  globalThis.setInterval = realInterval;
+  const vsBot = (level) => { const s = sf.setup([{ id: 'A', name: 'Ana' }, { id: 'B', name: 'Bot' }], { level }); s.players[0].color = 'b'; s.players[1].color = 'w'; return s; };
+  for (const level of ['club', 'strong', 'master']) {
+    const s = vsBot(level);
+    sf.act(s, 'A', { type: 'offer' });
+    posted.length = 0;
+    assert.deepEqual(sf.bot(sf.view(s, 'B'), 'B'), { type: 'wait' }, `${level}: the engine is asked despite the draw offer`);
+    assert.ok(posted.some((m) => m.startsWith('go')), `${level}: a search was started`);
+    const a = sf.bot(sf.view(s, 'B'), 'B');
+    assert.deepEqual([a.from, a.to], [sq('a2'), sq('a3')], `${level}: the engine's move is played, not Easy's`);
+    sf.act(s, 'B', a); assert.equal(s.drawOffer, null);
+  }
+  // Clearly behind, the computer still accepts the offer.
+  const behind = vsBot('master'); Object.assign(behind, fromFEN('q3k3/8/8/8/8/8/8/4K3 w - - 0 1'));
+  sf.act(behind, 'A', { type: 'offer' });
+  assert.deepEqual(sf.bot(sf.view(behind, 'B'), 'B'), { type: 'accept' });
+  // When the engine fails, Easy plays and the log explains it once.
+  worker.onerror();
+  const s = vsBot('club'), note = /couldn't load, so the computer is playing at Easy/;
+  sf.act(s, 'B', sf.bot(sf.view(s, 'B'), 'B')); sf.act(s, 'A', sf.bot(sf.view(s, 'A'), 'A')); sf.act(s, 'B', sf.bot(sf.view(s, 'B'), 'B'));
+  assert.equal(s.log.filter((l) => note.test(l)).length, 1, 'one engine notice');
+  delete globalThis.document; delete globalThis.localStorage; delete globalThis.addEventListener; delete globalThis.Worker;
+}
+console.log('Chess engine checks passed (draw offers keep the chosen level; a missing engine is logged once).');
+

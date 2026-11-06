@@ -85,7 +85,12 @@ const DOODLES = {
 
 /* ---------------- rules ---------------- */
 
-const norm = (t) => String(t || '').toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
+// Accents are dropped (é → e), apostrophes vanish and any other non-letter (hyphens too) becomes a space.
+const norm = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/['’]/g, '').replace(/[^a-z]+/g, ' ').trim();
+const squash = (t) => t.replace(/ /g, ''); // "hot dog", "hot-dog" and "hotdog" are the same answer
+const right = (g, w) => squash(g) === squash(w);
+// A miss that would give the answer away if posted: it contains the word (so "cats", "the sun") or is one letter off (4+ letters).
+const giveaway = (g, w) => { const a = squash(g), b = squash(w); return a !== b && (a.includes(b) || close(a, b)); };
 function close(a, b) {
   if (Math.abs(a.length - b.length) > 1 || b.length < 4) return false;
   const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
@@ -195,7 +200,7 @@ function act(s, pid, a) {
       if (s.guessed[pid]) throw Error('You already guessed it.');
       const text = norm(a.text).slice(0, 40);
       if (!text) throw Error('Type a guess.');
-      if (text === s.word) {
+      if (right(text, s.word)) {
         const left = Math.max(0, s.endsAt - Date.now());
         const pts = Math.max(50, Math.round((300 * left) / s.drawMs / 10) * 10);
         s.guessed[pid] = pts;
@@ -204,7 +209,7 @@ function act(s, pid, a) {
         say(s, { k: 'right', pid, text: `${me.name} guessed the word! +${pts}` });
         addFx(s, { kind: 'sound', sound: 'chime' });
         if (Object.keys(s.guessed).length >= s.players.length - 1) reveal(s, 'Everyone got it!');
-      } else if (close(text, s.word)) say(s, { k: 'close', pid, to: pid, text: `“${text}” is very close!` });
+      } else if (giveaway(text, s.word)) say(s, { k: 'close', pid, to: pid, text: `“${text}” is very close!` });
       else say(s, { k: 'guess', pid, text });
       return;
     }
@@ -266,7 +271,7 @@ function levelGuess(v, pid, level) {
     const near = turn.filter((f) => f.k === 'close' && f.to === pid).map((f) => /“(.+)”/.exec(f.text)?.[1]).filter(Boolean);
     const wrong = new Set([...turn.filter((f) => f.k === 'guess').map((f) => f.text), ...near]);
     for (const [w, D] of Object.entries(DOODLES)) if (!wrong.has(w) && looks(D, 1)) return { type: 'guess', text: w };
-    const options = WORDS.filter((w) => fits(w, v.mask) && !wrong.has(w) && near.every((g) => close(g, w)));
+    const options = WORDS.filter((w) => fits(w, v.mask) && !wrong.has(w) && near.every((g) => giveaway(g, w)));
     return options.length && options.length <= (browser ? 20 : 1000) ? pick(options) : null;
   }
   const tried = new Set(turn.filter((f) => f.pid === pid && f.k === 'guess').map((f) => f.text));
@@ -544,9 +549,10 @@ function render(el, v, ctx) {
   UI.gid = v.players.map((p) => p.id).join() + v.used + v.phase;
   if (fresh && v.phase !== 'draw') { UI.local = []; UI.pending = null; UI.drawing = false; }
   UI.v = v; UI.ctx = ctx;
-  // A device's first round starts with a skippable doodle warm-up; it gives way if you're the drawer and the clock runs out.
-  if (UI.warm?.el.isConnected) { if (v.phase === 'draw' && v.drawer === ctx.me) UI.warm.close(); }
-  else if (v.round === 1 && v.turn === 0 && v.phase === 'choose' && v.players.some((p) => p.id === ctx.me) && needsWarmup()) UI.warm = openWarmup();
+  // A device's first round offers a skippable doodle warm-up while someone else draws. It never covers your own turn
+  // to pick or draw: it closes the moment you become the drawer, and waits for a turn where you're guessing.
+  if (UI.warm?.el.isConnected) { if (v.drawer === ctx.me) UI.warm.close(); }
+  else if (!UI.warmShown && v.round === 1 && v.drawer !== ctx.me && v.players.some((p) => p.id === ctx.me) && needsWarmup()) { UI.warmShown = true; UI.warm = openWarmup(); }
   draw();
 }
 

@@ -153,4 +153,28 @@ for (const n of [2, 4]) {
   for (let i = 0; i < games; i++) { const s = play(2, [g.bot, g.bot]); total += s.boards[0].score + s.boards[1].score; rounds += s.round; }
   console.log(`2p bot vs bot: avg score ${Math.round(total / games / 2)}, avg rounds ${(rounds / games).toFixed(1)}`);
 }
+// Turn timer: the timeout move is always legal, whatever the computer level.
+{
+  assert.equal(typeof g.onTimeout, 'function', 'mosaic exports onTimeout');
+  const players = [{ id: 'P0', name: 'P0' }, { id: 'P1', name: 'P1' }];
+  for (const level of ['easy', 'normal', 'hard']) {
+    const s = g.setup(players, { level });
+    const pid = g.turnOf(s)[0];
+    const a = g.onTimeout(clone(g.view(s, pid)), pid);
+    assert.ok(legalMoves(g.view(s, pid), pid).some((m) => JSON.stringify(m) === JSON.stringify(a)), `${level}: timeout move is legal`);
+    g.act(s, pid, a);
+    assert.notEqual(g.turnOf(s)[0], pid, `${level}: the turn moves on after a timeout`);
+  }
+  // Every pattern line full: the only legal place is the floor.
+  const s = g.setup(players);
+  const pid = g.turnOf(s)[0], b = s.boards[+pid.slice(1)];
+  b.lines = b.lines.map((_, r) => Array.from({ length: r + 1 }, (_, j) => 80 + (r * (r + 1)) / 2 + j)); // black tiles 80-94
+  const a = g.onTimeout(clone(g.view(s, pid)), pid);
+  assert.equal(a.line, -1, 'with every line full the timeout move goes to the floor');
+  g.act(s, pid, a);
+  // A whole game of timeout moves keeps every rule and finishes.
+  const end = play(3, [g.onTimeout, g.onTimeout, g.onTimeout]);
+  assert.ok(end.over, 'a game of timeout moves finishes');
+  console.log('turn timer: timeout moves legal in every state checked');
+}
 console.log('all checks passed');

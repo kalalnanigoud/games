@@ -261,7 +261,11 @@ async function sampleFlow(browser) {
 }
 async function sketchFlow(browser) {
   let page = await open(browser, { viewport: { width: 1100, height: 800 } }, {});
-  await localGame(page, 'sketch');
+  // The warm-up waits for a turn where you guess. Seats are shuffled at the start, so hold Math.random low for
+  // that moment (the computer is seated first and draws first); it is restored after a few dozen calls.
+  await page.click('[data-local="sketch"]'); await page.click('[data-kick]'); await page.click('#botBtn');
+  await page.evaluate(() => { const r = Math.random; let n = 0; Math.random = () => (++n > 40 ? (Math.random = r)() : 0.1); });
+  await page.click('#startBtn');
   await page.waitForSelector('#skWarm', { timeout: 15000 });
   assert.match(await page.textContent('#skWarm'), /Warm-up 1 of 3/);
   const cv = await page.locator('#skWarm canvas').boundingBox();

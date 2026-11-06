@@ -67,6 +67,31 @@ const json = (x) => JSON.parse(JSON.stringify(x));
   assert.equal(s.over, true, 'one round of three drawers ends the game');
   assert.deepEqual(sketch.turnOf(s), []);
 }
+{
+  // Guesses that give the word away stay private, even for short words; spacing, hyphens and accents don't matter.
+  const fresh = (word) => { const s = sketch.setup(team(3)); sketch.act(s, s.drawer, { type: 'choose', i: 0 }); s.word = word; return [s, s.players.map((p) => p.id).filter((id) => id !== s.drawer)]; };
+  for (const [word, guess] of [['cat', 'cats'], ['cat', 'the cat'], ['bus', 'buses'], ['sun', 'the sun'], ['apple', 'an apple'], ['apple', 'apples'], ['hot dog', 'hot dogs']]) {
+    const [s, [g0, g1]] = fresh(word);
+    sketch.act(s, g0, { type: 'guess', text: guess });
+    assert.equal(s.feed.at(-1).k, 'close', `“${guess}” for ${word} is a private near miss`);
+    assert.ok(!JSON.stringify(sketch.view(s, g1).feed).includes(guess), `“${guess}” is not shown to others`);
+  }
+  for (const [word, guess] of [['cat', 'dog'], ['sun', 'moon'], ['hot dog', 'hot'], ['ant', 'panda']]) {
+    const [s] = fresh(word), g0 = s.players.find((p) => p.id !== s.drawer).id;
+    sketch.act(s, g0, { type: 'guess', text: guess }); assert.equal(s.feed.at(-1).k, 'guess', `“${guess}” for ${word} is an ordinary miss`);
+  }
+  for (const [word, guess] of [['hot dog', 'hot-dog'], ['hot dog', 'HOTDOG'], ['snowman', 'snow man'], ['ice cream', 'Ice-Cream!'], ['snowman', 'snöwman'], ['cafe', 'café']]) {
+    const [s, [g0]] = fresh(word);
+    sketch.act(s, g0, { type: 'guess', text: guess }); assert.ok(s.guessed[g0] >= 50, `“${guess}” counts for ${word}`);
+  }
+  // A Hard computer guesser still uses its private near misses: told “the sun” is very close, it guesses SUN.
+  const [s, [g0]] = fresh('sun');
+  sketch.act(s, g0, { type: 'guess', text: 'the sun' });
+  const v = json(sketch.view(s, g0)); v.level = 'hard';
+  let a = { type: 'think' };
+  for (let i = 0; i < 50 && a.type !== 'guess'; i++) a = sketch.bot(v, g0);
+  assert.deepEqual(a, { type: 'guess', text: 'sun' });
+}
 
 /* ---------------- Word Spies ---------------- */
 {
@@ -106,6 +131,27 @@ const json = (x) => JSON.parse(JSON.stringify(x));
     let g = spies.setup(team(n)), steps = 0;
     while (!g.over) { const ids = spies.turnOf(g), pid = ids[r % ids.length]; spies.act(g, pid, spies.bot(json(spies.view(g, pid)), pid)); g = json(g); assert.ok(++steps < 2000); }
   }
+  // A board of our choosing: the listed cards are face down with the given keys, every other card is face up.
+  const FILL = 'whale ship piano guitar knife oven cow pig snow king queen ball goal bank coin bus taxi book pencil chalk tower park'.split(' ');
+  const board = (cards) => {
+    const g = spies.setup(team(4)), me = g.players.find((p) => p.spy && p.team === g.turn), opp = g.turn === 'r' ? 'b' : 'r';
+    const keys = { own: g.turn, opp, n: 'n', x: 'x' }, list = Object.entries(cards);
+    g.words = [...list.map(([w]) => w), ...FILL].slice(0, 25);
+    g.key = g.words.map((w, i) => (i < list.length ? keys[list[i][1]] : 'n')); g.open = g.words.map((w, i) => i >= list.length);
+    return [g, me];
+  };
+  // Clues: only a board word or the same word plus s/es/ing/ed/er is too close; a word hiding inside another is fine.
+  const [c, cspy] = board({ ice: 'own', ant: 'own', knight: 'opp', dance: 'n', swim: 'n', x0: 'x' });
+  const clue = (word) => spies.act(json(c), cspy.id, { type: 'clue', word, n: 1 });
+  for (const ok of ['juice', 'police', 'giant', 'night', 'whales', 'diced']) assert.doesNotThrow(() => clue(ok), `“${ok}” is a fair clue`);
+  for (const bad of ['ice', 'ices', 'ants', 'knights', 'dancing', 'danced', 'swimmer', 'whale']) assert.throws(() => clue(bad), /too close/, `“${bad}” is too close`);
+  for (const bad of ['sea-creature', 'ice cream', 'sea creature']) assert.throws(() => clue(bad), /one word/);
+  // Normal spymaster with no good theme: its fallback never covers the assassin and prefers sparing the other team.
+  const fallback = (cards) => { const [g, sp] = board(cards); g.level = 'normal'; return spies.bot(json(spies.view(g, sp.id)), sp.id); };
+  const a1 = fallback({ star: 'own', moon: 'x', actor: 'n', screen: 'n', director: 'n' }); // STAR: space, movie, night; MOON: space, night
+  assert.deepEqual(a1, { type: 'clue', word: 'movie', n: 1 }, 'not SPACE or NIGHT, which point at the assassin');
+  const a2 = fallback({ owl: 'own', moon: 'x', bear: 'opp', eagle: 'n', nest: 'n', wing: 'n' }); // OWL: forest, night, birds
+  assert.deepEqual(a2, { type: 'clue', word: 'birds', n: 1 }, 'not NIGHT (assassin) or FOREST (their BEAR)');
 }
 
 /* ---------------- tournaments ---------------- */

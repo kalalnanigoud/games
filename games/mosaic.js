@@ -1513,6 +1513,9 @@ export default {
     if (v.level === 'hard') return botHard(v, pid);
     return botMove(v, pid); // Normal: the original computer player
   },
+  // When a player's move timer runs out the Normal computer takes for them, whatever the computer level
+  // (the platform falls back to the bot if this move turns out to be illegal).
+  onTimeout: (v, pid) => botMove(v, pid),
 
   render,
 };

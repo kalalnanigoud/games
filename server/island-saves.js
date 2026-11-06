@@ -22,8 +22,10 @@
 //
 // Forgotten PINs: an account gets a one-time recovery code (like K7QM-2XPA-9TNE, about 60 bits) when it is
 // made, stored only as an HMAC with the same secret. POST /recover swaps a name + code + new PIN for a new
-// PIN, a fresh code and a new session, and ends every older session. Wrong codes are counted and paused
-// exactly like wrong PINs. Accounts made before this get a code from POST /recovery while signed in.
+// PIN, a fresh code and a new session, and ends every older session. Wrong codes are limited per network
+// only: they don't pause the name, and a pause from wrong PINs doesn't stop the right code (it lifts it),
+// so nobody can keep an owner out by guessing badly on purpose. Accounts made before this get a code from
+// POST /recovery while signed in.
 
 const MAX_SAVE = 64 * 1024; // a full explorer is a few kilobytes
 const MIN_GAP_MS = 2000; // one save per explorer every two seconds at most
@@ -159,7 +161,7 @@ export default {
       const r = await DB.prepare('INSERT INTO sessions (token_hash, account_id, expires_at) SELECT ?, id, ? FROM accounts WHERE id = ? AND salt = ?').bind(await sha256hex(token), now + SESSION_MS, accountId, salt).run();
       return r.meta?.changes ? token : null;
     };
-    // Each try (a PIN or a recovery code) is counted before it is checked, in one statement that also starts
+    // Each PIN try is counted before it is checked, in one statement that also starts
     // a pause on every fifth miss: tries sent all at once can't slip past the limit.
     // Resolves to { resp } (paused already) or { wrong(message) } to answer a miss.
     const countTry = async (acct) => {
@@ -233,11 +235,11 @@ export default {
         if (!name || !code) return wrong();
         const acct = await withTables(env, () => DB.prepare('SELECT id, display, salt, rec_hash FROM accounts WHERE name = ?').bind(name.toLowerCase()).first());
         if (!acct) return wrong();
-        // Counted and paused like PINs; an account with no code still counts, so it can't be told apart.
-        const miss = await countTry(acct);
-        if (miss.resp) return miss.resp;
+        // Not counted against the name, and not stopped by a PIN pause: a code has about 60 bits, so the
+        // per-network limit is enough, and anyone who knows a name could otherwise keep its owner locked
+        // out of recovery too, just by sending wrong PINs or codes.
         const mine = await codeHash(env, acct.salt, code);
-        if (!acct.rec_hash || !same(mine, acct.rec_hash)) return miss.wrong('That name and recovery code don’t match.');
+        if (!acct.rec_hash || !same(mine, acct.rec_hash)) return wrong();
         const fresh = newCode(), salt = randomHex(16);
         // Rotate credentials, revoke sessions and issue the replacement atomically.
         // Later statements only act if this request installed its unique salt.

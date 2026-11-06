@@ -237,6 +237,20 @@ function danger(s, i) {
   if (VILLAGES.includes(to)) return 10 + 10 * f;
   return s.tiles[i].animal && f >= 2 ? 30 : 2 * f;
 }
+// What a firebreak is worth to Steady teammates: nothing once every spread of the next wind is already
+// prevented. When the next wind can blow fire into a village it beats wandering (more the likelier that
+// is), and when that village is one level from losing protection it beats a step toward an animal.
+function breakScore(s) {
+  if (1 + s.difficulty - s.breaks <= 0) return 0;
+  const burning = s.tiles.map((t, i) => (t.fire ? i : -1)).filter((i) => i > 0);
+  let hot = 0, near = false;
+  for (const i of burning) {
+    let to = i + OFFSETS[s.wind];
+    if (to <= 0 || to >= 16 || distance(i, to) !== 1) to = i;
+    if (VILLAGES.includes(to) && s.tiles[to].fire < 3) { hot++; if (s.tiles[to].fire === 2) near = true; }
+  }
+  return hot ? Math.round(25 + 10 * hot / burning.length) + (near ? 20 : 0) : 0;
+}
 function expert(s, p, moves) {
   const pick = (type) => moves.find((m) => m.type === type);
   const toward = (goal) => moves.filter((m) => m.type === 'move').reduce((a, b) => (distance(b.to, goal) < distance(a.to, goal) ? b : a));
@@ -265,7 +279,7 @@ function expert(s, p, moves) {
 export default cooperative({
   id:'ember',theme:'ember',name:'Emberwatch',description:'Read the wind, contain spreading fire, and bring woodland animals safely to the river camp.',
   goal:'Rescue four woodland animals to River Camp while protecting both villages from the wildfire.',limit:24,timeout:'Night fell before the rescue was complete. The remaining forest paths became impassable.',
-  roles:[['Ranger','Move up to two forest spaces.'],['Firefighter','Extinguish two fire levels for one water.'],['Medic','Rescue animals even in heavy fire.'],['Weatherkeeper','Shelter the forest from one spreading fire.']],
+  roles:[['Ranger','Move up to two forest spaces.'],['Firefighter','Extinguish two fire levels for one water.'],['Medic','Rescue animals even in heavy fire.'],['Weatherkeeper','Shelter the forest from two spreading fires.']],
   steps:['Identify animal locations and the current wind direction.','Move, fight fire, refill at camp, rescue an animal, or deliver carried animals.','The wind spreads fire after every team round. Villages at fire level 3 lose protection.'],
   tips:['Carry animals back to River Camp to count them as rescued.','Water is personal: refill at camp or use a turn to collect one water from the rain barrel.','Firebreaks reduce the next fire spread. Keep villages below fire level 3.'],
   setup(s){s.tiles=names.map((name,i)=>({name,fire:[3,6,11].includes(i)?1:0,animal:animalSites.includes(i)}));s.players.forEach(p=>{p.water=3;p.carry=0;});s.rescued=0;s.safety=8;s.wind=0;s.breaks=0;},
@@ -275,7 +289,7 @@ export default cooperative({
     if(here.animal&&(here.fire<2||p.role==='Medic'))m.push(action('rescue','Rescue the animal here',95));
     if(p.pos===0&&p.carry)m.push(action('deliver',`Deliver ${p.carry} rescued animal${p.carry>1?'s':''}`,120));
     if(p.water<4)m.push(action('refill',p.pos===0?'Refill water to 4':'Collect 1 water',p.water===0&&here.fire?105:5));
-    m.push(action('break',p.role==='Weatherkeeper'?'Forecast: prevent two fire spreads':'Build a firebreak (prevent one spread)',s.rescued===4?100:0));return m;},
+    m.push(action('break',p.role==='Weatherkeeper'?'Forecast: prevent two fire spreads':'Build a firebreak (prevent one spread)',breakScore(s)));return m;},
   perform(s,p,a){if(a.type==='move')p.pos=a.to;if(a.type==='water'){s.tiles[p.pos].fire=Math.max(0,s.tiles[p.pos].fire-(p.role==='Firefighter'?2:1));p.water--;}if(a.type==='rescue'){s.tiles[p.pos].animal=false;p.carry++;}if(a.type==='deliver'){s.rescued+=p.carry;p.carry=0;}if(a.type==='refill')p.water=p.pos===0?4:Math.min(4,p.water+1);if(a.type==='break')s.breaks+=p.role==='Weatherkeeper'?2:1;},
   event(s){const burning=s.tiles.map((t,i)=>t.fire?i:-1).filter(i=>i>0);let n=Math.max(0,1+s.difficulty-s.breaks);s.breaks=0;const offsets=[-4,1,4,-1];for(let k=0;k<n;k++){const source=burning.length?burning[rand(burning.length)]:6;let to=source+offsets[s.wind];if(to<=0||to>=16||distance(source,to)!==1)to=source;s.tiles[to].fire=Math.min(3,s.tiles[to].fire+1);}const damage=[12,15].filter(i=>s.tiles[i].fire>=3).length;s.safety-=damage;s.event=`${['North','East','South','West'][s.wind]} wind: ${n} fire spread${n===1?'':'s'}.${damage?' Villages lost '+damage+' protection.':''}`;s.wind=(s.wind+1)%4;},
   check(s){if(s.safety<=0)finish(s,false,'Both villages exhausted their protection. The rescue team withdrew.');else if(s.rescued===4)finish(s,true,'All four animals are safe at River Camp, and the villages still stand.');},

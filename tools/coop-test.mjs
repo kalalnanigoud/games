@@ -34,5 +34,12 @@ const fresh=(id,n=2)=>{const g=games.find(g=>g.id===id);const s=g.setup(Array.fr
 {
  const [g,s]=fresh('ember');s.rescued=3;s.players[0].carry=1;g.act(s,'A',{type:'deliver'});assert.equal(s.won,true);
  const [h,t]=fresh('ember',3);t.cur=1;t.players[1].pos=3;t.tiles[3].fire=3;h.act(t,'B',{type:'water'});assert.equal(t.tiles[3].fire,1);assert.equal(t.players[1].water,2);
+ // Steady teammates build a firebreak when the next wind blows fire into a village one level from burning...
+ const [e,u]=fresh('ember',3);u.cur=1;u.players[1].pos=0;u.players[1].water=4;u.tiles.forEach(x=>x.fire=0);u.tiles[8].fire=1;u.tiles[12].fire=2;u.wind=2;
+ const steady=()=>e.bot({...e.view(u,'B'),level:'normal'},'B');
+ assert.equal(steady().type,'break');e.act(u,'B',steady());assert.equal(u.breaks,1);
+ // ...but not once the next spreads are all prevented, nor when the wind blows the fire away from the villages.
+ u.cur=1;u.breaks=2;assert.notEqual(steady().type,'break');
+ u.breaks=0;u.wind=0;u.tiles[12].fire=0;assert.notEqual(steady().type,'break');
 }
 console.log('Cooperative victory, defeat, and role ability checks passed.');

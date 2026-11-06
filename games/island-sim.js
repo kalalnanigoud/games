@@ -107,6 +107,7 @@ export function validateExplorer(rec, name) {
   const chestIds = new Set(island().chests.map((c) => c.id));
   ex.chests = [...new Set((Array.isArray(rec.chests) ? rec.chests : []).filter((c) => chestIds.has(c)))];
   ex.time = num(rec.time, 0, 1e8, 0);
+  if (ex.quests.supplies === 1 || ex.quests.supplies === 2) ex.picked = num(rec.picked, 0, 5, ex.quests.supplies === 2 ? 5 : 0);
   ex.hp = num(rec.hp, 0, playerMax(ex.lv, ex.equip.charm), playerMax(ex.lv, ex.equip.charm));
   if (ex.hp <= 0) ex.hp = playerMax(ex.lv, ex.equip.charm);
   const x = rec.loc?.x, y = rec.loc?.y;
@@ -424,12 +425,13 @@ export class World {
       if (src.knock && !e.big) { e.kx = (e.kx || 0) + Math.cos(src.ang) * src.knock; e.ky = (e.ky || 0) + Math.sin(src.ang) * src.knock; }
       if (src.stun) e.stun = Math.max(e.stun || 0, src.stun);
       e.animT = 0.25; e.anim = 'hurt';
+      // A hit breaks a Bond Charm like a failed befriend (the charm is spent); the creature reacts as if wandering.
+      if (e.bound || e.state === 'bound') { e.bound = null; e.state = 'wander'; this.event(e, ['catch', e.id, 0, Math.round(e.x), Math.round(e.y)]); }
       if (e.state === 'wander' || e.state === 'flee') {
         const sp = SPECIES[e.sp];
         if (sp?.temper === 'shy' && !e.murk) { e.state = 'flee'; e.t = 3; if (e.sp === 'puffcap' && Math.random() < 0.35) this.startAttack(e); }
         else if (src.pid) { e.angry = true; e.target = this.players.get(src.pid)?.body ? 'p:' + src.pid : null; e.state = 'chase'; }
       }
-      if (e.bound) { e.bound = null; }
     }
     if (e.hp <= 0) this.faint(e);
   }
@@ -555,7 +557,7 @@ export class World {
       const n = best.node;
       p.nodes[n.id] = this.t + 90;
       if (n.item === 'shells') { const s = 4 + Math.floor(Math.random() * 4); p.ex.shells += s; this.personal(p, ['float', n.x, n.y - 30, `+${s} shells`, '#ffe8a3']); }
-      else { this.give(p, n.item, 1); this.personal(p, ['float', n.x, n.y - 30, `+1 ${ITEMS[n.item].name}`, '#d3f9d8']); }
+      else { this.give(p, n.item, 1); if (n.item === 'sunberry' && p.ex.quests.supplies === 1) p.ex.picked = Math.min(5, (p.ex.picked || 0) + 1); this.personal(p, ['float', n.x, n.y - 30, `+1 ${ITEMS[n.item].name}`, '#d3f9d8']); }
       this.personal(p, ['gather', n.id, 90]);
       this.questCheck(p);
       this.bump(p, true);
@@ -790,14 +792,15 @@ export class World {
       hp: p.downT > 0 ? this.maxHp(p) : Math.round(p.hp), shells: ex.shells, inv: { ...ex.inv }, gear: [...ex.gear], equip: { ...ex.equip },
       team, ranch: ex.ranch.map((m) => ({ ...m })), active: ex.active, dex: { seen: [...ex.dex.seen], caught: [...ex.dex.caught] },
       quests: { ...ex.quests }, flags: [...ex.flags], chests: [...ex.chests], time: Math.round(ex.time),
-      loc: this.placeOf(p), savedAt: this.now(),
+      loc: this.placeOf(p), savedAt: this.now(), ...(ex.picked ? { picked: ex.picked } : {}),
     };
   }
 
   // ---- quests ----
   questCheck(p) {
     const ex = p.ex, q = ex.quests;
-    if (q.supplies === 1 && (ex.inv.sunberry || 0) >= 5) q.supplies = 2;
+    // Supplies counts only Sunberries picked from bushes after the Healer asks, not the ones handed out at the start.
+    if (q.supplies === 1 && (ex.picked || 0) >= 5 && (ex.inv.sunberry || 0) >= 5) q.supplies = 2;
     else if (q.supplies === 2 && (ex.inv.sunberry || 0) < 5) q.supplies = 1;
     if (q.bridge === 1 && (ex.inv.driftwood || 0) >= 4) q.bridge = 2;
     else if (q.bridge === 2 && (ex.inv.driftwood || 0) < 4) q.bridge = 1;
@@ -923,7 +926,7 @@ export class World {
       if (Math.abs(e.kx) < 5) e.kx = 0;
       if (Math.abs(e.ky) < 5) e.ky = 0;
     }
-    if (e.state === 'bound') { if ((e.bound.t -= TICK) <= 0) this.resolveCatch(e); return; }
+    if (e.state === 'bound') { if (!e.bound) e.state = 'wander'; else { if ((e.bound.t -= TICK) <= 0) this.resolveCatch(e); return; } }
     if (e.stun > 0) { e.stun -= TICK; return; }
     e.atkCd -= TICK;
     const weak = e.hp <= e.max * CATCH_HP && !e.murk;
@@ -1167,7 +1170,7 @@ export class World {
       if (boss && boss.state !== 'faint') {
         const anyone = ready.some((p) => dist(p.body, c) < (arena.r + 5) * T && !p.downT);
         boss.empty = anyone ? 0 : (boss.empty || 0) + 1;
-        if (boss.empty > 12) { this.ents.delete(boss.id); this.worldVer++; }
+        if (boss.empty > 12) { for (const m of this.ents.values()) if (m.summoner === boss.id) this.ents.delete(m.id); this.ents.delete(boss.id); this.worldVer++; }
       }
     }
   }
@@ -1468,7 +1471,7 @@ function dialog(npc, p, w) {
       heal(p, w);
       if (q.supplies === 2) return L([...lines, 'Are those Sunberries for me?'], [{ id: 'supplies', label: 'Hand over 5 Sunberries' }]);
       if (!q.supplies && q.starter === 9) return L([...lines, 'I’m running low on Sunberries. Could you pick 5 from the bushes in Whispering Woods, west of here?'], [{ id: 'supplies-start', label: 'Sure' }]);
-      if (q.supplies === 1) return L([...lines, `${ex.inv.sunberry || 0} of 5 Sunberries so far. The bushes are in the woods to the west.`]);
+      if (q.supplies === 1) return L([...lines, `${ex.picked || 0} of 5 Sunberries picked so far. The bushes are in the woods to the west.`]);
       return L(lines);
     }
     case 'merchant': {
@@ -1531,7 +1534,7 @@ function answer(npc, id, p, w) {
   if (npc === 'elder' && id === 'collector' && !q.collector) return start('collector', ['Wonderful. Each kind you befriend is recorded in your field guide.']);
   if (npc === 'elder' && id === 'collector-done' && q.collector === 1 && ex.dex.caught.length >= 6) { ex.shells += 200; w.give(p, 'bigberry', 3); return done('collector', 'Friends of Every Kind', ['Six kinds! You have a gift. Take these, with my thanks.']); }
   if (npc === 'healer' && id === 'supplies-start' && !q.supplies) return start('supplies', ['Thank you, dear. Berry bushes have red fruit; walk up and gather.']);
-  if (npc === 'healer' && id === 'supplies' && q.supplies === 2 && w.takeItem(p, 'sunberry', 5)) { ex.shells += 60; w.give(p, 'seed', 2); return done('supplies', 'Supplies for the Healer', ['These will help so many creatures. Here: Revive Seeds, for when a companion faints.']); }
+  if (npc === 'healer' && id === 'supplies' && q.supplies === 2 && w.takeItem(p, 'sunberry', 5)) { delete ex.picked; ex.shells += 60; w.give(p, 'seed', 2); return done('supplies', 'Supplies for the Healer', ['These will help so many creatures. Here: Revive Seeds, for when a companion faints.']); }
   if (npc === 'merchant' && id === 'shop') return { lines: ['Take your time!'], ui: 'shop' };
   if (npc === 'merchant' && id === 'craft') { w.command(p, { c: 'craft', gear: 'crystalblade' }); return { lines: ['Hammer, hammer… done! Mind the edge.'] }; }
   if (npc === 'kid' && id === 'lost' && !q.lost) { w.give(p, 'sunberry', 1); return start('lost', ['Thank you! Here’s a Sunberry for it. The clearing is west, in the woods.']); }

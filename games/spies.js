@@ -80,11 +80,15 @@ function endTurn(s, why) {
   if (why) log(s, why);
   s.turn = other(s.turn); s.phase = 'clue'; s.clue = null; s.left = 0;
 }
+// A clue may not be a board word, nor (while that word is face down) the same word plus s/es/ing/ed/er,
+// allowing for a dropped final e or a doubled last letter (dance → dancing, swim → swimmer). "juice" next to ICE is fine.
+const forms = (w) => { const e = w.endsWith('e') ? w.slice(0, -1) : w, d = w + w.at(-1); return ['s', 'es', 'ing', 'ed', 'er'].flatMap((x) => [w + x, e + x, d + x]); };
+const kin = (a, b) => forms(a).includes(b) || forms(b).includes(a);
 function clueProblem(s, word) {
-  if (!/^[a-z][a-z-]{1,19}$/.test(word)) return 'A clue is one word (letters only).';
+  if (!/^[a-z]{2,20}$/.test(word)) return 'A clue is one word (letters only).';
   for (let i = 0; i < 25; i++) {
     const w = s.words[i];
-    if (w === word || (!s.open[i] && word.length >= 3 && (w.includes(word) || word.includes(w)))) return `“${word}” is too close to a word on the board.`;
+    if (w === word || (!s.open[i] && kin(w, word))) return `“${word}” is too close to a word on the board.`;
   }
   return null;
 }
@@ -152,8 +156,10 @@ function bot(v, pid) {
       if (!best || score > best.score) best = { t, own, score };
     }
     if (best && best.score > 0) return { type: 'clue', word: best.t, n: best.own };
-    const i = v.key.findIndex((k, j) => k === me.team && !v.open[j]);
-    const fallback = themesOf(v.words[i]).find((t) => !clueProblem(v, t)) || ['thing', 'object', 'stuff'].find((t) => !clueProblem(v, t));
+    // Otherwise a theme covering one of ours but never the assassin, the fewer of theirs the better.
+    const hits = (t, k) => v.words.filter((w, j) => !v.open[j] && v.key[j] === k && THEMES[t].includes(w)).length;
+    const safe = Object.keys(THEMES).filter((t) => hits(t, me.team) && !hits(t, 'x') && !clueProblem(v, t)).sort((a, b) => hits(a, other(me.team)) - hits(b, other(me.team)));
+    const fallback = safe[0] || ['thing', 'object', 'stuff'].find((t) => !clueProblem(v, t));
     return { type: 'clue', word: fallback, n: 1 };
   }
   if (Math.random() < idle) return { type: 'think' };
@@ -669,7 +675,7 @@ export default {
       ['👆', 'Teammates guess', 'Tap a word and confirm to reveal it. Your agent: keep going (up to the number + 1). A bystander or the other team’s agent ends your turn.'],
       ['✖', 'The assassin', 'Reveal the assassin and your team loses immediately.'],
     ],
-    tips: ['The first two seats are the spymasters; teams alternate around the table.', 'Talk it over with your teammates before revealing (voice chat helps!).', 'You can end your turn early to play it safe.'],
+    tips: ['Teams and spymasters are drawn at random each game; the team lists show who’s who.', 'Talk it over with your teammates before revealing (voice chat helps!).', 'You can end your turn early to play it safe.'],
   },
   setup, act, view, bot, render,
   turnOf: (s) => (s.over ? [] : s.phase === 'clue' ? [spyOf(s, s.turn).id] : s.players.filter((p) => p.team === s.turn && !p.spy).map((p) => p.id)),

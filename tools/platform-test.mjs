@@ -30,7 +30,7 @@ function paintNet() {}
 globalThis.test = { S, conns, onHostMessage, onConnClosed, saveSession, resume, parse, cleanup, localRoom, hostRoom, joinRoom, broadcast, requireMultiplayer,
   startGame, armTimer, scheduleBots, onClientMessage, setWatch, applyAction, startTour, playTour, closeTour, loadGame, viewFor, standingIn, scheduleClientRetry,
   addBot, fitTable, seatLimit, endGame, validTourDraft, openClientPeer, roomPeerId,
-  get timer() { return turnTimer; } };
+  get timer() { return turnTimer; }, get botTimer() { return botTimer; } };
 `, context);
 const t = context.test;
 const json = (x) => JSON.parse(JSON.stringify(x));
@@ -228,6 +228,23 @@ t.cleanup();t.localRoom('hexisle',localSaved);assert.ok(t.timer,'resumed local g
 // A pending bot move must not survive leaving a room.
 t.S.players[0].bot=true;t.S.game.over=false;t.scheduleBots();assert.ok(tasks.size>0);
 t.cleanup();assert.equal(tasks.size,0);
+// A guest's messages that leave the game as it was (resync, voice) must not hold a computer's move back.
+{
+  tasks.clear();
+  Object.assign(t.S,{role:'host',started:false,tour:null,lobbyMode:'game',gameId:'gems',credentials:[],game:null,
+    players:[{id:t.S.token,name:'Host',connected:true},{id:'Bstall',name:'Bot',connected:true,bot:true}]});
+  const pest=conn(); t.onHostMessage(pest,{t:'hello',token:'pest',secret,name:'Pest'});
+  t.startGame(); assert.equal(t.S.started,true);
+  const gems=getGame('gems');
+  while (gems.turnOf(t.S.game)[0] !== 'Bstall') { const pid=gems.turnOf(t.S.game)[0]; t.applyAction(pid, gems.bot(t.viewFor(pid), pid)); }
+  const pending=t.botTimer; assert.ok(pending && tasks.has(pending),'the computer’s move is waiting');
+  for (let i=0;i<40;i++) t.onHostMessage(pest, i%2 ? {t:'resync'} : {t:'voice',on:false});
+  assert.equal(t.botTimer,pending,'a stream of resyncs and voice updates does not restart the wait');
+  const stalled=JSON.stringify(t.S.game); runTask(tasks.get(pending));
+  assert.notEqual(JSON.stringify(t.S.game),stalled,'the computer moved on time');
+  assert.notEqual(gems.turnOf(t.S.game)[0],'Bstall');
+  t.cleanup(); assert.equal(t.botTimer,null,'leaving clears the pending move'); tasks.clear();
+}
 // Tournament drafts survive refresh; malformed/old drafts have safe defaults.
 t.S.started=false; t.localRoom('gems');
 t.S.lobbyMode='tour'; t.S.tourDraft={format:'series',picks:['sketch','gems'],ko:'chess'}; t.saveSession();

@@ -94,6 +94,55 @@ assert.ok(w.ents.size < 200, 'the world stays tidy');
   void charms;
 }
 
+// A hit during a befriend breaks the Bond Charm instead of freezing the island.
+{
+  const a = P('A');
+  place('A', 40, 55);
+  const e = w.creature('nettlebug', 3, a.body.x + 40, a.body.y);
+  e.hp = Math.floor(e.max * 0.1);
+  a.ex.inv.charm = 2;
+  const mark = (sent.get('A') || []).length;
+  w.message('A', { k: 'in', s: a.lastSeq + 1 + a.input.length, i: [[0, 0, BITS.catch]] });
+  w.step();
+  assert.ok(e.state === 'bound' && e.bound?.by === 'A', 'the Bond Charm is holding the creature');
+  assert.equal(a.ex.inv.charm, 1, 'the charm is spent');
+  w.hurt(e, 1, 'none', { pid: 'A' });
+  const sane = () => [...w.ents.values()].every((x) => x.state !== 'bound' || x.bound);
+  for (let i = 0; i < 120; i++) { w.step(); assert.ok(sane(), 'no creature is bound without a charm'); }
+  assert.ok(e.state !== 'bound' && !e.bound, `a hit breaks the charm (state ${e.state})`);
+  assert.ok((sent.get('A') || []).slice(mark).flatMap((m) => m.ev || []).some((ev) => ev[0] === 'catch' && ev[1] === e.id && ev[2] === 0), 'the thrower sees it break free');
+  // A creature somehow left 'bound' with no charm recovers on its own.
+  const g = w.creature('nettlebug', 3, a.body.x + 80, a.body.y, { state: 'bound' });
+  for (let i = 0; i < 5; i++) w.step();
+  assert.ok(!w.ents.get(g.id) || g.state !== 'bound', 'a stray bound state resets');
+  for (const x of [e, g]) w.ents.delete(x.id);
+}
+
+// The Healer's Supplies quest needs Sunberries picked after she asks, not the ones handed out at the start.
+{
+  const b = P('B'), q = b.ex.quests;
+  assert.ok(!q.supplies && q.starter === 9);
+  b.ex.inv.sunberry = 6; // 2 to start, 3 from the elder, 1 from Lili
+  const hp = npcPos('healer');
+  Object.assign(b.body, { x: hp.x, y: hp.y + 30 });
+  b.dlg = { npc: 'healer', choices: ['supplies-start'] };
+  w.message('B', { k: 'cmd', c: 'choose', npc: 'healer', id: 'supplies-start' });
+  assert.equal(q.supplies, 1, 'the quest is not done the moment it starts');
+  const bush = island().nodes.find((n) => n.item === 'sunberry');
+  const pick = () => { b.nodes = {}; Object.assign(b.body, { x: bush.x, y: bush.y + 10 }); w.interact(b); };
+  for (let i = 0; i < 4; i++) pick();
+  assert.equal(q.supplies, 1, 'four picked is not enough, even with 10 in the bag');
+  const rec = w.snapshot(b);
+  assert.equal(validateExplorer(JSON.parse(JSON.stringify(rec)), 'B').picked, 4, 'picking progress is saved');
+  pick();
+  assert.equal(q.supplies, 2, 'five picked: back to the Healer');
+  Object.assign(b.body, { x: hp.x, y: hp.y + 30 });
+  b.dlg = { npc: 'healer', choices: ['supplies'] };
+  w.message('B', { k: 'cmd', c: 'choose', npc: 'healer', id: 'supplies' });
+  assert.equal(q.supplies, 9);
+  assert.equal(b.ex.picked, undefined);
+}
+
 // Saving captures one consistent moment; loading checks everything.
 {
   const a = P('A');
@@ -153,6 +202,24 @@ assert.ok(w.ents.size < 200, 'the world stays tidy');
   P('A').ex.flags.splice(P('A').ex.flags.indexOf('bridge'), 1);
   w.refreshGates();
   assert.ok(w.open.bridge, 'a gate never closes on someone');
+}
+
+// A boss that leaves after everyone walks away takes its summoned murklings with it.
+{
+  const [ax, ay] = ARENAS.mirebrute.at;
+  w.open = { bridge: true, cave: true, storm: true };
+  ids.forEach((id, i) => { place(id, ax - 1.5 + i, ay + 2); P(id).hp = 999; });
+  steps(25);
+  const boss = [...w.ents.values()].find((e) => e.type === 'b' && e.kind === 'mirebrute');
+  assert.ok(boss);
+  Object.assign(boss, { state: 'fight', hp: Math.round(boss.max * 0.5), summonT: 0, cd: 0 });
+  let guard = 0;
+  while (![...w.ents.values()].some((e) => e.summoner === boss.id) && guard++ < 200) { for (const id of ids) P(id).hp = 999; steps(1); }
+  assert.ok([...w.ents.values()].some((e) => e.summoner === boss.id && e.boss), 'the boss calls helpers');
+  ids.forEach((id, i) => { place(id, 62 + i, 70); P(id).hp = 999; });
+  steps(400, () => [0, 0, 0]);
+  assert.ok(!w.ents.has(boss.id), 'the boss leaves an empty arena');
+  assert.ok(![...w.ents.values()].some((e) => e.summoner === boss.id), 'and its helpers go too');
 }
 
 // Every boss can be beaten by the party, and pays everyone who fought.

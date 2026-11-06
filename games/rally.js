@@ -6,7 +6,10 @@ import { uid } from '../js/util.js';
 const COLORS = ['#ffcb47', '#70d7ff', '#ff789d', '#c1a4ff'];
 export const COVER = `<svg viewBox="0 0 320 200" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="ry-sky" x2="0" y2="1"><stop stop-color="#124d62"/><stop offset="1" stop-color="#10233f"/></linearGradient></defs><rect width="320" height="200" fill="url(#ry-sky)"/><ellipse cx="160" cy="105" rx="117" ry="62" fill="#426f58" stroke="#d8d4bc" stroke-width="45"/><ellipse cx="160" cy="105" rx="117" ry="62" fill="none" stroke="#283647" stroke-width="36"/><ellipse cx="160" cy="105" rx="117" ry="62" fill="none" stroke="#f1d373" stroke-width="2" stroke-dasharray="12 10"/><g transform="translate(227 58) rotate(27)"><rect x="-24" y="-12" width="48" height="24" rx="8" fill="#ffcc48"/><rect x="-8" y="-9" width="20" height="18" rx="4" fill="#1a3148"/></g><g transform="translate(104 160) rotate(-17)"><rect x="-21" y="-11" width="42" height="22" rx="7" fill="#69ceff"/><rect x="-7" y="-8" width="18" height="16" rx="3" fill="#1a3148"/></g><path d="M28 24h48v24H28z" fill="#fff"/><path d="M28 24h12v12H28zm24 0h12v12H52zM40 36h12v12H40zm24 0h12v12H64z" fill="#172438"/><text x="160" y="112" text-anchor="middle" fill="#fff1bd" font-family="sans-serif" font-weight="bold" font-size="20">POCKET RALLY</text></svg>`;
 let race = null, mounted = null, stop = null;
-export const debug = { get race() { return race; } };
+// Space presses a focused button, except the race's own controls mid-race (say, after clicking
+// Pause and Resume), where it boosts instead.
+const spaceForButton = (target, racing) => !!target?.closest?.('button') && !(racing && target.closest('.rally-controls'));
+export const debug = { get race() { return race; }, spaceForButton };
 const fmt = s => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`;
 
 function mount(box, ctx, level) {
@@ -23,7 +26,7 @@ function mount(box, ctx, level) {
   const key = e => {
     if (!root.isConnected || e.target?.matches('input,textarea,select') || document.querySelector('.modal-bg, .gh-sheet')) { if (e.type === 'keyup') keys.delete(e.code); return; }
     if (!['KeyA','KeyD','ArrowLeft','ArrowRight','ArrowDown','KeyS','Space','KeyP'].includes(e.code)) return;
-    if (['Space'].includes(e.code) && e.target?.closest('button')) return;
+    if (e.code === 'Space' && spaceForButton(e.target, !!race && !race.paused && !race.result)) return;
     e.preventDefault();
     if (e.type === 'keyup') keys.delete(e.code);
     else if (e.code === 'KeyP' && !e.repeat) pause(); else keys.add(e.code);

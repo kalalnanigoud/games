@@ -585,6 +585,12 @@ function bot(v, pid) {
   return pick(acts) || { type: 'pass' };
 }
 
+// What happens when a player's move timer runs out (the platform falls back to the bot if this move turns
+// out to be illegal): the Normal planner moves for them, whatever the computer level.
+function onTimeout(v, pid) {
+  return bot({ ...v, level: 'normal' }, pid);
+}
+
 /* ---------- computer levels ----------
    Normal is the planner above. Easy is a beginner: it buys what it can, otherwise gathers gems for a
    card it fancies, and never courts patrons or blocks anyone. Hard tries every purchase, every way of
@@ -1906,5 +1912,6 @@ export default {
   turnOf,
   view,
   bot,
+  onTimeout,
   render,
 };

@@ -167,5 +167,41 @@ const coinsOf = (s, id) => s.players.find((p) => p.id === id).coins;
   console.log(`     bot stats: claims ${claims}, bluffs ${bluffs} (${Math.round((bluffs / claims) * 100)}%), challenges ${challenges}, correct ${wins} (${Math.round((wins / challenges) * 100)}%), blocks ${blocks}`);
 }
 
+// 9. Turn timer: an idle player's timeout move is always legal and gentle, so a claim never stalls the court.
+{
+  const timeout = (s, pid) => { const a = g.onTimeout(JSON.parse(JSON.stringify(g.view(s, pid))), pid); g.act(s, pid, a); return a; };
+  ok(typeof g.onTimeout === 'function', 'bluff exports onTimeout, so the platform runs the move clock');
+  const s = game(3, [['envoy', 'corsair'], ['corsair', 'chancellor'], ['envoy', 'corsair']]);
+  g.act(s, 'P0', { type: 'act', action: 'levy' });
+  g.act(s, 'P1', { type: 'allow' });
+  ok(s.phase === 'challenge' && JSON.stringify(g.turnOf(s)) === '["P2"]', 'a Levy claim waits on the idle P2');
+  ok(timeout(s, 'P2').type === 'allow', 'timed-out player allows the claim (never challenges)');
+  ok(coinsOf(s, 'P0') === 5 && s.phase === 'action' && s.respond[0] === 'P1', 'pending claim resolves once the idle player times out');
+  ok(timeout(s, 'P1').action === 'income' && coinsOf(s, 'P1') === 3 && s.respond[0] === 'P2', 'own turn: timeout takes Income');
+
+  const a = game(2, [['shadow', 'envoy'], ['corsair', 'chancellor']], 3);
+  g.act(a, 'P0', { type: 'act', action: 'assassinate', target: 'P1' });
+  ok(timeout(a, 'P1').type === 'allow' && a.phase === 'block', 'timeout allows the Shadow claim; block window opens');
+  ok(timeout(a, 'P1').type === 'allow' && a.phase === 'lose', 'timeout never bluffs a block; target must give up a card');
+  const lost = timeout(a, 'P1');
+  ok(lost.type === 'lose' && hiddenN(a, 'P1') === 1 && a.phase === 'action', 'forced loss: timeout gives up a legal card');
+
+  const b = game(3, [['envoy', 'corsair'], ['chancellor', 'duchess'], ['envoy', 'corsair']]);
+  g.act(b, 'P0', { type: 'act', action: 'aid' });
+  g.act(b, 'P1', { type: 'block', role: 'chancellor' });
+  ok(b.phase === 'blockChallenge' && timeout(b, 'P0').type === 'allow' && timeout(b, 'P2').type === 'allow', 'block challenge window: timeouts allow');
+  ok(b.phase === 'action' && coinsOf(b, 'P0') === 2, 'the block stands after timeouts');
+
+  const c = game(3, [['envoy', 'corsair'], ['corsair', 'chancellor'], ['envoy', 'corsair']], 10);
+  const coup = timeout(c, 'P0');
+  ok(coup.action === 'coup' && coup.target !== 'P0' && c.phase === 'lose', 'with 10+ coins the timeout stages the forced Coup');
+  ok(timeout(c, c.respond[0]).type === 'lose' && c.phase === 'action', 'Coup victim times out and loses a legal card');
+
+  const e = game(2, [['envoy', 'duchess'], ['corsair', 'chancellor']]);
+  g.act(e, 'P0', { type: 'act', action: 'exchange' });
+  timeout(e, 'P1');
+  ok(e.phase === 'exchange' && timeout(e, 'P0').type === 'exchange' && e.phase === 'action' && total(e) === 15, 'exchange: timeout keeps a legal hand');
+}
+
 console.log(fails ? `${fails} FAILED` : 'all passed');
 process.exit(fails ? 1 : 0);

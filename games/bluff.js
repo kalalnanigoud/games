@@ -380,6 +380,16 @@ function bot(v, pid) {
   return botNormal(v, pid);
 }
 
+// What happens when a player's move timer runs out (the platform falls back to the bot's choice if this move
+// turns out to be illegal): a pending claim or block is allowed, never challenged or blocked; on their own
+// turn they take Income, or stage the Coup they must make with 10+ coins. Choosing which card to give up,
+// or which to keep after an Exchange, is left to the Normal courtier, whatever the computer level.
+function onTimeout(v, pid) {
+  if (WINDOWS.includes(v.phase)) return { type: 'allow' };
+  if (v.phase === 'action' && (P(v, pid)?.coins ?? 0) < 10) return { type: 'act', action: 'income' };
+  return botNormal(v, pid);
+}
+
 function botNormal(v, pid) {
   const me = P(v, pid);
   if (!me) return { type: 'allow' };
@@ -2430,5 +2440,6 @@ export default {
   },
 
   bot,
+  onTimeout,
   render,
 };
