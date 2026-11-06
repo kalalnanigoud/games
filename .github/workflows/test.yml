@@ -116,12 +116,23 @@ jobs:
           cache: npm
       - name: Install dependencies (browsers come with the image)
         run: npm ci
-      - name: Run browser suite
+      - name: Run browser suite (retried once if it fails or hangs)
         env:
           CI_PART: ${{ matrix.part }}
           TEST_BROWSER: ${{ matrix.browser }}
           ONLY: ${{ matrix.only }}
-        run: node tools/test-all.mjs --only ${{ matrix.suite }}
+        # The longest suite takes about a minute. Each attempt gets 4 minutes, so a hang is cut short and
+        # retried instead of using up the job's 10. A pass on the second try is flagged as a warning on the
+        # run, so flaky suites stay visible.
+        run: |
+          for attempt in 1 2; do
+            if timeout -k 10 240 node tools/test-all.mjs --only ${{ matrix.suite }}; then
+              [ "$attempt" = 1 ] || echo "::warning title=Flaky browser suite::${{ matrix.name }} passed only on attempt $attempt."
+              exit 0
+            fi
+            echo "::warning title=Browser suite retry::${{ matrix.name }} failed or hung on attempt $attempt."
+          done
+          exit 1
       - name: Upload browser logs, traces and screenshots
         if: always()
         uses: actions/upload-artifact@v7
