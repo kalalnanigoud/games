@@ -199,7 +199,8 @@ try {
   // Another tab saves a newer copy of this explorer. Saving here conflicts; Cancel then Save must conflict
   // again rather than quietly overwrite it, and only "Replace it" does.
   const phoneKey = await phone.evaluate(() => JSON.parse(localStorage.getItem('island-session')).token);
-  assert.ok(!(await phone.evaluate(() => JSON.stringify(localStorage))).includes('4826'), 'the PIN is never kept in the browser');
+  // Random tokens and timestamps can contain "4826" by chance, so look for the PIN outside them.
+  assert.ok(!(await phone.evaluate(() => JSON.stringify(localStorage).replace(/[a-f0-9]{16,}/g, '').replace(/\d{10,}/g, ''))).includes('4826'), 'the PIN is never kept in the browser');
   // Any other device: the same name and PIN bring back the same explorer.
   const login = await worker.fetch(new Request(saveUrl.replace(/\/+$/, '') + '/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'phone explorer', pin: '4826' }) }), { DB: D1, PIN_PEPPER: 'ci-pepper' });
   const other = await login.json();

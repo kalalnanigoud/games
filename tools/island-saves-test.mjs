@@ -252,7 +252,10 @@ const recoverCodes = [];
 
 // What's stored: no PINs, no tokens, no keys, no recovery codes.
 const dump = JSON.stringify([...sqlite.prepare('SELECT * FROM accounts').all(), ...sqlite.prepare('SELECT * FROM sessions').all(), ...sqlite.prepare('SELECT id FROM explorers').all()]);
-for (const secret of ['4826', '7310', nani.token, laptop.token, bea.token, legacyKey, legacy2, env.PIN_PEPPER, nani.code, ...recoverCodes, ...recoverCodes.map((c) => c.replace(/-/g, ''))]) assert.ok(!dump.includes(secret), 'nothing secret is stored');
+for (const secret of [nani.token, laptop.token, bea.token, legacyKey, legacy2, env.PIN_PEPPER, nani.code, ...recoverCodes, ...recoverCodes.map((c) => c.replace(/-/g, ''))]) assert.ok(!dump.includes(secret), 'nothing secret is stored');
+// A 4-digit PIN can turn up inside a random hash, salt or timestamp by chance, so look for PINs outside those.
+const plain = dump.replace(/[a-f0-9]{16,}/g, '').replace(/\d{10,}/g, '');
+for (const pin of ['4826', '7310']) assert.ok(!plain.includes(pin), 'no PIN is stored');
 assert.ok(dump.includes(sha(legacy4)), 'browser keys only as their SHA-256');
 
 broken = true;
