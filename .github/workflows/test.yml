@@ -184,7 +184,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [rules, browser, performance]
     permissions:
-      contents: read
+      contents: write # to tag each deployed version
       pages: write
       id-token: write
     environment:
@@ -193,9 +193,23 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # the tags of earlier deploys, which number this one
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      # Every deploy gets a new version: major.minor from package.json, the last number one past the previous
+      # deploy of that major.minor (see tools/release-version.mjs). The site shows it beside the logo.
+      - name: Pick this deploy's version
+        id: version
+        run: node tools/release-version.mjs
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:
           path: '.'
       - id: deployment
         uses: actions/deploy-pages@v5
+      - name: Tag the deployed version
+        run: |
+          git tag "v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"

@@ -55,6 +55,9 @@ try {
       await page.keyboard.up('ArrowRight');
       // The race pauses itself when the window loses focus, which WebKit on Linux CI sometimes does around the
       // menu; Pause is a toggle, so start from a running race and check the click really paused it.
+      // WebKit on Linux CI can report a window blur when Playwright clicks, and a blur pauses the race on purpose,
+      // so a click on the Pause toggle could pause and resume at once. Keep stray blurs out of these checks.
+      await page.evaluate(() => addEventListener('blur', (e) => e.stopImmediatePropagation(), true));
       const paused = () => page.evaluate(async () => (await import('/games/rally.js')).debug.race.paused);
       const running = async () => { if (await paused()) await page.click('[data-resume]'); assert.equal(await paused(), false, 'the race is running'); };
       await running();

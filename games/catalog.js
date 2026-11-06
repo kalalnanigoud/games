@@ -2,7 +2,7 @@
 // Names, covers and rules for the home page and lobby; each game's code loads only when it is played.
 
 export const VERSION = '202611061647-39f8f05f47';
-export const RELEASE = '1.2';
+export const RELEASE = '1.3';
 export const FILES = ["index.html","css/style.css","js/app.js","js/avatar.js","js/config.js","js/dialog.js","js/fx.js","js/icons.js","js/levels.js","js/library.js","js/multiplayer.js","js/net.js","js/onboarding.js","js/patch.js","js/report.js","js/sample.js","js/sound.js","js/state.js","js/storage.js","js/tour.js","js/ui.js","js/util.js","js/voice.js","games/bingo.js","games/bluff.js","games/caller-kit.js","games/chess.js","games/coop-kit.js","games/ember.js","games/escape-kit.js","games/gems.js","games/hexisle.js","games/index.js","games/island-arena.js","games/island-art.js","games/island-client.js","games/island-cloud.js","games/island-data.js","games/island-input.js","games/island-map.js","games/island-practice.js","games/island-sim.js","games/island-view.js","games/island.js","games/keeper.js","games/mosaic.js","games/rally-sim.js","games/rally.js","games/save-centre.js","games/signal.js","games/sketch-warmup.js","games/sketch.js","games/spies.js","games/tambola.js","games/temple.js"];
 export const CATALOG = [
  {
