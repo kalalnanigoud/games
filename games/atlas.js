@@ -111,6 +111,8 @@ function resolveVote(s) {
   else loseLife(s, v.by, 'rejected');
 }
 
+const due = (s, now = Date.now()) => (s.phase === 'play' && now >= s.endsAt) || (s.phase === 'vote' && now >= s.vote.until);
+
 function tick(s) {
   const now = Date.now();
   if (s.phase === 'play' && now >= s.endsAt) loseLife(s, current(s).id, 'time');
@@ -122,9 +124,11 @@ function act(s, pid, a) {
   const me = player(s, pid);
   if (!me) throw Error('You are not playing in this game.');
   if (!a || typeof a !== 'object') throw Error('Choose something to do.');
+  if (a.type === 'think') return;
+  // The host's clock decides: anything that arrives after the deadline applies it, and the late move is dropped.
+  if (due(s)) return tick(s);
   switch (a.type) {
-    case 'think': return;
-    case 'clock': return tick(s);
+    case 'clock': return; // early, or sent for a deadline that has already been replaced
     case 'place': {
       if (s.phase !== 'play') throw Error('Wait for the vote to finish.');
       if (current(s).id !== pid) throw Error(`It's ${current(s).name}'s turn.`);

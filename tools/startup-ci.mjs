@@ -46,6 +46,27 @@ try {
     await waitFor(page, async () => (await import('/js/state.js')).S.status === 'online');
     await page.evaluate(async () => (await import('/js/net.js')).leave());
     await page.context().close();
+    const again = await env.open(browser);
+    await again.fill('#nameIn', 'Again');
+    // Host again while an earlier load is still running and about to fail (its two CDN requests were sent while
+    // the network was down): the new request must get its own try, not inherit that failure. This is how WebKit
+    // used to fail here, when the cancelled load's script errors were still on their way.
+    let calls = 0, releaseDoomed;
+    const doomed = new Promise(r => { releaseDoomed = r; });
+    await again.route(peerCDN, async r => {
+      calls++;
+      if (calls === 1) { await doomed; return r.abort(); }
+      if (calls === 2) return r.abort();
+      return r.fallback();
+    });
+    await again.click('[data-host="island"]');
+    await again.waitForFunction(() => document.getElementById('toast').textContent.includes('Loading online play'));
+    await again.click('[data-host="island"]');
+    releaseDoomed();
+    await waitFor(again, async () => (await import('/js/state.js')).S.status === 'online');
+    assert.ok(calls >= 3, 'the later request loaded PeerJS afresh');
+    await again.evaluate(async () => (await import('/js/net.js')).leave());
+    await again.context().close();
     // Both CDNs fail: retain the home screen, show recovery, then permit a retry.
     const failed = await env.open(browser);
     await failed.route(peerCDN, r => r.abort());

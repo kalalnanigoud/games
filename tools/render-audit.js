@@ -2,8 +2,18 @@
 //   const m = await import('/tools/render-audit.js'); await m.audit(['gems'], { maxSteps: 400 })
 // Plays bot-vs-bot games and renders states from every seat's point of view,
 // reporting render crashes, sideways overflow and tiny buttons at the current viewport width.
+//
+// Timed games (Name Place Animal Thing, Atlas, Antakshari, Tambola…) wait on Date.now() deadlines, which a loop
+// of instant moves never reaches. So each game runs on a virtual clock: every move takes a quarter of a second,
+// and a move that changes nothing (a computer waiting for the bell) lets a whole second pass. A game that still
+// hasn't finished when maxSteps runs out is reported with limit: true, which the CI treats as a failure.
 
 export async function audit(ids, { maxSteps = 600, every = 3 } = {}) {
+  const realNow = Date.now;
+  try { return await run(ids, maxSteps, every, realNow); } finally { Date.now = realNow; }
+}
+
+async function run(ids, maxSteps, every, realNow) {
   const host = document.createElement('div');
   host.style.cssText = 'position:absolute;left:0;top:0;width:100%;opacity:0;pointer-events:none;z-index:-1';
   document.body.appendChild(host);
@@ -14,7 +24,9 @@ export async function audit(ids, { maxSteps = 600, every = 3 } = {}) {
     for (const n of Array.from({ length: g.maxPlayers - g.minPlayers + 1 }, (_, i) => g.minPlayers + i)) {
       const players = Array.from({ length: n }, (_, i) => ({ id: 'P' + i, name: 'Player ' + i }));
       const ctx = (pid) => ({ me: pid, players, name: (x) => players.find((p) => p.id === x)?.name || '?', isBot: () => false, send: () => {}, isHost: true, local: false });
-      const r = { game: id, players: n, renders: 0, crashes: [], overflow: [], smallButtons: new Set(), steps: 0, finished: false };
+      const r = { game: id, players: n, renders: 0, crashes: [], overflow: [], smallButtons: new Set(), steps: 0, finished: false, limit: false, idle: 0 };
+      let clock = realNow();
+      Date.now = () => clock;
       let s = g.setup(players);
       const draw = (pid, tag) => {
         const v = JSON.parse(JSON.stringify(g.view ? g.view(s, pid) : s));
@@ -45,12 +57,17 @@ export async function audit(ids, { maxSteps = 600, every = 3 } = {}) {
           }
           const pid = due[Math.floor(Math.random() * due.length)];
           const a = g.bot(JSON.parse(JSON.stringify(g.view ? g.view(s, pid) : s)), pid);
-          const next = JSON.parse(JSON.stringify(s));
+          const before = JSON.stringify(s);
+          const next = JSON.parse(before);
           g.act(next, pid, a);
+          const idle = JSON.stringify(next) === before;
+          if (idle) r.idle++;
+          clock += idle ? 1000 : 250;
           s = next;
           r.steps++;
         }
         r.finished = !!s.over;
+        r.limit = !s.over && r.steps >= maxSteps;
         players.forEach((p) => draw(p.id, 'final'));
       } catch (e) {
         r.crashes.push('logic: ' + e.message);

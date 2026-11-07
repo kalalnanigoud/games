@@ -214,4 +214,19 @@ const whose = (s) => s.players[s.turn].id;
   assert.ok(rate >= 0.62, 'Hard wins at least 62% of decided games');
 }
 
+// ---- late moves: once the deadline has passed, a move applies it and is itself dropped ----
+{
+  const s = game(3, 'd');
+  s.endsAt = Date.now() - 5000; // nobody's screen has sent the clock yet
+  say(s, 'Delhi');
+  assert.equal(s.players[0].lives, 2, 'a place named after the time ran out loses the life');
+  assert.ok(!s.chain.some((c) => c.text === 'Delhi'), 'and is not added to the chain');
+  assert.equal(whose(s), 'P1');
+  const q = game(3, 'p');
+  say(q, 'Pallavaram');
+  assert.equal(q.phase, 'vote');
+  q.vote.until = Date.now() - 5000;
+  atlas.act(q, 'P1', { type: 'vote', ok: false });
+  assert.equal(q.chain.at(-1).text, 'Pallavaram', 'late votes are not counted: silence lets it in');
+}
 console.log('atlas-test: all checks passed');

@@ -243,4 +243,19 @@ for (let n = 2; n <= 8; n++) {
   }
 }
 
+// ---- late moves: once the deadline has passed, a move applies it and is itself dropped ----
+{
+  const s = ak.setup(players(4));
+  const t0 = s.turn, letter = s.letter;
+  s.until = Date.now() - 5000; // nobody's screen has sent the clock yet
+  sing(s, 'R');
+  assert.equal(s.phase, 'sing'); assert.equal(s.turn, 1 - t0, 'a song claimed after the time ran out is a miss');
+  assert.equal(s.letter, letter, 'the same letter passes across');
+  const c = ak.setup(players(4));
+  sing(c, 'R');
+  c.until = Date.now() - 5000;
+  ak.act(c, judges(c)[0], { type: 'challenge' });
+  assert.equal(c.phase, 'sing', 'a challenge after the window closed is too late: the song stands');
+  assert.equal(c.letter, 'R');
+}
 console.log('antakshari-test: all passed');

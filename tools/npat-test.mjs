@@ -272,4 +272,26 @@ const sheet = (s, pid, cat) => s.last.sheet[pid][cat];
   assert.ok(rate >= 0.62, 'Hard wins at least 62% of decided games');
 }
 
+// ---- late moves: once the host's deadline has passed, a move rings the bell and is itself dropped ----
+{
+  const s = game(3);
+  fill(s, 'P0', { name: 'Mohan' });
+  s.endsAt = Date.now() - 5000; // nobody's screen has sent the clock yet
+  npat.act(s, 'P1', { type: 'done', answers: { name: 'Meena', place: 'Mumbai', animal: 'Monkey', thing: 'Mirror' } });
+  assert.notEqual(s.phase, 'play', 'the late hand-in ends the round instead');
+  assert.equal(s.last?.sheet?.P1?.place?.text || s.cur?.P1?.place || '', '', 'answers sent after the bell do not count');
+  const v = game(4, 's');
+  fill(v, 'P0', { name: 'Sooraj', place: 'Snorpville', animal: 'Snake', thing: 'Spoon' });
+  doneAll(v);
+  assert.equal(v.phase, 'vote');
+  const item = v.vote.items.findIndex((it) => it.text === 'Snorpville');
+  v.vote.until = Date.now() - 5000;
+  npat.act(v, 'P1', { type: 'vote', item, ok: false });
+  assert.equal(v.phase, 'results', 'a late vote closes the vote');
+  assert.notEqual(sheet(v, 'P0', 'place').why, 'rejected', 'and is not counted');
+  v.resultsUntil = Date.now() - 5000;
+  const round = v.round;
+  npat.act(v, 'P2', { type: 'ready' });
+  assert.equal(v.phase, 'play'); assert.equal(v.round, round + 1, 'a late Ready starts the next round, once');
+}
 console.log('npat-test: all checks passed');

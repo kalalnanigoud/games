@@ -126,6 +126,9 @@ jobs:
               exit 0
             fi
             echo "::warning title=Browser suite retry::${{ matrix.name }} failed or hung on attempt $attempt."
+            # Keep this attempt's logs, traces and screenshots in test-results/failed-attempt-N/: the next
+            # attempt writes files of the same names.
+            if [ -d test-results ]; then mv test-results "failed-attempt-$attempt" && mkdir test-results && mv "failed-attempt-$attempt" test-results/; fi
           done
           exit 1
       - name: Upload browser logs, traces and screenshots
@@ -162,6 +165,8 @@ jobs:
               exit 0
             fi
             echo "::warning title=Browser suite retry::Island solo adventure (WebKit) failed or hung on attempt $attempt."
+            # Keep this attempt's logs, traces and screenshots in test-results/failed-attempt-N/.
+            if [ -d test-results ]; then mv test-results "failed-attempt-$attempt" && mkdir test-results && mv "failed-attempt-$attempt" test-results/; fi
           done
           exit 1
       - name: Upload browser logs, traces and screenshots
@@ -221,26 +226,48 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    # One deploy at a time: each numbers itself from the tags of the deploys before it, so two running together
+    # could pick the same version and clash on the tag. A newer push waiting in the queue replaces an older one.
+    concurrency:
+      group: deploy-pages
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0 # the tags of earlier deploys, which number this one
+      # An older push's tests can finish after a newer push's: only the newest commit on main is deployed,
+      # so the live site never steps back to older code.
+      - name: Check this is still the newest commit on main
+        id: newest
+        run: |
+          git fetch --quiet --tags origin main
+          if [ "$(git rev-parse origin/main)" = "$GITHUB_SHA" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=Deploy skipped::A newer commit is on main; its own run deploys it."
+          fi
       - uses: actions/setup-node@v5
+        if: steps.newest.outputs.deploy == 'true'
         with:
           node-version: 24
       # Every deploy gets a new version: major.minor from package.json, the last number one past the previous
       # deploy of that major.minor (see tools/release-version.mjs). The site shows it beside the logo.
       - name: Pick this deploy's version
+        if: steps.newest.outputs.deploy == 'true'
         id: version
         run: node tools/release-version.mjs
       - uses: actions/configure-pages@v6
+        if: steps.newest.outputs.deploy == 'true'
       - uses: actions/upload-pages-artifact@v5
+        if: steps.newest.outputs.deploy == 'true'
         with:
           path: '.'
       - id: deployment
+        if: steps.newest.outputs.deploy == 'true'
         uses: actions/deploy-pages@v5
       - name: Tag the deployed version
+        if: steps.newest.outputs.deploy == 'true'
         run: |
           git tag "v${{ steps.version.outputs.version }}"
           git push origin "v${{ steps.version.outputs.version }}"

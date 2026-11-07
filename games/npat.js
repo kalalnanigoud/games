@@ -156,6 +156,11 @@ function score(s) {
 
 function allDone(s) { if (s.players.every((p) => s.done[p.id])) endRound(s); }
 
+// The deadline of the current step has passed (whether or not a screen has said so yet).
+function due(s, now = Date.now()) {
+  return (writing(s) && now >= s.endsAt) || (s.phase === 'vote' && now >= s.vote.until) || (s.phase === 'results' && now >= s.resultsUntil);
+}
+
 function tick(s) {
   const now = Date.now();
   if (writing(s) && now >= s.endsAt) endRound(s);
@@ -168,9 +173,11 @@ function act(s, pid, a) {
   const me = player(s, pid);
   if (!me) throw Error('You are not playing in this game.');
   if (!a || typeof a !== 'object') throw Error('Choose something to do.');
+  if (a.type === 'think') return;
+  // The host's clock decides: anything that arrives after the bell rings it, and the late move itself is dropped.
+  if (due(s)) return tick(s);
   switch (a.type) {
-    case 'think': return;
-    case 'clock': return tick(s); // early or stale clocks change nothing
+    case 'clock': return; // an early or stale clock changes nothing
     case 'answer': case 'fill': {
       if (!writing(s)) return; // a last keystroke that arrives after the bell is simply too late
       if (s.done[pid]) {

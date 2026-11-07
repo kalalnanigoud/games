@@ -107,10 +107,12 @@ function act(s, pid, a) {
   const me = s.players.find((p) => p.id === pid);
   if (!me) throw Error('Only players at the table can do that.');
   if (!a || typeof a !== 'object') throw Error('Unknown move.');
+  if (a.type === 'think') return;
+  // The host's clock decides: anything that arrives after the deadline applies it, and the late move is dropped.
+  if (s.until && Date.now() >= s.until) return tick(s);
   const singer = me.team === s.turn;
   switch (a.type) {
-    case 'think': return;
-    case 'clock': return tick(s);
+    case 'clock': return; // early, or sent for a deadline that has already been replaced
     case 'sang': {
       if (s.phase !== 'sing') throw Error('Wait for the next song.');
       if (!singer) throw Error(`It’s Team ${TEAM[s.turn]}’s turn to sing.`);
@@ -168,17 +170,19 @@ function view(s) {
 }
 
 // Singing can't be simulated, so the lobby offers no computer players (noBotSeats). This bot exists for the
-// rules simulator and for stand-ins: in Node it "sings" at once with a random last letter, never challenges and
-// votes to accept. In a browser (a stand-in for someone who dropped out) it only accepts songs and moves the
-// clock on, so a computer never claims a song for a real team.
+// rules simulator and for stand-ins. Simulated (in Node, or in a browser test that sets
+// globalThis.simulatedSingers) it "sings" at once with a random last letter, now and then challenges a song,
+// and mostly votes to accept, so whole games reach every screen. In a real browser game (a stand-in for someone
+// who dropped out) it only accepts songs and moves the clock on, so a computer never claims a song for a real team.
+const simulated = () => !browser || globalThis.simulatedSingers === true;
 function bot(v) {
-  if (browser) {
+  if (!simulated()) {
     if (Date.now() >= v.until) return { type: 'clock' };
     return v.phase === 'check' ? { type: 'fair' } : { type: 'think' };
   }
   if (v.phase === 'sing') return { type: 'sang', letter: String.fromCharCode(65 + rand(26)) };
-  if (v.phase === 'check') return { type: 'fair' };
-  return { type: 'vote', ok: true };
+  if (v.phase === 'check') return rand(10) ? { type: 'fair' } : { type: 'challenge' };
+  return { type: 'vote', ok: rand(4) > 0 };
 }
 
 /* ---------------- screen ---------------- */

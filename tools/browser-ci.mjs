@@ -57,6 +57,7 @@ for (const [label, viewport] of [['phone', { width: 375, height: 812 }], ['deskt
   await page.goto(base + '/tools/browser-test.html', { waitUntil: 'networkidle' });
   const results = await page.evaluate(async (ids) => {
     globalThis.escapeBotPatience = 0;
+    globalThis.simulatedSingers = true; // Antakshari's computer stand-ins sing, so its games reach the end
     const { seededRandom } = await import('/tools/seed.mjs');
     Math.random = seededRandom('render-ci-v1');
     const { audit } = await import('/tools/render-audit.js');
@@ -69,6 +70,8 @@ for (const [label, viewport] of [['phone', { width: 375, height: 812 }], ['deskt
   for (const r of results) {
     const where = `${label} ${r.game} ${r.players}p`;
     if (r.crashes.length) fail(`${where}: ${r.crashes.join('; ')}`);
+    // A game that never ends hides every screen after the point it stalled (results, the winner), so it fails.
+    if (r.limit) fail(`${where}: the computer players had not finished after ${r.steps} moves (${r.idle} of them waiting), so its later screens went unchecked`);
     if (r.overflow.length) fail(`${where}: sideways overflow ${r.overflow[0]}`);
     if (r.smallButtons.length) fail(`${where}: buttons smaller than 30px: ${r.smallButtons.join(', ')}`);
   }
