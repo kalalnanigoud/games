@@ -14,10 +14,19 @@ export const root = fileURLToPath(new URL('../', import.meta.url));
 export const out = new URL('../test-results/', import.meta.url);
 export const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// A page or browser that has died is not "not ready yet": that error is thrown at once (as "...has been closed"),
+// so the suites' crash retry sees it, instead of being swallowed until the wait times out. Other errors (the game
+// not loaded yet) count as not ready, and the last one is named if the wait does time out.
+export const closedError = /has been closed|Target crashed|Browser closed|Target closed/i;
 export async function waitFor(page, fn, arg, timeout = 20000) {
   const end = Date.now() + timeout;
-  do { if (await page.evaluate(fn, arg).catch(() => false)) return; await wait(120); } while (Date.now() < end);
-  throw Error('Timed out: ' + fn.toString().slice(0, 160));
+  let last = '';
+  do {
+    try { if (await page.evaluate(fn, arg)) return; last = ''; }
+    catch (e) { if (closedError.test(String(e.message)) || page.isClosed?.()) throw e; last = String(e.message).split('\n')[0]; }
+    await wait(120);
+  } while (Date.now() < end);
+  throw Error('Timed out: ' + fn.toString().slice(0, 160) + (last ? `\n  (last error: ${last.slice(0, 200)})` : ''));
 }
 
 export async function startEnv({ withBroker = false } = {}) {

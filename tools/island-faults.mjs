@@ -7,7 +7,7 @@ import { selectCases } from './ci-select.mjs';
 const testBrowsers = selectCases('TEST_BROWSER', ['chromium', 'webkit'], process.env.TEST_BROWSER || (process.env.SKIP_WEBKIT ? 'chromium' : undefined));
 import { fileURLToPath } from 'node:url';
 import { chromium, webkit } from 'playwright';
-import { startEnv, soloIsland, openSave, tick, wait, waitFor, out } from './island-harness.mjs';
+import { startEnv, soloIsland, openSave, tick, wait, waitFor, out, closedError } from './island-harness.mjs';
 
 const env = await startEnv();
 const rows = () => env.db.prepare("SELECT name FROM sqlite_master WHERE name='explorers'").get() ? env.db.prepare('SELECT COUNT(*) AS n FROM explorers').get().n : 0;
@@ -157,7 +157,7 @@ for (const [name, launch] of engines.filter(([name]) => testBrowsers.includes(na
       for (let attempt = 0; ; attempt++) {
         try { await fn(browser); break; }
         catch (e) {
-          if (attempt || name !== 'WebKit' || !/has been closed|Target crashed|Browser closed/i.test(String(e.message))) throw e;
+          if (attempt || name !== 'WebKit' || !closedError.test(String(e.message))) throw e;
           console.warn(`RETRY ${name}: ${title} (the browser closed under it)`);
           for (const c of env.contexts.splice(0)) await c.close().catch(() => {});
           await browser.close().catch(() => {});
@@ -170,7 +170,7 @@ for (const [name, launch] of engines.filter(([name]) => testBrowsers.includes(na
     } catch (e) {
       console.error(`FAIL ${name}: ${title}\n  ${String(e.message).split('\n').slice(0, 4).join('\n  ')}`, env.errors.slice(0, 4));
       results.push(false);
-      for (const [i, c] of env.contexts.slice(-1).entries()) for (const p of c.pages()) await p.screenshot({ path: fileURLToPath(new URL(`fault-${name}-${results.length}-${i}.png`, out)) }).catch(() => {});
+      for (const [i, c] of env.contexts.slice(-1).entries()) for (const p of c.pages()) await p.screenshot({ path: fileURLToPath(new URL(`fault-${name}-${results.length}-${i}.png`, out)) }).catch((e) => console.error(`  (no screenshot: ${String(e.message).split('\n')[0]})`));
     }
     for (const c of env.contexts.splice(0)) await c.close().catch(() => {});
   }
