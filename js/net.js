@@ -729,9 +729,11 @@ export function openClientPeer() {
       // and treating it as "host not found" would tear down a working connection.
       const gone = missingPeer(err);
       if (gone && gone !== roomPeerId(S.code)) return voice.unreachable(gone);
+      if (hostConn?.open) return;
+      closeHostConnection();
       S.status = 'host not found';
       render();
-      scheduleClientRetry();
+      scheduleClientRetry('not found');
     } else if (['network', 'server-error', 'socket-error', 'socket-closed'].includes(err.type)) {
       S.status = 'offline';
       render();
@@ -741,10 +743,14 @@ export function openClientPeer() {
   });
 }
 
-export function cleanupPeerOnly() {
+function closeHostConnection() {
   const oldHost = hostConn;
   hostConn = null;
   if (oldHost) try { oldHost.close(); } catch {}
+}
+
+export function cleanupPeerOnly() {
+  closeHostConnection();
   const oldPeer = peer;
   peer = null;
   if (oldPeer) try { oldPeer.destroy(); } catch {}
@@ -781,6 +787,7 @@ export function connectToHost() {
   conn.on('data', (msg) => { if (hostConn === conn && S.role === 'client') onClientMessage(msg); });
   conn.on('close', () => {
     if (hostConn !== conn) return;
+    hostConn = null;
     S.status = 'disconnected';
     S.lostAt ||= Date.now();
     render();
@@ -790,22 +797,21 @@ export function connectToHost() {
   // and no error arrives. Give up on this attempt and try again.
   setTimeout(() => {
     if (hostConn !== conn || conn.open) return;
-    if (S.status === 'connecting') S.status = 'cannot reach host';
-    try { conn.close(); } catch {}
-    hostConn = null;
+    closeHostConnection();
+    S.status = 'cannot reach host';
     S.lostAt ||= Date.now();
     render();
     scheduleClientRetry();
   }, S.synced ? 8000 : 15000);
 }
 
-export function scheduleClientRetry() {
+export function scheduleClientRetry(failure = 'join failed') {
   clearTimeout(retryTimer);
   if (S.role !== 'client') return;
   if (S.lostAt && S.backup && S.successor === S.token && Date.now() - S.lostAt >= TAKEOVER_MS) return takeOver();
   // A room we were in may just be refreshing, so keep trying for a minute.
-  // A code that never answered is probably mistyped: stop after ~15 seconds.
-  if (retries++ > (S.synced ? 20 : 4)) { S.status = S.synced ? 'gave up — tap Retry' : 'not found'; render(); return; }
+  // Stop a first join sooner and preserve the failure reported by the last attempt.
+  if (retries++ > (S.synced ? 20 : 4)) { S.status = S.synced ? 'gave up — tap Retry' : failure; render(); return; }
   retryTimer = setTimeout(() => {
     if (peer && !peer.destroyed && peer.open) connectToHost();
     else { cleanupPeerOnly(); openClientPeer(); }

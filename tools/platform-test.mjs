@@ -296,6 +296,38 @@ assert.deepEqual(voiceCalls.at(-1), ['unreachable', 'gone-phone-1'], 'voice chat
 clientPeer.handlers.error({ type: 'peer-unavailable', message: 'Could not connect to peer ' + t.roomPeerId('VOICE') });
 assert.equal(t.S.status, 'host not found', 'the host itself missing still counts');
 t.cleanup(); tasks.clear(); delete context.Peer;
+// A new join can exhaust its retries because the broker cannot find the room or because
+// its data channel never opens. Only the first case should say there is no open room.
+class JoiningPeer extends FakePeer {
+  constructor() { super(); this.open = true; }
+  connect() {
+    const handlers = {};
+    return { on(event, handler) { handlers[event] = handler; }, close() { handlers.close(); } };
+  }
+}
+context.Peer = JoiningPeer;
+for (const expected of ['not found', 'join failed']) {
+  Object.assign(t.S, { role: 'client', code: 'TABLE', status: 'connecting', synced: false });
+  t.openClientPeer();
+  const joiningPeer = FakePeer.last;
+  joiningPeer.handlers.open();
+  for (let attempt = 0; attempt < 6; attempt++) {
+    if (expected === 'not found') {
+      const timeout = [...tasks.values()].at(-1);
+      joiningPeer.handlers.error({ type: 'peer-unavailable', message: 'Could not connect to peer ' + t.roomPeerId('TABLE') });
+      assert.equal(t.S.status, attempt === 5 ? expected : 'host not found');
+      runTask(timeout); // the failed connection's old timeout must do nothing
+      assert.equal(t.S.status, attempt === 5 ? expected : 'host not found');
+    } else {
+      runTask(); // connection timeout (including a synchronous close event)
+      assert.equal(t.S.status, attempt === 5 ? expected : 'cannot reach host');
+    }
+    if (attempt < 5) runTask(); // retry starts another connection
+  }
+  assert.equal(tasks.size, 0, 'a finished join must leave no pending retries');
+  t.cleanup(); tasks.clear();
+}
+delete context.Peer;
 t.S.role = null;
 t.hostRoom('rally');
 assert.equal(t.S.role, null, 'solo-only game cannot create an online room');

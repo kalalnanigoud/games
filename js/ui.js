@@ -372,14 +372,17 @@ export function renderHome() {
 
 // Joining, before the host has answered: no player list or game yet.
 export function renderJoining() {
-  const lost = S.status === 'not found';
+  const missing = S.status === 'not found';
+  const failed = missing || S.status === 'join failed';
   app.innerHTML = `
     <div class="panel center-card">
       <span class="eyebrow">Room code</span>
       <div class="roomcode">${esc(S.code)}</div>
-      ${lost ? `
-        <h3 style="margin:0">No open room with this code</h3>
-        <p class="muted" style="margin:0">Check the code with your friend. Their game page must stay open while you join.</p>
+      ${failed ? `
+        <h3 style="margin:0">${missing ? 'No open room with this code' : 'Could not connect to the host'}</h3>
+        <p class="muted" style="margin:0">${missing
+          ? 'Check the code with your friend. Ask them to keep their game page open and wait for the online status.'
+          : 'Ask the host to keep the room open, then try again. If it still fails, try a different Wi-Fi network or a mobile hotspot.'}</p>
         <div class="row" style="justify-content:center"><button class="primary" id="retryBtn">${icon('refresh')}Try again</button><button id="backBtn">Back</button></div>`
       : `${spinner}
         <p class="muted" style="margin:0">Looking for the room… <span class="small">(${esc(S.status)})</span></p>
